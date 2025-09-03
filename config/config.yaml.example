@@ -1,0 +1,42 @@
+# Example configuration file
+# Copy this to config.yaml and customize as needed
+
+# Application settings
+environment: "development"
+debug: true
+log_level: "INFO"
+data_retention_days: 90
+collection_interval_hours: 6
+
+# Ollama configuration
+ollama:
+  host: "localhost"
+  port: 11434
+  model: "llama2"
+
+# Google APIs
+google:
+  credentials_file: "config/google_credentials.json"
+  scopes:
+    - "https://www.googleapis.com/auth/gmail.readonly"
+    - "https://www.googleapis.com/auth/calendar.readonly"
+
+# Apple settings
+apple:
+  reminders_export_path: "data/apple_reminders.csv"
+
+# Dashboard settings
+dashboard:
+  output_dir: "output"
+  template_dir: "templates"
+  static_dir: "static"
+  weekly_goals:
+    emails_processed: 100
+    meetings_attended: 10
+    tasks_completed: 20
+    github_commits: 15
+  monthly_goals:
+    emails_processed: 400
+    meetings_attended: 40
+    tasks_completed: 80
+    github_commits: 60

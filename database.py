@@ -1,0 +1,1140 @@
+"""
+Database models and initialization for the Personal Dashboard.
+"""
+
+import sqlite3
+import json
+import logging
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Dict, Any, List, Optional
+from contextlib import contextmanager
+
+logger = logging.getLogger(__name__)
+
+DATABASE_PATH = "dashboard.db"
+
+
+class DatabaseManager:
+    """Manages SQLite database operations for the dashboard."""
+    
+    def __init__(self, db_path: str = DATABASE_PATH):
+        """Initialize database manager."""
+        self.db_path = db_path
+        self.init_database()
+    
+    def init_database(self):
+        """Initialize database tables."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Credentials table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS credentials (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    service_name TEXT UNIQUE NOT NULL,
+                    credentials_data TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Authentication tokens table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS auth_tokens (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    service_name TEXT UNIQUE NOT NULL,
+                    token_data TEXT NOT NULL,
+                    expires_at TIMESTAMP,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Collected data table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS collected_data (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    service_name TEXT NOT NULL,
+                    data_type TEXT NOT NULL,
+                    data_content TEXT NOT NULL,
+                    collection_date TIMESTAMP NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Settings table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS settings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    setting_key TEXT UNIQUE NOT NULL,
+                    setting_value TEXT NOT NULL,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Dashboard sessions table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS dashboard_sessions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_data TEXT NOT NULL,
+                    kpis_data TEXT,
+                    insights_data TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Email analysis table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS emails (
+                    id TEXT PRIMARY KEY,
+                    subject TEXT NOT NULL,
+                    sender TEXT NOT NULL,
+                    recipient TEXT,
+                    body TEXT,
+                    received_date TIMESTAMP,
+                    priority TEXT DEFAULT 'medium',
+                    is_analyzed INTEGER DEFAULT 0,
+                    ollama_priority TEXT,
+                    has_todos INTEGER DEFAULT 0,
+                    is_archived INTEGER DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Universal todos table (from all sources)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS universal_todos (
+                    id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    description TEXT,
+                    due_date TIMESTAMP,
+                    priority TEXT DEFAULT 'medium',
+                    category TEXT,
+                    source TEXT NOT NULL,
+                    source_id TEXT,
+                    status TEXT DEFAULT 'pending',
+                    assigned_to_service TEXT,
+                    requires_response INTEGER DEFAULT 0,
+                    email_id TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    completed_at TIMESTAMP,
+                    FOREIGN KEY (email_id) REFERENCES emails (id)
+                )
+            """)
+            
+            # News articles table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS news_articles (
+                    id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    url TEXT NOT NULL,
+                    snippet TEXT,
+                    source TEXT,
+                    published_date TIMESTAMP,
+                    topics TEXT,
+                    relevance_score REAL,
+                    is_liked INTEGER DEFAULT 0,
+                    user_feedback TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Music content table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS music_content (
+                    id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    artist TEXT,
+                    album TEXT,
+                    url TEXT,
+                    source TEXT,
+                    release_date TIMESTAMP,
+                    genres TEXT,
+                    is_liked INTEGER DEFAULT 0,
+                    user_feedback TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # User preferences and personality profile table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS user_personality_profile (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    content_type TEXT NOT NULL,
+                    content_id TEXT NOT NULL,
+                    preference_score REAL DEFAULT 0.0,
+                    keywords TEXT,
+                    topics TEXT,
+                    sentiment TEXT,
+                    interaction_type TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Data cleanup log table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS data_cleanup_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    cleanup_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    content_type TEXT NOT NULL,
+                    items_removed INTEGER DEFAULT 0,
+                    items_preserved INTEGER DEFAULT 0,
+                    notes TEXT
+                )
+            """)
+            
+            # Create indexes for better performance
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_collected_data_service_date ON collected_data(service_name, collection_date)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_credentials_service ON credentials(service_name)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_auth_tokens_service ON auth_tokens(service_name)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_emails_received_date ON emails(received_date)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_emails_priority ON emails(priority)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_emails_analyzed ON emails(is_analyzed)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_todos_due_date ON universal_todos(due_date)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_todos_priority ON universal_todos(priority)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_todos_status ON universal_todos(status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_todos_source ON universal_todos(source)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_news_articles_liked ON news_articles(is_liked)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_music_content_liked ON music_content(is_liked)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_vanity_alerts_liked ON vanity_alerts(is_liked)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_personality_profile_type ON user_personality_profile(content_type)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_personality_profile_content ON user_personality_profile(content_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_news_created_at ON news_articles(created_at)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_music_created_at ON music_content(created_at)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_vanity_created_at ON vanity_alerts(timestamp)")
+            
+            conn.commit()
+            logger.info("Database initialized successfully")
+    
+    @contextmanager
+    def get_connection(self):
+        """Get database connection with automatic cleanup."""
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row  # Enable column access by name
+        try:
+            yield conn
+        finally:
+            conn.close()
+    
+    # Credentials management
+    def save_credentials(self, service_name: str, credentials: Dict[str, Any]):
+        """Save service credentials."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            credentials_json = json.dumps(credentials)
+            
+            cursor.execute("""
+                INSERT OR REPLACE INTO credentials (service_name, credentials_data, updated_at)
+                VALUES (?, ?, CURRENT_TIMESTAMP)
+            """, (service_name, credentials_json))
+            
+            conn.commit()
+            logger.info(f"Credentials saved for {service_name}")
+    
+    def get_credentials(self, service_name: str) -> Optional[Dict[str, Any]]:
+        """Get service credentials."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT credentials_data FROM credentials WHERE service_name = ?",
+                (service_name,)
+            )
+            
+            row = cursor.fetchone()
+            if row:
+                return json.loads(row['credentials_data'])
+            return None
+    
+    def list_configured_services(self) -> List[str]:
+        """List all configured services."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT service_name FROM credentials")
+            return [row['service_name'] for row in cursor.fetchall()]
+    
+    # Authentication tokens management
+    def save_auth_token(self, service_name: str, token_data: Dict[str, Any], expires_at: Optional[datetime] = None):
+        """Save authentication token."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            token_json = json.dumps(token_data)
+            
+            cursor.execute("""
+                INSERT OR REPLACE INTO auth_tokens (service_name, token_data, expires_at, updated_at)
+                VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+            """, (service_name, token_json, expires_at))
+            
+            conn.commit()
+            logger.info(f"Auth token saved for {service_name}")
+    
+    def get_auth_token(self, service_name: str) -> Optional[Dict[str, Any]]:
+        """Get authentication token."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT token_data, expires_at FROM auth_tokens WHERE service_name = ?",
+                (service_name,)
+            )
+            
+            row = cursor.fetchone()
+            if row:
+                token_data = json.loads(row['token_data'])
+                # Check if token is expired
+                if row['expires_at']:
+                    expires_at = datetime.fromisoformat(row['expires_at'])
+                    if expires_at < datetime.now():
+                        logger.warning(f"Token for {service_name} has expired")
+                        return None
+                return token_data
+            return None
+    
+    def is_service_authenticated(self, service_name: str) -> bool:
+        """Check if service is authenticated."""
+        # Check database first
+        token = self.get_auth_token(service_name)
+        credentials = self.get_credentials(service_name)
+        
+        if token is not None or credentials is not None:
+            return True
+        
+        # For Google, also check file-based storage as fallback
+        if service_name == "google":
+            from pathlib import Path
+            google_file = Path("tokens/google_credentials.json")
+            if google_file.exists():
+                return True
+                
+        return False
+    
+    def get_auth_status(self) -> Dict[str, bool]:
+        """Get authentication status for all services."""
+        services = ['google', 'apple', 'todoist', 'ticktick', 'github', 'buildly']
+        status = {}
+        
+        for service in services:
+            status[service] = self.is_service_authenticated(service)
+        
+        return status
+    
+    # Data collection storage
+    def save_collected_data(self, service_name: str, data_type: str, data: List[Dict[str, Any]], collection_date: datetime):
+        """Save collected data."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            data_json = json.dumps(data, default=str)  # default=str handles datetime objects
+            
+            # Remove old data for the same service and type from the same day
+            cursor.execute("""
+                DELETE FROM collected_data 
+                WHERE service_name = ? AND data_type = ? AND DATE(collection_date) = DATE(?)
+            """, (service_name, data_type, collection_date))
+            
+            # Insert new data
+            cursor.execute("""
+                INSERT INTO collected_data (service_name, data_type, data_content, collection_date)
+                VALUES (?, ?, ?, ?)
+            """, (service_name, data_type, data_json, collection_date))
+            
+            conn.commit()
+            logger.info(f"Saved {len(data)} {data_type} items for {service_name}")
+    
+    def get_collected_data(self, service_name: str, data_type: str, start_date: datetime, end_date: datetime) -> List[Dict[str, Any]]:
+        """Get collected data for a service and type within date range."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT data_content FROM collected_data 
+                WHERE service_name = ? AND data_type = ? 
+                AND collection_date BETWEEN ? AND ?
+                ORDER BY collection_date DESC
+            """, (service_name, data_type, start_date, end_date))
+            
+            all_data = []
+            for row in cursor.fetchall():
+                data = json.loads(row['data_content'])
+                all_data.extend(data)
+            
+            return all_data
+    
+    def get_latest_collection_date(self, service_name: str) -> Optional[datetime]:
+        """Get the latest collection date for a service."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT MAX(collection_date) as latest_date 
+                FROM collected_data 
+                WHERE service_name = ?
+            """, (service_name,))
+            
+            row = cursor.fetchone()
+            if row and row['latest_date']:
+                return datetime.fromisoformat(row['latest_date'])
+            return None
+    
+    # Settings management
+    def save_setting(self, key: str, value: Any):
+        """Save a setting."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            value_json = json.dumps(value)
+            
+            cursor.execute("""
+                INSERT OR REPLACE INTO settings (setting_key, setting_value, updated_at)
+                VALUES (?, ?, CURRENT_TIMESTAMP)
+            """, (key, value_json))
+            
+            conn.commit()
+    
+    def get_setting(self, key: str, default: Any = None) -> Any:
+        """Get a setting."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT setting_value FROM settings WHERE setting_key = ?",
+                (key,)
+            )
+            
+            row = cursor.fetchone()
+            if row:
+                return json.loads(row['setting_value'])
+            return default
+    
+    # Dashboard sessions
+    def save_dashboard_session(self, session_data: Dict[str, Any], kpis_data: Dict[str, Any], insights_data: List[str]):
+        """Save dashboard session data."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            
+            session_json = json.dumps(session_data, default=str)
+            kpis_json = json.dumps(kpis_data, default=str)
+            insights_json = json.dumps(insights_data)
+            
+            cursor.execute("""
+                INSERT INTO dashboard_sessions (session_data, kpis_data, insights_data)
+                VALUES (?, ?, ?)
+            """, (session_json, kpis_json, insights_json))
+            
+            conn.commit()
+            return cursor.lastrowid
+    
+    def get_latest_dashboard_session(self) -> Optional[Dict[str, Any]]:
+        """Get the latest dashboard session."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT session_data, kpis_data, insights_data, created_at
+                FROM dashboard_sessions 
+                ORDER BY created_at DESC 
+                LIMIT 1
+            """)
+            
+            row = cursor.fetchone()
+            if row:
+                return {
+                    'session_data': json.loads(row['session_data']),
+                    'kpis_data': json.loads(row['kpis_data']),
+                    'insights_data': json.loads(row['insights_data']),
+                    'created_at': row['created_at']
+                }
+            return None
+    
+    # Cleanup operations
+    def cleanup_old_data(self, days_to_keep: int = 90):
+        """Clean up old collected data."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cutoff_date = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+            cutoff_date = cutoff_date.replace(day=cutoff_date.day - days_to_keep)
+            
+            cursor.execute("""
+                DELETE FROM collected_data 
+                WHERE collection_date < ?
+            """, (cutoff_date,))
+            
+            cursor.execute("""
+                DELETE FROM dashboard_sessions 
+                WHERE created_at < ?
+            """, (cutoff_date,))
+            
+            conn.commit()
+            logger.info(f"Cleaned up data older than {days_to_keep} days")
+
+    # Email and todo management methods
+    
+    def save_email(self, email_data: Dict[str, Any]) -> bool:
+        """Save an email to the database."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT OR REPLACE INTO emails 
+                    (id, subject, sender, recipient, body, received_date, 
+                     priority, is_analyzed, ollama_priority, has_todos)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    email_data.get('id'),
+                    email_data.get('subject'),
+                    email_data.get('sender'),
+                    email_data.get('recipient'),
+                    email_data.get('body'),
+                    email_data.get('received_date'),
+                    email_data.get('priority', 'medium'),
+                    1 if email_data.get('is_analyzed') else 0,
+                    email_data.get('ollama_priority'),
+                    1 if email_data.get('has_todos') else 0
+                ))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error saving email: {e}")
+            return False
+    
+    def save_todo(self, todo_data: Dict[str, Any]) -> bool:
+        """Save a todo item to the universal todos table."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT OR REPLACE INTO universal_todos 
+                    (id, title, description, due_date, priority, category, 
+                     source, source_id, status, assigned_to_service, 
+                     requires_response, email_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    todo_data.get('id'),
+                    todo_data.get('title'),
+                    todo_data.get('description'),
+                    todo_data.get('due_date'),
+                    todo_data.get('priority', 'medium'),
+                    todo_data.get('category'),
+                    todo_data.get('source'),
+                    todo_data.get('source_id'),
+                    todo_data.get('status', 'pending'),
+                    todo_data.get('assigned_to_service'),
+                    1 if todo_data.get('requires_response') else 0,
+                    todo_data.get('email_id')
+                ))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error saving todo: {e}")
+            return False
+    
+    def get_emails_by_priority(self, priority: str = None, analyzed_only: bool = False) -> List[Dict[str, Any]]:
+        """Get emails filtered by priority and analysis status."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                query = "SELECT * FROM emails WHERE 1=1"
+                params = []
+                
+                if priority:
+                    query += " AND (priority = ? OR ollama_priority = ?)"
+                    params.extend([priority, priority])
+                
+                if analyzed_only:
+                    query += " AND is_analyzed = 1"
+                
+                query += " ORDER BY received_date DESC"
+                
+                cursor.execute(query, params)
+                rows = cursor.fetchall()
+                
+                emails = []
+                for row in rows:
+                    emails.append({
+                        'id': row[0],
+                        'subject': row[1],
+                        'sender': row[2],
+                        'recipient': row[3],
+                        'body': row[4],
+                        'received_date': row[5],
+                        'priority': row[6],
+                        'is_analyzed': bool(row[7]),
+                        'ollama_priority': row[8],
+                        'has_todos': bool(row[9]),
+                        'is_archived': bool(row[10]),
+                        'created_at': row[11]
+                    })
+                
+                return emails
+                
+        except Exception as e:
+            logger.error(f"Error getting emails: {e}")
+            return []
+    
+    def get_todos_by_source(self, source: str = None, status: str = None) -> List[Dict[str, Any]]:
+        """Get todos filtered by source and status."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                query = "SELECT * FROM universal_todos WHERE 1=1"
+                params = []
+                
+                if source:
+                    query += " AND source = ?"
+                    params.append(source)
+                
+                if status:
+                    query += " AND status = ?"
+                    params.append(status)
+                
+                query += " ORDER BY due_date ASC, priority DESC"
+                
+                cursor.execute(query, params)
+                rows = cursor.fetchall()
+                
+                todos = []
+                for row in rows:
+                    todos.append({
+                        'id': row[0],
+                        'title': row[1],
+                        'description': row[2],
+                        'due_date': row[3],
+                        'priority': row[4],
+                        'category': row[5],
+                        'source': row[6],
+                        'source_id': row[7],
+                        'status': row[8],
+                        'assigned_to_service': row[9],
+                        'requires_response': bool(row[10]),
+                        'email_id': row[11],
+                        'created_at': row[12],
+                        'completed_at': row[13]
+                    })
+                
+                return todos
+                
+        except Exception as e:
+            logger.error(f"Error getting todos: {e}")
+            return []
+    
+    def update_email_analysis(self, email_id: str, ollama_priority: str, has_todos: bool) -> bool:
+        """Update email analysis results."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    UPDATE emails 
+                    SET is_analyzed = 1, ollama_priority = ?, has_todos = ?
+                    WHERE id = ?
+                """, (ollama_priority, 1 if has_todos else 0, email_id))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error updating email analysis: {e}")
+            return False
+
+    # Content lifecycle management methods
+    
+    def save_news_article(self, article_data: Dict[str, Any]) -> bool:
+        """Save a news article to the database."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT OR REPLACE INTO news_articles 
+                    (id, title, url, snippet, source, published_date, topics, relevance_score, user_feedback)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    article_data.get('id'),
+                    article_data.get('title'),
+                    article_data.get('url'),
+                    article_data.get('snippet'),
+                    article_data.get('source'),
+                    article_data.get('published_date'),
+                    json.dumps(article_data.get('topics', [])),
+                    article_data.get('relevance_score', 0.0),
+                    article_data.get('user_feedback')
+                ))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error saving news article: {e}")
+            return False
+
+    def save_music_content(self, music_data: Dict[str, Any]) -> bool:
+        """Save music content to the database."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT OR REPLACE INTO music_content 
+                    (id, title, artist, album, url, source, release_date, genres, user_feedback)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    music_data.get('id'),
+                    music_data.get('title'),
+                    music_data.get('artist'),
+                    music_data.get('album'),
+                    music_data.get('url'),
+                    music_data.get('source'),
+                    music_data.get('release_date'),
+                    json.dumps(music_data.get('genres', [])),
+                    music_data.get('user_feedback')
+                ))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error saving music content: {e}")
+            return False
+
+    def like_content(self, content_type: str, content_id: str, is_liked: bool = True) -> bool:
+        """Mark content as liked/unliked and update personality profile."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Update the content table
+                if content_type == 'news':
+                    cursor.execute("""
+                        UPDATE news_articles SET is_liked = ? WHERE id = ?
+                    """, (1 if is_liked else 0, content_id))
+                elif content_type == 'music':
+                    cursor.execute("""
+                        UPDATE music_content SET is_liked = ? WHERE id = ?
+                    """, (1 if is_liked else 0, content_id))
+                elif content_type == 'vanity_alert':
+                    cursor.execute("""
+                        UPDATE vanity_alerts SET is_liked = ? WHERE id = ?
+                    """, (1 if is_liked else 0, content_id))
+                
+                # Update personality profile
+                if is_liked:
+                    self._update_personality_profile(cursor, content_type, content_id, 'like')
+                else:
+                    self._update_personality_profile(cursor, content_type, content_id, 'unlike')
+                
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error updating content like status: {e}")
+            return False
+
+    def _update_personality_profile(self, cursor, content_type: str, content_id: str, interaction_type: str):
+        """Update user personality profile based on interaction."""
+        try:
+            # Get content details for personality analysis
+            content_data = self._get_content_for_profile(cursor, content_type, content_id)
+            
+            if content_data:
+                # Calculate preference score
+                preference_score = 1.0 if interaction_type == 'like' else -0.5
+                
+                # Insert or update personality profile entry
+                cursor.execute("""
+                    INSERT OR REPLACE INTO user_personality_profile 
+                    (content_type, content_id, preference_score, keywords, topics, sentiment, interaction_type, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    content_type,
+                    content_id,
+                    preference_score,
+                    json.dumps(content_data.get('keywords', [])),
+                    json.dumps(content_data.get('topics', [])),
+                    content_data.get('sentiment', 'neutral'),
+                    interaction_type,
+                    datetime.now()
+                ))
+        except Exception as e:
+            logger.error(f"Error updating personality profile: {e}")
+
+    def _get_content_for_profile(self, cursor, content_type: str, content_id: str) -> Optional[Dict[str, Any]]:
+        """Get content data for personality profile analysis."""
+        try:
+            if content_type == 'news':
+                cursor.execute("""
+                    SELECT title, topics, snippet FROM news_articles WHERE id = ?
+                """, (content_id,))
+                result = cursor.fetchone()
+                if result:
+                    return {
+                        'keywords': result[0].split()[:10],  # Extract keywords from title
+                        'topics': json.loads(result[1]) if result[1] else [],
+                        'sentiment': 'positive'  # Could be enhanced with sentiment analysis
+                    }
+            elif content_type == 'music':
+                cursor.execute("""
+                    SELECT title, artist, genres FROM music_content WHERE id = ?
+                """, (content_id,))
+                result = cursor.fetchone()
+                if result:
+                    return {
+                        'keywords': [result[1], result[0]],  # Artist and title
+                        'topics': json.loads(result[2]) if result[2] else [],
+                        'sentiment': 'positive'
+                    }
+            elif content_type == 'vanity_alert':
+                cursor.execute("""
+                    SELECT title, search_term, snippet FROM vanity_alerts WHERE id = ?
+                """, (content_id,))
+                result = cursor.fetchone()
+                if result:
+                    return {
+                        'keywords': [result[1]],  # Search term
+                        'topics': [result[1]],
+                        'sentiment': 'positive'
+                    }
+            return None
+        except Exception as e:
+            logger.error(f"Error getting content for profile: {e}")
+            return None
+
+    def cleanup_unliked_content(self) -> Dict[str, int]:
+        """Clean up old content that hasn't been liked (nightly cleanup)."""
+        cleanup_stats = {'news': 0, 'music': 0, 'vanity_alerts': 0, 'preserved': 0}
+        
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cutoff_date = datetime.now() - timedelta(days=1)  # Content from yesterday
+                
+                # Clean up news articles (keep liked ones)
+                cursor.execute("""
+                    SELECT COUNT(*) FROM news_articles 
+                    WHERE created_at < ? AND (is_liked = 0 OR is_liked IS NULL)
+                """, (cutoff_date,))
+                cleanup_stats['news'] = cursor.fetchone()[0]
+                
+                cursor.execute("""
+                    DELETE FROM news_articles 
+                    WHERE created_at < ? AND (is_liked = 0 OR is_liked IS NULL)
+                """, (cutoff_date,))
+                
+                # Clean up music content (keep liked ones)
+                cursor.execute("""
+                    SELECT COUNT(*) FROM music_content 
+                    WHERE created_at < ? AND (is_liked = 0 OR is_liked IS NULL)
+                """, (cutoff_date,))
+                cleanup_stats['music'] = cursor.fetchone()[0]
+                
+                cursor.execute("""
+                    DELETE FROM music_content 
+                    WHERE created_at < ? AND (is_liked = 0 OR is_liked IS NULL)
+                """, (cutoff_date,))
+                
+                # Clean up vanity alerts (keep liked ones)
+                cursor.execute("""
+                    SELECT COUNT(*) FROM vanity_alerts 
+                    WHERE timestamp < ? AND (is_liked = 0 OR is_liked IS NULL)
+                """, (cutoff_date,))
+                cleanup_stats['vanity_alerts'] = cursor.fetchone()[0]
+                
+                cursor.execute("""
+                    DELETE FROM vanity_alerts 
+                    WHERE timestamp < ? AND (is_liked = 0 OR is_liked IS NULL)
+                """, (cutoff_date,))
+                
+                # Count preserved items
+                cursor.execute("""
+                    SELECT COUNT(*) FROM 
+                    (SELECT id FROM news_articles WHERE is_liked = 1
+                     UNION ALL
+                     SELECT id FROM music_content WHERE is_liked = 1
+                     UNION ALL
+                     SELECT id FROM vanity_alerts WHERE is_liked = 1)
+                """)
+                cleanup_stats['preserved'] = cursor.fetchone()[0]
+                
+                # Log cleanup
+                cursor.execute("""
+                    INSERT INTO data_cleanup_log (content_type, items_removed, items_preserved, notes)
+                    VALUES (?, ?, ?, ?)
+                """, (
+                    'all_content',
+                    cleanup_stats['news'] + cleanup_stats['music'] + cleanup_stats['vanity_alerts'],
+                    cleanup_stats['preserved'],
+                    f"Nightly cleanup: News({cleanup_stats['news']}), Music({cleanup_stats['music']}), Vanity({cleanup_stats['vanity_alerts']})"
+                ))
+                
+                conn.commit()
+                logger.info(f"Nightly cleanup completed: {cleanup_stats}")
+                
+        except Exception as e:
+            logger.error(f"Error during content cleanup: {e}")
+            
+        return cleanup_stats
+
+    def get_personality_profile(self) -> Dict[str, Any]:
+        """Get user's personality profile based on liked content."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Get preference statistics
+                cursor.execute("""
+                    SELECT content_type, 
+                           COUNT(*) as interactions,
+                           AVG(preference_score) as avg_score,
+                           topics, keywords
+                    FROM user_personality_profile 
+                    WHERE preference_score > 0
+                    GROUP BY content_type
+                """)
+                
+                preferences = cursor.fetchall()
+                
+                # Aggregate topics and keywords
+                all_topics = []
+                all_keywords = []
+                
+                cursor.execute("""
+                    SELECT topics, keywords FROM user_personality_profile 
+                    WHERE preference_score > 0
+                """)
+                
+                for row in cursor.fetchall():
+                    if row[0]:  # topics
+                        all_topics.extend(json.loads(row[0]))
+                    if row[1]:  # keywords
+                        all_keywords.extend(json.loads(row[1]))
+                
+                # Count frequencies
+                from collections import Counter
+                topic_counts = Counter(all_topics)
+                keyword_counts = Counter(all_keywords)
+                
+                return {
+                    'preferences_by_type': {pref[0]: {
+                        'interactions': pref[1],
+                        'avg_score': pref[2]
+                    } for pref in preferences},
+                    'top_topics': dict(topic_counts.most_common(10)),
+                    'top_keywords': dict(keyword_counts.most_common(20)),
+                    'total_liked_items': sum(pref[1] for pref in preferences),
+                    'last_updated': datetime.now().isoformat()
+                }
+                
+        except Exception as e:
+            logger.error(f"Error getting personality profile: {e}")
+            return {}
+
+    def get_liked_content_summary(self) -> Dict[str, Any]:
+        """Get summary of all liked content for AI personality training."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Get liked news
+                cursor.execute("""
+                    SELECT title, topics, snippet, source FROM news_articles 
+                    WHERE is_liked = 1 ORDER BY created_at DESC
+                """)
+                liked_news = cursor.fetchall()
+                
+                # Get liked music
+                cursor.execute("""
+                    SELECT title, artist, album, genres FROM music_content 
+                    WHERE is_liked = 1 ORDER BY created_at DESC
+                """)
+                liked_music = cursor.fetchall()
+                
+                # Get liked vanity alerts
+                cursor.execute("""
+                    SELECT title, search_term, snippet, source FROM vanity_alerts 
+                    WHERE is_liked = 1 ORDER BY timestamp DESC
+                """)
+                liked_vanity = cursor.fetchall()
+                
+                return {
+                    'liked_news': [{'title': n[0], 'topics': json.loads(n[1]) if n[1] else [], 
+                                   'snippet': n[2], 'source': n[3]} for n in liked_news],
+                    'liked_music': [{'title': m[0], 'artist': m[1], 'album': m[2], 
+                                    'genres': json.loads(m[3]) if m[3] else []} for m in liked_music],
+                    'liked_vanity_alerts': [{'title': v[0], 'search_term': v[1], 
+                                           'snippet': v[2], 'source': v[3]} for v in liked_vanity],
+                    'total_count': len(liked_news) + len(liked_music) + len(liked_vanity),
+                    'generated_at': datetime.now().isoformat()
+                }
+                
+        except Exception as e:
+            logger.error(f"Error getting liked content summary: {e}")
+            return {}
+    
+    def get_database_stats(self) -> Dict[str, int]:
+        """Get database statistics."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            
+            stats = {}
+            
+            # Count records in each table
+            tables = ['credentials', 'auth_tokens', 'collected_data', 'settings', 'dashboard_sessions']
+            for table in tables:
+                cursor.execute(f"SELECT COUNT(*) as count FROM {table}")
+                stats[table] = cursor.fetchone()['count']
+            
+            # Get database file size
+            db_path = Path(self.db_path)
+            if db_path.exists():
+                stats['database_size_mb'] = round(db_path.stat().st_size / (1024 * 1024), 2)
+            else:
+                stats['database_size_mb'] = 0
+            
+            return stats
+
+    async def unlike_content(self, content_id: str, content_type: str) -> bool:
+        """Unlike content (wrapper for like_content with is_liked=False)."""
+        return self.like_content(content_type, content_id, is_liked=False)
+
+    async def save_music_feedback(self, content_id: str, feedback: str) -> bool:
+        """Save user feedback for music content."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Update the music content with feedback
+                cursor.execute("""
+                    UPDATE music_content 
+                    SET user_feedback = ?, updated_at = CURRENT_TIMESTAMP 
+                    WHERE id = ?
+                """, (feedback, content_id))
+                
+                if cursor.rowcount > 0:
+                    conn.commit()
+                    return True
+                else:
+                    return False
+                    
+        except Exception as e:
+            logger.error(f"Error saving music feedback: {e}")
+            return False
+
+    async def get_liked_content(self, content_type: str = None) -> List[Dict[str, Any]]:
+        """Get all liked content, optionally filtered by type."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                liked_content = []
+                
+                # Get liked news articles
+                if content_type is None or content_type == 'news':
+                    cursor.execute("""
+                        SELECT id, title, url, snippet, source, published_date, 
+                               topics, relevance_score, created_at, 'news' as content_type
+                        FROM news_articles 
+                        WHERE is_liked = 1 
+                        ORDER BY created_at DESC
+                    """)
+                    news_results = cursor.fetchall()
+                    for row in news_results:
+                        liked_content.append({
+                            'id': row[0],
+                            'title': row[1],
+                            'url': row[2],
+                            'snippet': row[3],
+                            'source': row[4],
+                            'published_date': row[5],
+                            'topics': row[6],
+                            'relevance_score': row[7],
+                            'created_at': row[8],
+                            'content_type': row[9]
+                        })
+                
+                # Get liked music content
+                if content_type is None or content_type == 'music':
+                    cursor.execute("""
+                        SELECT id, title, artist, album, source, 
+                               url, release_date, genres, created_at, 'music' as type
+                        FROM music_content 
+                        WHERE is_liked = 1 
+                        ORDER BY created_at DESC
+                    """)
+                    music_results = cursor.fetchall()
+                    for row in music_results:
+                        liked_content.append({
+                            'id': row[0],
+                            'title': row[1],
+                            'artist': row[2],
+                            'album': row[3],
+                            'source': row[4],
+                            'url': row[5],
+                            'release_date': row[6],
+                            'genres': row[7],
+                            'created_at': row[8],
+                            'content_type': row[9]
+                        })
+                
+                # Get liked vanity alerts
+                if content_type is None or content_type == 'vanity_alert':
+                    cursor.execute("""
+                        SELECT id, title, url, snippet, source, search_term,
+                               confidence_score, timestamp, 'vanity_alert' as content_type
+                        FROM vanity_alerts 
+                        WHERE is_liked = 1 
+                        ORDER BY timestamp DESC
+                    """)
+                    vanity_results = cursor.fetchall()
+                    for row in vanity_results:
+                        liked_content.append({
+                            'id': row[0],
+                            'title': row[1],
+                            'url': row[2],
+                            'snippet': row[3],
+                            'source': row[4],
+                            'search_term': row[5],
+                            'confidence_score': row[6],
+                            'created_at': row[7],  # Using timestamp as created_at
+                            'content_type': row[8]
+                        })
+                
+                # Sort by creation date (most recent first)
+                liked_content.sort(key=lambda x: x.get('created_at', ''), reverse=True)
+                
+                return liked_content
+                
+        except Exception as e:
+            logger.error(f"Error getting liked content: {e}")
+            return []
+
+
+# Global database instance
+db = DatabaseManager()
+
+
+# Convenience functions
+def get_db() -> DatabaseManager:
+    """Get the global database instance."""
+    return db
+
+
+def save_credentials(service_name: str, credentials: Dict[str, Any]):
+    """Save credentials for a service."""
+    return db.save_credentials(service_name, credentials)
+
+
+def get_credentials(service_name: str) -> Optional[Dict[str, Any]]:
+    """Get credentials for a service."""
+    return db.get_credentials(service_name)
+
+
+def save_auth_token(service_name: str, token_data: Dict[str, Any], expires_at: Optional[datetime] = None):
+    """Save authentication token."""
+    return db.save_auth_token(service_name, token_data, expires_at)
+
+
+def get_auth_token(service_name: str) -> Optional[Dict[str, Any]]:
+    """Get authentication token."""
+    return db.get_auth_token(service_name)
+
+
+def get_auth_status() -> Dict[str, bool]:
+    """Get authentication status."""
+    return db.get_auth_status()
+
+
+def save_collected_data(service_name: str, data_type: str, data: List[Dict[str, Any]], collection_date: datetime = None):
+    """Save collected data."""
+    if collection_date is None:
+        collection_date = datetime.now()
+    return db.save_collected_data(service_name, data_type, data, collection_date)
+
+
+def get_collected_data(service_name: str, data_type: str, start_date: datetime, end_date: datetime) -> List[Dict[str, Any]]:
+    """Get collected data."""
+    return db.get_collected_data(service_name, data_type, start_date, end_date)

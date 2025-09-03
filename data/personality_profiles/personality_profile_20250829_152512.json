@@ -1,0 +1,52 @@
+{
+  "personality_profile": {
+    "preferences_by_type": {
+      "music": {
+        "interactions": 2,
+        "avg_score": 1.0
+      },
+      "news": {
+        "interactions": 2,
+        "avg_score": 1.0
+      }
+    },
+    "top_topics": {
+      "electronic": 2,
+      "ambient": 2
+    },
+    "top_keywords": {
+      "Test": 2,
+      "News": 2,
+      "Article": 2,
+      "Test Artist": 2,
+      "Test Music Track": 2
+    },
+    "total_liked_items": 4,
+    "last_updated": "2025-08-29T15:25:12.388187"
+  },
+  "liked_content_summary": {
+    "liked_news": [
+      {
+        "title": "Test News Article",
+        "topics": [],
+        "snippet": "This is a test article for the personality system",
+        "source": "Test Source"
+      }
+    ],
+    "liked_music": [
+      {
+        "title": "Test Music Track",
+        "artist": "Test Artist",
+        "album": "Test Album",
+        "genres": [
+          "electronic",
+          "ambient"
+        ]
+      }
+    ],
+    "liked_vanity_alerts": [],
+    "total_count": 2,
+    "generated_at": "2025-08-29T15:25:12.388453"
+  },
+  "generated_at": "2025-08-29T15:25:12.389343"
+}

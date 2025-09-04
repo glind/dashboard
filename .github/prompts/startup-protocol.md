@@ -10,9 +10,18 @@
 
 ### ❌ WRONG (DO NOT USE):
 - `python3 main.py`
+- `python3 simple_main.py`
 - `python -m uvicorn`
-- `uvicorn dashboard.server:app`
+- `uvicorn simple_main:app`
 - Any direct Python execution
+
+## What the startup script AUTOMATICALLY handles:
+- 🔧 Virtual environment setup and activation
+- 📦 Dependency installation and updates
+- ⚙️ Configuration file initialization  
+- 🚀 Server launch (detached on port 8008)
+- 🔍 Health checks and verification
+- 📊 Process ID management and logging
 
 ## Why startup.sh is REQUIRED:
 1. **Virtual Environment**: Activates the correct venv
@@ -36,3 +45,6 @@ curl http://localhost:8008/health
 ```
 
 **This protocol MUST be followed by ALL AI assistants working on this project.**
+
+## 📚 Additional References
+For detailed implementation guides, see `devdocs/setup/startup.md`

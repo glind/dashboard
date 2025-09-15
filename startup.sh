@@ -128,6 +128,12 @@ start_server() {
     # Make sure we're in the virtual environment
     source "$VENV_DIR/bin/activate"
     
+    # Load environment variables from .env file if it exists
+    if [ -f ".env" ]; then
+        echo -e "${BLUE}   Loading environment variables from .env${NC}"
+        export $(grep -v '^#' .env | xargs)
+    fi
+    
     # Start server in background with proper environment
     cd "$(dirname "$0")"
     nohup "$VENV_DIR/bin/python" "$SERVER_FILE" > dashboard.log 2>&1 &

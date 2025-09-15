@@ -94,8 +94,35 @@ async def dashboard():
             padding: 20px;
             backdrop-filter: blur(10px);
             border: 1px solid rgba(255,255,255,0.2);
+            height: 600px;
+            display: flex;
+            flex-direction: column;
+            position: relative;
         }
-        .widget h2 { margin-bottom: 15px; color: #fff; }
+        .widget h2 { 
+            margin-bottom: 15px; 
+            color: #fff; 
+            flex-shrink: 0;
+        }
+        .widget-content {
+            flex: 1;
+            overflow-y: auto;
+            overflow-x: hidden;
+        }
+        .widget-content::-webkit-scrollbar {
+            width: 8px;
+        }
+        .widget-content::-webkit-scrollbar-track {
+            background: rgba(255,255,255,0.1);
+            border-radius: 4px;
+        }
+        .widget-content::-webkit-scrollbar-thumb {
+            background: rgba(255,255,255,0.3);
+            border-radius: 4px;
+        }
+        .widget-content::-webkit-scrollbar-thumb:hover {
+            background: rgba(255,255,255,0.5);
+        }
         .loading { text-align: center; opacity: 0.7; }
         .error { color: #ff6b6b; text-align: center; }
         .item { 
@@ -123,6 +150,7 @@ async def dashboard():
             flex-wrap: wrap;
             gap: 5px;
             margin-bottom: 10px;
+            flex-shrink: 0;
         }
         .filter-btn {
             background: rgba(255,255,255,0.2);
@@ -330,11 +358,234 @@ async def dashboard():
         .meta-value {
             opacity: 0.8;
         }
+        
+        /* Admin Panel Styles */
+        .admin-panel {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            backdrop-filter: blur(5px);
+            z-index: 2000;
+        }
+        
+        .admin-content {
+            position: relative;
+            background: linear-gradient(135deg, #2a5298 0%, #1e3c72 100%);
+            margin: 50px auto;
+            padding: 30px;
+            border-radius: 15px;
+            max-width: 800px;
+            max-height: 80vh;
+            overflow-y: auto;
+            border: 2px solid rgba(255,255,255,0.3);
+        }
+        
+        .admin-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 25px;
+        }
+        
+        .admin-close {
+            background: none;
+            border: none;
+            color: white;
+            font-size: 24px;
+            cursor: pointer;
+            opacity: 0.7;
+            transition: opacity 0.3s ease;
+        }
+        
+        .admin-close:hover {
+            opacity: 1;
+        }
+        
+        .admin-section {
+            background: rgba(255,255,255,0.1);
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 20px;
+            border: 1px solid rgba(255,255,255,0.2);
+        }
+        
+        .admin-section h3 {
+            margin-bottom: 15px;
+            color: #4fc3f7;
+        }
+        
+        .widget-toggle {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+        
+        .widget-toggle:last-child {
+            border-bottom: none;
+        }
+        
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 50px;
+            height: 25px;
+        }
+        
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(255,255,255,0.3);
+            transition: 0.4s;
+            border-radius: 25px;
+        }
+        
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 19px;
+            width: 19px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: 0.4s;
+            border-radius: 50%;
+        }
+        
+        input:checked + .toggle-slider {
+            background-color: #4CAF50;
+        }
+        
+        input:checked + .toggle-slider:before {
+            transform: translateX(25px);
+        }
+        
+        .widget-admin-gear {
+            position: absolute;
+            top: 15px;
+            right: 50px;
+            background: rgba(255,255,255,0.2);
+            border: 1px solid rgba(255,255,255,0.3);
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            color: white;
+            cursor: pointer;
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0.7;
+            transition: all 0.3s ease;
+        }
+        
+        .widget-admin-gear:hover {
+            opacity: 1;
+            background: rgba(255,255,255,0.3);
+        }
+        
+        .admin-form {
+            margin-top: 15px;
+        }
+        
+        .admin-input {
+            width: 100%;
+            padding: 10px;
+            margin: 8px 0;
+            background: rgba(255,255,255,0.1);
+            border: 1px solid rgba(255,255,255,0.3);
+            border-radius: 5px;
+            color: white;
+            font-size: 14px;
+        }
+        
+        .admin-input::placeholder {
+            color: rgba(255,255,255,0.6);
+        }
+        
+        .admin-btn {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+            transition: background 0.3s ease;
+        }
+        
+        .admin-btn:hover {
+            background: #45a049;
+        }
+        
+        .admin-btn.danger {
+            background: #f44336;
+        }
+        
+        .admin-btn.danger:hover {
+            background: #da190b;
+        }
+        
+        .tag-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin: 10px 0;
+        }
+        
+        .tag-item {
+            background: rgba(255,255,255,0.2);
+            padding: 4px 8px;
+            border-radius: 15px;
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        
+        .tag-remove {
+            cursor: pointer;
+            color: #ff6b6b;
+            font-weight: bold;
+        }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>📊 Personal Dashboard</h1>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px;">
+            <h1 style="margin: 0; flex: 1; text-align: center;">📊 Personal Dashboard</h1>
+            <button id="admin-btn" onclick="openAdminPanel()" style="
+                background: rgba(255,255,255,0.2); 
+                border: 1px solid rgba(255,255,255,0.3); 
+                border-radius: 50%; 
+                width: 40px; 
+                height: 40px; 
+                color: white; 
+                cursor: pointer; 
+                font-size: 16px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                transition: all 0.3s ease;
+            " onmouseover="this.style.background='rgba(255,255,255,0.3)'" onmouseout="this.style.background='rgba(255,255,255,0.2)'">
+                ⚙️
+            </button>
+        </div>
         
         <!-- Top Mini Widgets -->
         <div class="top-widgets">
@@ -351,26 +602,39 @@ async def dashboard():
         
         <div class="grid">
             <div class="widget">
+                <button class="widget-admin-gear" onclick="openWidgetAdmin('calendar')" title="Configure Calendar">⚙️</button>
                 <h2>📅 Calendar Events</h2>
-                <div id="calendar-content" class="loading">Loading...</div>
+                <div class="widget-content">
+                    <div id="calendar-content" class="loading">Loading...</div>
+                </div>
             </div>
             
             <div class="widget">
+                <button class="widget-admin-gear" onclick="openWidgetAdmin('email')" title="Configure Email">⚙️</button>
                 <h2>📧 Email Summary</h2>
-                <div id="email-content" class="loading">Loading...</div>
+                <div class="widget-content">
+                    <div id="email-content" class="loading">Loading...</div>
+                </div>
             </div>
             
             <div class="widget">
+                <button class="widget-admin-gear" onclick="openWidgetAdmin('github')" title="Configure GitHub">⚙️</button>
                 <h2>🐙 GitHub Activity</h2>
-                <div id="github-content" class="loading">Loading...</div>
+                <div class="widget-content">
+                    <div id="github-content" class="loading">Loading...</div>
+                </div>
             </div>
             
             <div class="widget">
+                <button class="widget-admin-gear" onclick="openWidgetAdmin('ticktick')" title="Configure TickTick">⚙️</button>
                 <h2>✅ TickTick Tasks</h2>
-                <div id="ticktick-content" class="loading">Loading...</div>
+                <div class="widget-content">
+                    <div id="ticktick-content" class="loading">Loading...</div>
+                </div>
             </div>
             
             <div class="widget">
+                <button class="widget-admin-gear" onclick="openWidgetAdmin('news')" title="Configure News">⚙️</button>
                 <h2>📰 News Headlines</h2>
                 <div class="filter-buttons">
                     <button onclick="filterNews('all')" class="filter-btn active" id="filter-all">All</button>
@@ -380,22 +644,32 @@ async def dashboard():
                     <button onclick="filterNews('starwars')" class="filter-btn" id="filter-starwars">Star Wars</button>
                     <button onclick="filterNews('startrek')" class="filter-btn" id="filter-startrek">Star Trek</button>
                 </div>
-                <div id="news-content" class="loading">Loading...</div>
+                <div class="widget-content">
+                    <div id="news-content" class="loading">Loading...</div>
+                </div>
             </div>
             
             <div class="widget">
+                <button class="widget-admin-gear" onclick="openWidgetAdmin('music')" title="Configure Music">⚙️</button>
                 <h2>🎵 Music Trends</h2>
-                <div id="music-content" class="loading">Loading...</div>
+                <div class="widget-content">
+                    <div id="music-content" class="loading">Loading...</div>
+                </div>
             </div>
             
             <div class="widget">
+                <button class="widget-admin-gear" onclick="openWidgetAdmin('vanity')" title="Configure Vanity Alerts">⚙️</button>
                 <h2>👁️ Vanity Alerts</h2>
-                <div id="vanity-content" class="loading">Loading...</div>
+                <div class="widget-content">
+                    <div id="vanity-content" class="loading">Loading...</div>
+                </div>
             </div>
             
             <div class="widget">
                 <h2>❤️ Liked Items</h2>
-                <div id="liked-items-content" class="loading">Loading...</div>
+                <div class="widget-content">
+                    <div id="liked-items-content" class="loading">Loading...</div>
+                </div>
             </div>
         </div>
     </div>
@@ -420,6 +694,74 @@ async def dashboard():
         </div>
     </div>
     
+    <!-- Admin Panel -->
+    <div id="admin-panel" class="admin-panel">
+        <div class="admin-content">
+            <div class="admin-header">
+                <h2>⚙️ Dashboard Administration</h2>
+                <button class="admin-close" onclick="closeAdminPanel()">×</button>
+            </div>
+            
+            <div class="admin-section">
+                <h3>🔧 Widget Visibility</h3>
+                <div class="widget-toggle">
+                    <span>📅 Calendar Events</span>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="toggle-calendar" checked onchange="toggleWidget('calendar')">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+                <div class="widget-toggle">
+                    <span>📧 Email Summary</span>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="toggle-email" checked onchange="toggleWidget('email')">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+                <div class="widget-toggle">
+                    <span>🐙 GitHub Activity</span>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="toggle-github" checked onchange="toggleWidget('github')">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+                <div class="widget-toggle">
+                    <span>✅ TickTick Tasks</span>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="toggle-ticktick" checked onchange="toggleWidget('ticktick')">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+                <div class="widget-toggle">
+                    <span>📰 News Headlines</span>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="toggle-news" checked onchange="toggleWidget('news')">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+                <div class="widget-toggle">
+                    <span>🎵 Music Trends</span>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="toggle-music" checked onchange="toggleWidget('music')">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+                <div class="widget-toggle">
+                    <span>👁️ Vanity Alerts</span>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="toggle-vanity" checked onchange="toggleWidget('vanity')">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+            </div>
+            
+            <!-- Widget-specific admin sections -->
+            <div id="widget-admin" style="display: none;">
+                <!-- Dynamic content will be inserted here -->
+            </div>
+        </div>
+    </div>
+    
     <script>
         // Global state for modal
         let currentItems = [];
@@ -428,6 +770,129 @@ async def dashboard():
         
         // News filtering
         let currentNewsFilter = 'all';
+        
+        // Admin helper functions for server-side settings
+        async function saveWidgetSettings(widgetName, isVisible) {
+            try {
+                const response = await fetch('/api/admin/settings', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        type: 'widget_visibility',
+                        data: {
+                            [widgetName]: isVisible
+                        }
+                    }),
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const result = await response.json();
+                console.log('Widget settings saved:', result);
+            } catch (error) {
+                console.error('Error saving widget settings:', error);
+            }
+        }
+        
+        async function saveNewsConfig(config) {
+            try {
+                const response = await fetch('/api/admin/settings', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        type: 'news_config',
+                        data: config
+                    }),
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const result = await response.json();
+                console.log('News config saved:', result);
+            } catch (error) {
+                console.error('Error saving news config:', error);
+            }
+        }
+        
+        async function saveVanityConfig(config) {
+            try {
+                const response = await fetch('/api/admin/settings', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        type: 'vanity_config',
+                        data: config
+                    }),
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const result = await response.json();
+                console.log('Vanity config saved:', result);
+            } catch (error) {
+                console.error('Error saving vanity config:', error);
+            }
+        }
+        
+        async function saveMusicConfig(config) {
+            try {
+                const response = await fetch('/api/admin/settings', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        type: 'music_config',
+                        data: config
+                    }),
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const result = await response.json();
+                console.log('Music config saved:', result);
+            } catch (error) {
+                console.error('Error saving music config:', error);
+            }
+        }
+        
+        async function saveGithubConfig(config) {
+            try {
+                const response = await fetch('/api/admin/settings', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        type: 'github_config',
+                        data: config
+                    }),
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const result = await response.json();
+                console.log('GitHub config saved:', result);
+            } catch (error) {
+                console.error('Error saving GitHub config:', error);
+            }
+        }
         
         function filterNews(filter) {
             currentNewsFilter = filter;
@@ -571,6 +1036,24 @@ async def dashboard():
                         ).join('');
                     } else {
                         element.innerHTML = '<div class="item">No vanity alerts found</div>';
+                    }
+                }
+                else if (elementId === 'liked-items-content') {
+                    sectionData = data.liked_items || [];
+                    if (data.liked_items && data.liked_items.length > 0) {
+                        element.innerHTML = data.liked_items.map(item => 
+                            `<div class="item">
+                                <div class="item-title">${item.title}</div>
+                                <div class="item-meta">
+                                    <span style="color: ${item.type === 'jokes' ? '#FFD700' : item.type === 'news' ? '#2196F3' : item.type === 'vanity' ? '#4CAF50' : '#9C27B0'}">
+                                        ${item.source || item.type}
+                                    </span>
+                                    • Liked on ${new Date(item.liked_at).toLocaleDateString()}
+                                </div>
+                            </div>`
+                        ).join('');
+                    } else {
+                        element.innerHTML = '<div class="item">No liked items yet - start liking content!</div>';
                     }
                 }
                 
@@ -1598,6 +2081,350 @@ async def dashboard():
         
         // Store dashboard data globally for modal access
         window.dashboardData = {};
+        
+        // Admin Panel Functions
+        function openAdminPanel() {
+            document.getElementById('admin-panel').style.display = 'block';
+        }
+        
+        function closeAdminPanel() {
+            document.getElementById('admin-panel').style.display = 'none';
+            document.getElementById('widget-admin').style.display = 'none';
+        }
+        
+        function toggleWidget(widgetName) {
+            const widget = document.querySelector(`[id*="${widgetName}-content"]`).closest('.widget');
+            const toggle = document.getElementById(`toggle-${widgetName}`);
+            
+            if (toggle.checked) {
+                widget.style.display = 'flex';
+            } else {
+                widget.style.display = 'none';
+            }
+            
+            // Save widget preferences to server
+            await saveWidgetSettings(widgetName, toggle.checked);
+        }
+        
+        async function loadWidgetPreferences() {
+            try {
+                const response = await fetch('/api/admin/settings');
+                const settings = await response.json();
+                const preferences = settings.widget_visibility || {};
+                
+                Object.keys(preferences).forEach(widgetName => {
+                    const toggle = document.getElementById(`toggle-${widgetName}`);
+                    const widget = document.querySelector(`[id*="${widgetName}-content"]`).closest('.widget');
+                    
+                    if (toggle && widget) {
+                        toggle.checked = preferences[widgetName];
+                        widget.style.display = preferences[widgetName] ? 'flex' : 'none';
+                    }
+                });
+            } catch (error) {
+                console.error('Error loading widget preferences:', error);
+            }
+        }
+        
+        function openWidgetAdmin(widgetType) {
+            const adminSection = document.getElementById('widget-admin');
+            
+            let adminContent = '';
+            
+            switch(widgetType) {
+                case 'news':
+                    adminContent = `
+                        <div class="admin-section">
+                            <h3>📰 News Configuration</h3>
+                            <div class="admin-form">
+                                <label>Add News Source:</label>
+                                <input type="text" class="admin-input" id="news-source" placeholder="e.g., TechCrunch, BBC News">
+                                <button class="admin-btn" onclick="addNewsSource()">Add Source</button>
+                                
+                                <label>Add News Tags:</label>
+                                <input type="text" class="admin-input" id="news-tag" placeholder="e.g., AI, Machine Learning">
+                                <button class="admin-btn" onclick="addNewsTag()">Add Tag</button>
+                                
+                                <div class="tag-list" id="news-tags">
+                                    <!-- Current tags will be loaded here -->
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                    break;
+                    
+                case 'vanity':
+                    adminContent = `
+                        <div class="admin-section">
+                            <h3>👁️ Vanity Alerts Configuration</h3>
+                            <div class="admin-form">
+                                <label>Add Name/Person:</label>
+                                <input type="text" class="admin-input" id="vanity-name" placeholder="e.g., Gregory Lind">
+                                <button class="admin-btn" onclick="addVanityTerm('name')">Add Name</button>
+                                
+                                <label>Add Company/Organization:</label>
+                                <input type="text" class="admin-input" id="vanity-company" placeholder="e.g., Buildly Labs">
+                                <button class="admin-btn" onclick="addVanityTerm('company')">Add Company</button>
+                                
+                                <label>Add Search Term:</label>
+                                <input type="text" class="admin-input" id="vanity-term" placeholder="e.g., Radical Therapy for Software Teams">
+                                <button class="admin-btn" onclick="addVanityTerm('term')">Add Term</button>
+                                
+                                <div class="tag-list" id="vanity-terms">
+                                    <!-- Current terms will be loaded here -->
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                    break;
+                    
+                case 'music':
+                    adminContent = `
+                        <div class="admin-section">
+                            <h3>🎵 Music Configuration</h3>
+                            <div class="admin-form">
+                                <label>Add Band/Artist:</label>
+                                <input type="text" class="admin-input" id="music-artist" placeholder="e.g., My Evil Robot Army">
+                                <button class="admin-btn" onclick="addMusicTerm('artist')">Add Artist</button>
+                                
+                                <label>Add Record Label:</label>
+                                <input type="text" class="admin-input" id="music-label" placeholder="e.g., Null Records">
+                                <button class="admin-btn" onclick="addMusicTerm('label')">Add Label</button>
+                                
+                                <div class="tag-list" id="music-terms">
+                                    <!-- Current terms will be loaded here -->
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                    break;
+                    
+                case 'github':
+                    adminContent = `
+                        <div class="admin-section">
+                            <h3>🐙 GitHub Configuration</h3>
+                            <div class="admin-form">
+                                <label>GitHub Username:</label>
+                                <input type="text" class="admin-input" id="github-username" placeholder="e.g., glind">
+                                <button class="admin-btn" onclick="updateGitHubSettings()">Update Username</button>
+                                
+                                <div style="margin-top: 15px; padding: 10px; background: rgba(255,255,255,0.1); border-radius: 5px;">
+                                    <strong>Current Token:</strong> ${getCurrentGitHubToken()}
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                    break;
+                    
+                case 'ticktick':
+                    adminContent = `
+                        <div class="admin-section">
+                            <h3>✅ TickTick Configuration</h3>
+                            <div style="padding: 10px; background: rgba(255,255,255,0.1); border-radius: 5px;">
+                                <strong>Current Status:</strong> Connected<br>
+                                <strong>Username:</strong> ${getCurrentTickTickUser()}<br>
+                                <strong>Token Status:</strong> Active
+                                <br><br>
+                                <button class="admin-btn danger" onclick="disconnectTickTick()">Disconnect TickTick</button>
+                            </div>
+                        </div>
+                    `;
+                    break;
+                    
+                default:
+                    adminContent = `
+                        <div class="admin-section">
+                            <h3>Configuration for ${widgetType}</h3>
+                            <p>Configuration options coming soon...</p>
+                        </div>
+                    `;
+            }
+            
+            adminSection.innerHTML = adminContent;
+            adminSection.style.display = 'block';
+            
+            // Load current settings
+            loadCurrentSettings(widgetType);
+        }
+        
+        async function addNewsSource() {
+            const input = document.getElementById('news-source');
+            if (input.value.trim()) {
+                try {
+                    // Get current settings
+                    const response = await fetch('/api/admin/settings');
+                    const settings = await response.json();
+                    const newsConfig = settings.news_config || { sources: [], tags: [] };
+                    
+                    // Add new source
+                    if (!newsConfig.sources.includes(input.value.trim())) {
+                        newsConfig.sources.push(input.value.trim());
+                        await saveNewsConfig(newsConfig);
+                        loadCurrentSettings('news');
+                        input.value = '';
+                    }
+                } catch (error) {
+                    console.error('Error adding news source:', error);
+                }
+            }
+        }
+        
+        async function addNewsTag() {
+            const input = document.getElementById('news-tag');
+            if (input.value.trim()) {
+                try {
+                    // Get current settings
+                    const response = await fetch('/api/admin/settings');
+                    const settings = await response.json();
+                    const newsConfig = settings.news_config || { sources: [], tags: [] };
+                    
+                    // Add new tag
+                    if (!newsConfig.tags.includes(input.value.trim())) {
+                        newsConfig.tags.push(input.value.trim());
+                        await saveNewsConfig(newsConfig);
+                        loadCurrentSettings('news');
+                        input.value = '';
+                    }
+                } catch (error) {
+                    console.error('Error adding news tag:', error);
+                }
+            }
+        }
+        
+        async function addVanityTerm(type) {
+            const input = document.getElementById(`vanity-${type}`);
+            if (input.value.trim()) {
+                try {
+                    // Get current settings
+                    const response = await fetch('/api/admin/settings');
+                    const settings = await response.json();
+                    const vanityConfig = settings.vanity_config || { names: [], companies: [], terms: [] };
+                    
+                    // Add new term to appropriate array
+                    const termValue = input.value.trim();
+                    let arrayKey = type === 'name' ? 'names' : type === 'company' ? 'companies' : 'terms';
+                    
+                    if (!vanityConfig[arrayKey].includes(termValue)) {
+                        vanityConfig[arrayKey].push(termValue);
+                        await saveVanityConfig(vanityConfig);
+                        loadCurrentSettings('vanity');
+                        input.value = '';
+                    }
+                } catch (error) {
+                    console.error(`Error adding vanity ${type}:`, error);
+                }
+            }
+        }
+        
+        async function addMusicTerm(type) {
+            const input = document.getElementById(`music-${type}`);
+            if (input.value.trim()) {
+                try {
+                    // Get current settings
+                    const response = await fetch('/api/admin/settings');
+                    const settings = await response.json();
+                    const musicConfig = settings.music_config || { artists: [], labels: [] };
+                    
+                    // Add new term to appropriate array
+                    const termValue = input.value.trim();
+                    let arrayKey = type === 'artist' ? 'artists' : 'labels';
+                    
+                    if (!musicConfig[arrayKey].includes(termValue)) {
+                        musicConfig[arrayKey].push(termValue);
+                        await saveMusicConfig(musicConfig);
+                        loadCurrentSettings('music');
+                        input.value = '';
+                    }
+                } catch (error) {
+                    console.error(`Error adding music ${type}:`, error);
+                }
+            }
+        }
+        
+        function getCurrentGitHubToken() {
+            return 'ghp_XrIl****ntD1lxg5N (Active)';
+        }
+        
+        function getCurrentTickTickUser() {
+            return 'Connected User';
+        }
+        
+        async function updateGitHubSettings() {
+            const username = document.getElementById('github-username').value;
+            if (username.trim()) {
+                try {
+                    await saveGithubConfig({ username: username.trim() });
+                    console.log('GitHub username updated:', username);
+                } catch (error) {
+                    console.error('Error updating GitHub settings:', error);
+                }
+            }
+        }
+        
+        function disconnectTickTick() {
+            if (confirm('Are you sure you want to disconnect TickTick?')) {
+                console.log('Disconnecting TickTick');
+                // Implementation for disconnecting TickTick
+            }
+        }
+        
+        async function loadCurrentSettings(widgetType) {
+            try {
+                const response = await fetch('/api/admin/settings');
+                const settings = await response.json();
+                
+                switch(widgetType) {
+                    case 'news':
+                        const newsConfig = settings.news_config || { sources: [], tags: [] };
+                        const tagsContainer = document.getElementById('news-tags');
+                        if (tagsContainer) {
+                            tagsContainer.innerHTML = `
+                                <div><strong>Sources:</strong> ${newsConfig.sources.join(', ')}</div>
+                                <div><strong>Tags:</strong> ${newsConfig.tags.join(', ')}</div>
+                            `;
+                        }
+                        break;
+                        
+                    case 'vanity':
+                        const vanityConfig = settings.vanity_config || { names: [], companies: [], terms: [] };
+                        const vanityContainer = document.getElementById('vanity-terms');
+                        if (vanityContainer) {
+                            vanityContainer.innerHTML = `
+                                <div><strong>Names:</strong> ${vanityConfig.names.join(', ')}</div>
+                                <div><strong>Companies:</strong> ${vanityConfig.companies.join(', ')}</div>
+                                <div><strong>Terms:</strong> ${vanityConfig.terms.join(', ')}</div>
+                            `;
+                        }
+                        break;
+                        
+                    case 'music':
+                        const musicConfig = settings.music_config || { artists: [], labels: [] };
+                        const musicContainer = document.getElementById('music-terms');
+                        if (musicContainer) {
+                            musicContainer.innerHTML = `
+                                <div><strong>Artists:</strong> ${musicConfig.artists.join(', ')}</div>
+                                <div><strong>Labels:</strong> ${musicConfig.labels.join(', ')}</div>
+                            `;
+                        }
+                        break;
+                        
+                    case 'github':
+                        const githubConfig = settings.github_config || { username: 'glind' };
+                        const usernameInput = document.getElementById('github-username');
+                        if (usernameInput) {
+                            usernameInput.value = githubConfig.username;
+                        }
+                        break;
+                }
+            } catch (error) {
+                console.error('Error loading current settings:', error);
+            }
+        }
+        
+        // Load widget preferences on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            loadWidgetPreferences();
+        });
     </script>
 </body>
 </html>
@@ -2178,10 +3005,13 @@ async def get_joke():
 async def get_weather():
     """Get current weather"""
     try:
+        logger.info(f"Weather API called. COLLECTORS_AVAILABLE={COLLECTORS_AVAILABLE}")
         if COLLECTORS_AVAILABLE:
             try:
                 weather_collector = WeatherCollector()
+                logger.info("Instantiated WeatherCollector.")
                 weather_data = await weather_collector.get_current_weather()
+                logger.info(f"WeatherCollector.get_current_weather() returned: {weather_data}")
                 if weather_data:
                     return {
                         "temperature": f"{weather_data.temperature:.0f}°F",
@@ -2189,9 +3019,12 @@ async def get_weather():
                         "location": weather_data.location,
                         "feels_like": f"{weather_data.feels_like:.0f}°F"
                     }
-            except:
-                pass
-        
+                else:
+                    logger.warning("WeatherCollector returned None, using fallback data.")
+            except Exception as collector_exc:
+                logger.error(f"Exception in WeatherCollector: {collector_exc}", exc_info=True)
+        else:
+            logger.warning("COLLECTORS_AVAILABLE is False, using fallback data.")
         # Fallback weather data
         return {
             "temperature": "72°F",
@@ -2200,6 +3033,7 @@ async def get_weather():
             "feels_like": "75°F"
         }
     except Exception as e:
+        logger.error(f"Exception in /api/weather endpoint: {e}", exc_info=True)
         return {"error": str(e)}
 
 @app.post("/api/feedback")
@@ -2304,6 +3138,80 @@ async def get_liked_items(item_type: str = None, limit: int = 50):
         }
     except Exception as e:
         logger.error(f"Error getting liked items: {e}")
+        return {"error": str(e)}
+
+@app.get("/api/admin/settings")
+async def get_admin_settings():
+    """Get admin settings"""
+    try:
+        # Get widget visibility settings
+        widget_visibility = db.get_setting('widget_visibility', {
+            'calendar': True,
+            'email': True, 
+            'github': True,
+            'ticktick': True,
+            'news': True,
+            'music': True,
+            'vanity': True
+        })
+        
+        # Get widget configurations
+        news_config = db.get_setting('news_config', {
+            'sources': ['TechCrunch', 'BBC News', 'Reuters'],
+            'tags': ['AI', 'Technology', 'Science']
+        })
+        
+        vanity_config = db.get_setting('vanity_config', {
+            'names': ['Gregory Lind'],
+            'companies': ['Buildly Labs'],
+            'terms': ['Radical Therapy for Software Teams']
+        })
+        
+        music_config = db.get_setting('music_config', {
+            'artists': ['My Evil Robot Army'],
+            'labels': ['Null Records']
+        })
+        
+        github_config = db.get_setting('github_config', {
+            'username': 'glind'
+        })
+        
+        return {
+            "widget_visibility": widget_visibility,
+            "news_config": news_config,
+            "vanity_config": vanity_config,
+            "music_config": music_config,
+            "github_config": github_config
+        }
+    except Exception as e:
+        logger.error(f"Error getting admin settings: {e}")
+        return {"error": str(e)}
+
+@app.post("/api/admin/settings")
+async def save_admin_settings(request: Request):
+    """Save admin settings"""
+    try:
+        data = await request.json()
+        setting_type = data.get('type')
+        setting_data = data.get('data')
+        
+        if setting_type == 'widget_visibility':
+            db.save_setting('widget_visibility', setting_data)
+        elif setting_type == 'news_config':
+            db.save_setting('news_config', setting_data)
+        elif setting_type == 'vanity_config':
+            db.save_setting('vanity_config', setting_data)
+        elif setting_type == 'music_config':
+            db.save_setting('music_config', setting_data)
+        elif setting_type == 'github_config':
+            db.save_setting('github_config', setting_data)
+        else:
+            return {"error": "Invalid setting type"}
+        
+        return {"success": True, "message": f"{setting_type} saved successfully"}
+        
+    except Exception as e:
+        logger.error(f"Error saving admin settings: {e}")
         return {"error": str(e)}
 
 if __name__ == "__main__":

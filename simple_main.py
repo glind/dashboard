@@ -413,6 +413,34 @@ async def dashboard():
             border: 1px solid rgba(255,255,255,0.2);
         }
         
+        #widget-admin {
+            background: rgba(30, 30, 30, 0.95);
+            border: 2px solid #4fc3f7;
+            border-radius: 15px;
+            padding: 20px;
+            margin: 20px auto;
+            min-height: 200px;
+            max-width: 800px;
+            width: 90%;
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 10000;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+        }
+        
+        #widget-admin::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: -1;
+        }
+        
         .admin-section h3 {
             margin-bottom: 15px;
             color: #4fc3f7;
@@ -674,6 +702,11 @@ async def dashboard():
         </div>
     </div>
     
+    <!-- Widget-specific admin sections (positioned after main grid) -->
+    <div id="widget-admin" style="display: none;">
+        <!-- Dynamic content will be inserted here -->
+    </div>
+    
     <button class="refresh-btn" onclick="loadAllData()">🔄 Refresh</button>
     
     <!-- Detail Popover Modal -->
@@ -753,11 +786,6 @@ async def dashboard():
                         <span class="toggle-slider"></span>
                     </label>
                 </div>
-            </div>
-            
-            <!-- Widget-specific admin sections -->
-            <div id="widget-admin" style="display: none;">
-                <!-- Dynamic content will be inserted here -->
             </div>
         </div>
     </div>
@@ -2092,7 +2120,7 @@ async def dashboard():
             document.getElementById('widget-admin').style.display = 'none';
         }
         
-        function toggleWidget(widgetName) {
+        async function toggleWidget(widgetName) {
             const widget = document.querySelector(`[id*="${widgetName}-content"]`).closest('.widget');
             const toggle = document.getElementById(`toggle-${widgetName}`);
             
@@ -2129,24 +2157,77 @@ async def dashboard():
         function openWidgetAdmin(widgetType) {
             const adminSection = document.getElementById('widget-admin');
             
-            let adminContent = '';
+            if (!adminSection) {
+                console.error('widget-admin element not found!');
+                return;
+            }
+            
+            let adminContent = `
+                <div class="modal-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 10px;">
+                    <h2 style="margin: 0; color: #4fc3f7;">Configure ${widgetType.charAt(0).toUpperCase() + widgetType.slice(1)}</h2>
+                    <button onclick="closeWidgetAdmin()" style="background: none; border: none; color: #ff6b6b; font-size: 24px; cursor: pointer; padding: 5px; border-radius: 50%; width: 35px; height: 35px; display: flex; align-items: center; justify-content: center;" onmouseover="this.style.background='rgba(255,107,107,0.2)'" onmouseout="this.style.background='none'">&times;</button>
+                </div>
+            `;
             
             switch(widgetType) {
+                case 'calendar':
+                    adminContent += `
+                        <div class="admin-section">
+                            <h3>📅 Google Calendar Integration</h3>
+                            <div class="admin-form">
+                                <div style="padding: 15px; background: rgba(255,255,255,0.1); border-radius: 10px; margin-bottom: 15px;">
+                                    <strong>Connection Status:</strong> <span id="calendar-status">Checking...</span><br>
+                                    <strong>Account:</strong> <span id="calendar-account">Loading...</span><br><br>
+                                    <button class="admin-btn" onclick="connectGoogleCalendar()">Connect Google Calendar</button>
+                                    <button class="admin-btn danger" onclick="disconnectGoogleCalendar()" style="margin-left: 10px;">Disconnect</button>
+                                </div>
+                                <p style="color: #ccc; font-size: 0.9em;">
+                                    Connect your Google Calendar to see upcoming events and meetings in your dashboard.
+                                </p>
+                            </div>
+                        </div>
+                    `;
+                    break;
+                    
+                case 'email':
+                    adminContent += `
+                        <div class="admin-section">
+                            <h3>📧 Gmail Integration</h3>
+                            <div class="admin-form">
+                                <div style="padding: 15px; background: rgba(255,255,255,0.1); border-radius: 10px; margin-bottom: 15px;">
+                                    <strong>Connection Status:</strong> <span id="email-status">Checking...</span><br>
+                                    <strong>Account:</strong> <span id="email-account">Loading...</span><br><br>
+                                    <button class="admin-btn" onclick="connectGmail()">Connect Gmail</button>
+                                    <button class="admin-btn danger" onclick="disconnectGmail()" style="margin-left: 10px;">Disconnect</button>
+                                </div>
+                                <p style="color: #ccc; font-size: 0.9em;">
+                                    Connect your Gmail to see unread messages and important emails in your dashboard.
+                                </p>
+                            </div>
+                        </div>
+                    `;
+                    break;
+                    
                 case 'news':
-                    adminContent = `
+                    adminContent += `
                         <div class="admin-section">
                             <h3>📰 News Configuration</h3>
                             <div class="admin-form">
-                                <label>Add News Source:</label>
+                                <label for="news-source">Add News Source:</label>
                                 <input type="text" class="admin-input" id="news-source" placeholder="e.g., TechCrunch, BBC News">
                                 <button class="admin-btn" onclick="addNewsSource()">Add Source</button>
                                 
-                                <label>Add News Tags:</label>
+                                <label for="news-tag">Add News Tags:</label>
                                 <input type="text" class="admin-input" id="news-tag" placeholder="e.g., AI, Machine Learning">
                                 <button class="admin-btn" onclick="addNewsTag()">Add Tag</button>
                                 
                                 <div class="tag-list" id="news-tags">
                                     <!-- Current tags will be loaded here -->
+                                </div>
+                                
+                                <div style="margin-top: 20px; padding-top: 15px; border-top: 1px solid rgba(255,255,255,0.2); text-align: right;">
+                                    <button class="admin-btn" onclick="closeWidgetAdmin()" style="background: #666; margin-right: 10px;">Cancel</button>
+                                    <button class="admin-btn" onclick="saveAndCloseWidget()">Save & Close</button>
                                 </div>
                             </div>
                         </div>
@@ -2158,20 +2239,25 @@ async def dashboard():
                         <div class="admin-section">
                             <h3>👁️ Vanity Alerts Configuration</h3>
                             <div class="admin-form">
-                                <label>Add Name/Person:</label>
+                                <label for="vanity-name">Add Name/Person:</label>
                                 <input type="text" class="admin-input" id="vanity-name" placeholder="e.g., Gregory Lind">
                                 <button class="admin-btn" onclick="addVanityTerm('name')">Add Name</button>
                                 
-                                <label>Add Company/Organization:</label>
+                                <label for="vanity-company">Add Company/Organization:</label>
                                 <input type="text" class="admin-input" id="vanity-company" placeholder="e.g., Buildly Labs">
                                 <button class="admin-btn" onclick="addVanityTerm('company')">Add Company</button>
                                 
-                                <label>Add Search Term:</label>
+                                <label for="vanity-term">Add Search Term:</label>
                                 <input type="text" class="admin-input" id="vanity-term" placeholder="e.g., Radical Therapy for Software Teams">
                                 <button class="admin-btn" onclick="addVanityTerm('term')">Add Term</button>
                                 
                                 <div class="tag-list" id="vanity-terms">
                                     <!-- Current terms will be loaded here -->
+                                </div>
+                                
+                                <div style="margin-top: 20px; padding-top: 15px; border-top: 1px solid rgba(255,255,255,0.2); text-align: right;">
+                                    <button class="admin-btn" onclick="closeWidgetAdmin()" style="background: #666; margin-right: 10px;">Cancel</button>
+                                    <button class="admin-btn" onclick="saveAndCloseWidget()">Save & Close</button>
                                 </div>
                             </div>
                         </div>
@@ -2183,16 +2269,21 @@ async def dashboard():
                         <div class="admin-section">
                             <h3>🎵 Music Configuration</h3>
                             <div class="admin-form">
-                                <label>Add Band/Artist:</label>
+                                <label for="music-artist">Add Band/Artist:</label>
                                 <input type="text" class="admin-input" id="music-artist" placeholder="e.g., My Evil Robot Army">
                                 <button class="admin-btn" onclick="addMusicTerm('artist')">Add Artist</button>
                                 
-                                <label>Add Record Label:</label>
+                                <label for="music-label">Add Record Label:</label>
                                 <input type="text" class="admin-input" id="music-label" placeholder="e.g., Null Records">
                                 <button class="admin-btn" onclick="addMusicTerm('label')">Add Label</button>
                                 
                                 <div class="tag-list" id="music-terms">
                                     <!-- Current terms will be loaded here -->
+                                </div>
+                                
+                                <div style="margin-top: 20px; padding-top: 15px; border-top: 1px solid rgba(255,255,255,0.2); text-align: right;">
+                                    <button class="admin-btn" onclick="closeWidgetAdmin()" style="background: #666; margin-right: 10px;">Cancel</button>
+                                    <button class="admin-btn" onclick="saveAndCloseWidget()">Save & Close</button>
                                 </div>
                             </div>
                         </div>
@@ -2204,12 +2295,17 @@ async def dashboard():
                         <div class="admin-section">
                             <h3>🐙 GitHub Configuration</h3>
                             <div class="admin-form">
-                                <label>GitHub Username:</label>
+                                <label for="github-username">GitHub Username:</label>
                                 <input type="text" class="admin-input" id="github-username" placeholder="e.g., glind">
                                 <button class="admin-btn" onclick="updateGitHubSettings()">Update Username</button>
                                 
                                 <div style="margin-top: 15px; padding: 10px; background: rgba(255,255,255,0.1); border-radius: 5px;">
                                     <strong>Current Token:</strong> ${getCurrentGitHubToken()}
+                                </div>
+                                
+                                <div style="margin-top: 20px; padding-top: 15px; border-top: 1px solid rgba(255,255,255,0.2); text-align: right;">
+                                    <button class="admin-btn" onclick="closeWidgetAdmin()" style="background: #666; margin-right: 10px;">Cancel</button>
+                                    <button class="admin-btn" onclick="saveAndCloseWidget()">Save & Close</button>
                                 </div>
                             </div>
                         </div>
@@ -2243,7 +2339,18 @@ async def dashboard():
             adminSection.innerHTML = adminContent;
             adminSection.style.display = 'block';
             
+            // Add ESC key listener
+            document.addEventListener('keydown', handleEscapeKey);
+            
+            // Add click-outside-to-close
+            adminSection.onclick = function(event) {
+                if (event.target === adminSection) {
+                    closeWidgetAdmin();
+                }
+            };
+            
             // Load current settings
+            loadCurrentSettings(widgetType);
             loadCurrentSettings(widgetType);
         }
         
@@ -2251,6 +2358,7 @@ async def dashboard():
             const input = document.getElementById('news-source');
             if (input.value.trim()) {
                 try {
+                    console.log('Adding news source:', input.value.trim());
                     // Get current settings
                     const response = await fetch('/api/admin/settings');
                     const settings = await response.json();
@@ -2259,9 +2367,13 @@ async def dashboard():
                     // Add new source
                     if (!newsConfig.sources.includes(input.value.trim())) {
                         newsConfig.sources.push(input.value.trim());
+                        console.log('Updated news config:', newsConfig);
                         await saveNewsConfig(newsConfig);
-                        loadCurrentSettings('news');
+                        await loadCurrentSettings('news');
                         input.value = '';
+                        console.log('News source added successfully');
+                    } else {
+                        console.log('News source already exists');
                     }
                 } catch (error) {
                     console.error('Error adding news source:', error);
@@ -2273,6 +2385,7 @@ async def dashboard():
             const input = document.getElementById('news-tag');
             if (input.value.trim()) {
                 try {
+                    console.log('Adding news tag:', input.value.trim());
                     // Get current settings
                     const response = await fetch('/api/admin/settings');
                     const settings = await response.json();
@@ -2281,9 +2394,13 @@ async def dashboard():
                     // Add new tag
                     if (!newsConfig.tags.includes(input.value.trim())) {
                         newsConfig.tags.push(input.value.trim());
+                        console.log('Updated news config:', newsConfig);
                         await saveNewsConfig(newsConfig);
-                        loadCurrentSettings('news');
+                        await loadCurrentSettings('news');
                         input.value = '';
+                        console.log('News tag added successfully');
+                    } else {
+                        console.log('News tag already exists');
                     }
                 } catch (error) {
                     console.error('Error adding news tag:', error);
@@ -2365,6 +2482,48 @@ async def dashboard():
             if (confirm('Are you sure you want to disconnect TickTick?')) {
                 console.log('Disconnecting TickTick');
                 // Implementation for disconnecting TickTick
+            }
+        }
+        
+        function closeWidgetAdmin() {
+            const adminSection = document.getElementById('widget-admin');
+            if (adminSection) {
+                adminSection.style.display = 'none';
+            }
+            // Remove ESC key listener
+            document.removeEventListener('keydown', handleEscapeKey);
+        }
+        
+        function saveAndCloseWidget() {
+            // Settings are auto-saved when items are added, so just close
+            closeWidgetAdmin();
+        }
+        
+        function handleEscapeKey(event) {
+            if (event.key === 'Escape') {
+                closeWidgetAdmin();
+            }
+        }
+        
+        function connectGoogleCalendar() {
+            window.open('/auth/google/calendar', '_blank');
+        }
+        
+        function disconnectGoogleCalendar() {
+            if (confirm('Are you sure you want to disconnect Google Calendar?')) {
+                fetch('/auth/google/disconnect', { method: 'POST' })
+                    .then(() => location.reload());
+            }
+        }
+        
+        function connectGmail() {
+            window.open('/auth/google/gmail', '_blank');
+        }
+        
+        function disconnectGmail() {
+            if (confirm('Are you sure you want to disconnect Gmail?')) {
+                fetch('/auth/google/disconnect', { method: 'POST' })
+                    .then(() => location.reload());
             }
         }
         

@@ -41,36 +41,28 @@ class VanityAlertsCollector:
         """Initialize the vanity alerts collector."""
         self.search_terms = {
             'buildly': [
-                '"Buildly"',
                 '"Buildly Labs"',
                 '"buildly.io"',
-                'Buildly',
-                'buildly.io'
+                'site:buildly.io'
             ],
             'gregory_lind': [
-                '"Gregory Lind"',
-                '"Greg Lind"',
-                '"Gregory A Lind"',
-                'Gregory Lind',
-                'Greg Lind'
+                '"Gregory Lind" CEO',
+                '"Gregory Lind" Buildly',
+                '"Gregory Lind" author',
+                '"Gregory A Lind"'
             ],
             'book': [
                 '"Radical Therapy for Software Teams"',
-                '"Radical Therapy" software',
-                'Gregory Lind book',
-                'Radical Therapy'
+                '"Radical Therapy for Software Teams" Gregory Lind',
+                'Radical Therapy Software Teams book',
+                'Gregory Lind "Radical Therapy for Software Teams"'
             ],
             'music': [
-                '"Gregory Lind" music',
-                '"Greg Lind" musician',
                 '"Gregory Lind" composer',
-                '"My Evil Robot Army"',
-                '"Null Records"',
-                '"nullrecords"',
-                'My Evil Robot Army',
-                'Null Records',
-                'nullrecords',
-                'Gregory Lind electronic'
+                '"My Evil Robot Army" band',
+                '"Null Records" Gregory Lind',
+                'nullrecords Gregory Lind',
+                '"Gregory Lind" electronic music'
             ]
         }
         
@@ -363,15 +355,21 @@ class VanityAlertsCollector:
             logger.info("Collecting vanity alerts data...")
             
             # Collect all alerts
-            alerts = await self.collect_all_alerts()
+            all_alerts = await self.collect_all_alerts()
             
-            # Save to database
-            if alerts:
-                self.save_alerts_to_database(alerts)
+            # Filter alerts with confidence score > 0.3 to reduce noise
+            filtered_alerts = [alert for alert in all_alerts if alert.confidence_score > 0.3]
+            
+            # Sort by confidence score descending
+            filtered_alerts.sort(key=lambda x: x.confidence_score, reverse=True)
+            
+            # Save high-confidence alerts to database
+            if filtered_alerts:
+                self.save_alerts_to_database(filtered_alerts)
             
             # Return summary data
             result = {
-                'total_alerts': len(alerts),
+                'total_alerts': len(filtered_alerts),
                 'alerts': [
                     {
                         'id': alert.id,
@@ -383,12 +381,14 @@ class VanityAlertsCollector:
                         'confidence_score': alert.confidence_score,
                         'snippet': alert.snippet
                     }
-                    for alert in alerts[:10]  # Return top 10 for display
+                    for alert in filtered_alerts[:15]  # Return top 15 high-confidence alerts
                 ],
-                'timestamp': datetime.now().isoformat()
+                'timestamp': datetime.now().isoformat(),
+                'filtered_count': len(all_alerts) - len(filtered_alerts),  # Show how many were filtered out
+                'total_before_filter': len(all_alerts)
             }
             
-            logger.info(f"Collected {len(alerts)} vanity alerts")
+            logger.info(f"Collected {len(filtered_alerts)} high-confidence vanity alerts (filtered {len(all_alerts) - len(filtered_alerts)} low-confidence)")
             return result
             
         except Exception as e:

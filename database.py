@@ -7,7 +7,7 @@ import json
 import logging
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Set
 from contextlib import contextmanager
 
 logger = logging.getLogger(__name__)
@@ -185,6 +185,24 @@ class DatabaseManager:
                 )
             """)
             
+            # User feedback table for AI training
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS user_feedback (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    item_id TEXT NOT NULL,
+                    item_type TEXT NOT NULL,
+                    item_title TEXT,
+                    item_content TEXT,
+                    item_metadata TEXT,
+                    feedback_type TEXT NOT NULL CHECK(feedback_type IN ('like', 'dislike')),
+                    feedback_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    source_api TEXT,
+                    category TEXT,
+                    confidence_score REAL DEFAULT 0.5,
+                    notes TEXT
+                )
+            """)
+            
             # Create indexes for better performance
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_collected_data_service_date ON collected_data(service_name, collection_date)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_credentials_service ON credentials(service_name)")
@@ -204,6 +222,9 @@ class DatabaseManager:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_news_created_at ON news_articles(created_at)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_music_created_at ON music_content(created_at)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_vanity_created_at ON vanity_alerts(timestamp)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_user_feedback_type ON user_feedback(feedback_type)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_user_feedback_item ON user_feedback(item_type, item_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_user_feedback_timestamp ON user_feedback(feedback_timestamp)")
             
             conn.commit()
             logger.info("Database initialized successfully")
@@ -1090,6 +1111,189 @@ class DatabaseManager:
                 
         except Exception as e:
             logger.error(f"Error getting liked content: {e}")
+            return []
+
+    def save_user_feedback(self, item_id: str, item_type: str, feedback_type: str, 
+                          item_title: str = None, item_content: str = None, 
+                          item_metadata: Dict[str, Any] = None, source_api: str = None, 
+                          category: str = None, confidence_score: float = 0.5, notes: str = None) -> bool:
+        """Save user feedback (like/dislike) for AI training."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Convert metadata to JSON string
+                metadata_json = json.dumps(item_metadata) if item_metadata else None
+                
+                cursor.execute("""
+                    INSERT INTO user_feedback 
+                    (item_id, item_type, item_title, item_content, item_metadata, 
+                     feedback_type, source_api, category, confidence_score, notes)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (item_id, item_type, item_title, item_content, metadata_json,
+                      feedback_type, source_api, category, confidence_score, notes))
+                
+                conn.commit()
+                logger.info(f"Saved {feedback_type} feedback for {item_type}: {item_id}")
+                return True
+                
+        except Exception as e:
+            logger.error(f"Error saving user feedback: {e}")
+            return False
+            
+    def get_user_feedback(self, item_type: str = None, feedback_type: str = None, 
+                         limit: int = 100) -> List[Dict[str, Any]]:
+        """Get user feedback for AI training analysis."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                query = "SELECT * FROM user_feedback WHERE 1=1"
+                params = []
+                
+                if item_type:
+                    query += " AND item_type = ?"
+                    params.append(item_type)
+                    
+                if feedback_type:
+                    query += " AND feedback_type = ?"
+                    params.append(feedback_type)
+                    
+                query += " ORDER BY feedback_timestamp DESC LIMIT ?"
+                params.append(limit)
+                
+                cursor.execute(query, params)
+                feedback_rows = cursor.fetchall()
+                
+                feedback_list = []
+                for row in feedback_rows:
+                    feedback_data = {
+                        'id': row['id'],
+                        'item_id': row['item_id'],
+                        'item_type': row['item_type'],
+                        'item_title': row['item_title'],
+                        'item_content': row['item_content'],
+                        'item_metadata': json.loads(row['item_metadata']) if row['item_metadata'] else {},
+                        'feedback_type': row['feedback_type'],
+                        'feedback_timestamp': row['feedback_timestamp'],
+                        'source_api': row['source_api'],
+                        'category': row['category'],
+                        'confidence_score': row['confidence_score'],
+                        'notes': row['notes']
+                    }
+                    feedback_list.append(feedback_data)
+                    
+                return feedback_list
+                
+        except Exception as e:
+            logger.error(f"Error getting user feedback: {e}")
+            return []
+            
+    def get_user_preferences_summary(self) -> Dict[str, Any]:
+        """Get summary of user preferences for AI training."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Get feedback counts by type and category
+                cursor.execute("""
+                    SELECT item_type, feedback_type, category, COUNT(*) as count,
+                           AVG(confidence_score) as avg_confidence
+                    FROM user_feedback
+                    GROUP BY item_type, feedback_type, category
+                    ORDER BY count DESC
+                """)
+                
+                summary_data = []
+                for row in cursor.fetchall():
+                    summary_data.append({
+                        'item_type': row['item_type'],
+                        'feedback_type': row['feedback_type'],
+                        'category': row['category'],
+                        'count': row['count'],
+                        'avg_confidence': row['avg_confidence']
+                    })
+                    
+                # Get total feedback counts
+                cursor.execute("""
+                    SELECT feedback_type, COUNT(*) as total_count
+                    FROM user_feedback
+                    GROUP BY feedback_type
+                """)
+                
+                totals = {row['feedback_type']: row['total_count'] for row in cursor.fetchall()}
+                
+                return {
+                    'detailed_summary': summary_data,
+                    'totals': totals,
+                    'total_feedback_items': sum(totals.values())
+                }
+                
+        except Exception as e:
+            logger.error(f"Error getting user preferences summary: {e}")
+            return {'detailed_summary': [], 'totals': {}, 'total_feedback_items': 0}
+    
+    def get_rated_item_ids(self, item_type: str = None) -> Set[str]:
+        """Get set of item IDs that have been rated (liked or disliked) to filter them out."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                query = "SELECT DISTINCT item_id FROM user_feedback WHERE 1=1"
+                params = []
+                
+                if item_type:
+                    query += " AND item_type = ?"
+                    params.append(item_type)
+                
+                cursor.execute(query, params)
+                return {row['item_id'] for row in cursor.fetchall()}
+                
+        except Exception as e:
+            logger.error(f"Error getting rated item IDs: {e}")
+            return set()
+    
+    def get_liked_items(self, item_type: str = None, limit: int = 50) -> List[Dict[str, Any]]:
+        """Get items that have been liked for the 'Liked Items' section."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                query = """
+                    SELECT item_id, item_type, item_title, item_content, item_metadata,
+                           feedback_timestamp, source_api, category
+                    FROM user_feedback 
+                    WHERE feedback_type = 'like'
+                """
+                params = []
+                
+                if item_type:
+                    query += " AND item_type = ?"
+                    params.append(item_type)
+                
+                query += " ORDER BY feedback_timestamp DESC LIMIT ?"
+                params.append(limit)
+                
+                cursor.execute(query, params)
+                liked_items = []
+                
+                for row in cursor.fetchall():
+                    item_data = {
+                        'id': row['item_id'],
+                        'type': row['item_type'],
+                        'title': row['item_title'],
+                        'content': row['item_content'] or '',
+                        'metadata': json.loads(row['item_metadata']) if row['item_metadata'] else {},
+                        'liked_at': row['feedback_timestamp'],
+                        'source': row['source_api'],
+                        'category': row['category'] or 'General'
+                    }
+                    liked_items.append(item_data)
+                
+                return liked_items
+                
+        except Exception as e:
+            logger.error(f"Error getting liked items: {e}")
             return []
 
 

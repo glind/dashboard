@@ -16,7 +16,7 @@ NC='\033[0m' # No Color
 VENV_DIR=".venv"
 PYTHON_CMD="python3"
 SERVER_FILE="main.py"
-SERVER_PORT="8008"
+SERVER_PORT="8008"  # Server runs on 0.0.0.0:8008 (accessible from network)
 PID_FILE="dashboard.pid"
 
 echo -e "${BLUE}🚀 Personal Dashboard Startup${NC}"
@@ -145,7 +145,8 @@ start_server() {
     if ps -p "$pid" > /dev/null 2>&1; then
         echo -e "${GREEN}✅ Dashboard started successfully!${NC}"
         echo ""
-        echo -e "${GREEN}📍 Dashboard URL: http://localhost:$SERVER_PORT${NC}"
+        echo -e "${GREEN}📍 Dashboard URL (Local): http://localhost:$SERVER_PORT${NC}"
+        echo -e "${GREEN}📍 Dashboard URL (Network): http://$(hostname -I | awk '{print $1}'):$SERVER_PORT${NC}"
         echo -e "${GREEN}🔧 API Docs: http://localhost:$SERVER_PORT/docs${NC}"
         echo -e "${GREEN}📋 Process ID: $pid${NC}"
         echo ""
@@ -177,7 +178,8 @@ show_status() {
         local pid=$(cat "$PID_FILE")
         if ps -p "$pid" > /dev/null 2>&1; then
             echo -e "${GREEN}✅ Running (PID: $pid)${NC}"
-            echo -e "   URL: http://localhost:$SERVER_PORT"
+            echo -e "   Local URL: http://localhost:$SERVER_PORT"
+            echo -e "   Network URL: http://$(hostname -I | awk '{print $1}'):$SERVER_PORT"
             echo -e "   Uptime: $(ps -o etime= -p "$pid" | tr -d ' ')"
         else
             echo -e "${RED}❌ Not running (stale PID file)${NC}"

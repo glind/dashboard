@@ -39,6 +39,11 @@ class VanityAlertsCollector:
     
     def __init__(self):
         """Initialize the vanity alerts collector."""
+        # Cache for alerts (valid for 30 minutes)
+        self._cache = None
+        self._cache_timestamp = None
+        self._cache_duration = timedelta(minutes=30)
+        
         self.search_terms = {
             'buildly': [
                 '"Buildly Labs"',
@@ -352,6 +357,13 @@ class VanityAlertsCollector:
     async def collect_data(self) -> Dict[str, Any]:
         """Collect vanity alerts data for the dashboard."""
         try:
+            # Check cache first
+            if (self._cache is not None and 
+                self._cache_timestamp is not None and 
+                datetime.now() - self._cache_timestamp < self._cache_duration):
+                logger.info("Returning cached vanity alerts data")
+                return self._cache
+            
             logger.info("Collecting vanity alerts data...")
             
             # Collect all alerts
@@ -387,6 +399,10 @@ class VanityAlertsCollector:
                 'filtered_count': len(all_alerts) - len(filtered_alerts),  # Show how many were filtered out
                 'total_before_filter': len(all_alerts)
             }
+            
+            # Cache the result
+            self._cache = result
+            self._cache_timestamp = datetime.now()
             
             logger.info(f"Collected {len(filtered_alerts)} high-confidence vanity alerts (filtered {len(all_alerts) - len(filtered_alerts)} low-confidence)")
             return result

@@ -36,6 +36,11 @@ class NewsCollector:
     """Collects news from multiple sources and learns from user feedback."""
     
     def __init__(self):
+        # Cache for news (valid for 20 minutes)
+        self._cache = None
+        self._cache_timestamp = None
+        self._cache_duration = timedelta(minutes=20)
+        
         self.topics = {
             'oregon_state': [
                 'Oregon State University', 'OSU Beavers', 'Corvallis', 'OSU', 'Oregon State',
@@ -535,6 +540,13 @@ class NewsCollector:
     async def collect_data(self) -> Dict[str, Any]:
         """Collect news data and save to database."""
         try:
+            # Check cache first
+            if (self._cache is not None and 
+                self._cache_timestamp is not None and 
+                datetime.now() - self._cache_timestamp < self._cache_duration):
+                logger.info("Returning cached news data")
+                return self._cache
+            
             logger.info("Collecting news data...")
             
             # Collect all news articles
@@ -585,6 +597,10 @@ class NewsCollector:
                 'saved_to_database': saved_count,
                 'timestamp': datetime.now().isoformat()
             }
+            
+            # Cache the result
+            self._cache = result
+            self._cache_timestamp = datetime.now()
             
             logger.info(f"Collected {len(articles)} news articles, saved {saved_count} to database")
             return result

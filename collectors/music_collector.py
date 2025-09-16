@@ -59,6 +59,11 @@ class MusicCollector:
     """Collects music data and learns from user preferences."""
     
     def __init__(self):
+        # Cache for music data (valid for 25 minutes)
+        self._cache = None
+        self._cache_timestamp = None
+        self._cache_duration = timedelta(minutes=25)
+        
         self.label_name = "NullRecords"
         self.band_name = "My Evil Robot Army"
         self.website = "www.nullrecords.com"
@@ -955,6 +960,13 @@ class MusicCollector:
         Collect music data and save to database for personality training.
         Returns the collected data for dashboard display.
         """
+        # Check cache first
+        if (self._cache is not None and 
+            self._cache_timestamp is not None and 
+            datetime.now() - self._cache_timestamp < self._cache_duration):
+            logger.info("Returning cached music data")
+            return self._cache
+        
         logger.info("Starting music data collection...")
         
         try:
@@ -1055,6 +1067,9 @@ class MusicCollector:
                        f"{len(music_data.get('music_news', []))} news items, "
                        f"{len(music_data.get('streaming_stats', []))} platform stats, "
                        f"{len(music_data.get('recent_releases', []))} releases")
+            # Cache the result
+            self._cache = music_data
+            self._cache_timestamp = datetime.now()
             
             return music_data
             

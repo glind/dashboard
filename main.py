@@ -19,6 +19,10 @@ import sys
 import httpx
 import aiohttp
 from bs4 import BeautifulSoup
+import threading
+import asyncio
+import time
+from typing import Dict, Any, Optional
 
 # Add the project root to the path so we can import our collectors
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -56,6 +60,183 @@ except ImportError as e:
 logging.basicConfig(level=logging.INFO)
 
 app = FastAPI(title="Simple Personal Dashboard")
+
+
+class BackgroundDataManager:
+    """Manages background data collection and caching."""
+    
+    def __init__(self):
+        self.cache: Dict[str, Dict[str, Any]] = {}
+        self.cache_timestamps: Dict[str, datetime] = {}
+        self.cache_duration = timedelta(minutes=10)  # Cache for 10 minutes
+        self.background_tasks: Dict[str, threading.Thread] = {}
+        self.running = True
+        
+        # Start background collection threads
+        self.start_background_collection()
+    
+    def start_background_collection(self):
+        """Start background data collection threads."""
+        endpoints = [
+            'calendar', 'email', 'github', 'news', 
+            'music', 'vanity', 'weather', 'jokes'
+        ]
+        
+        for endpoint in endpoints:
+            thread = threading.Thread(
+                target=self._background_collector, 
+                args=(endpoint,),
+                daemon=True,
+                name=f"collector-{endpoint}"
+            )
+            thread.start()
+            self.background_tasks[endpoint] = thread
+            
+        logger.info(f"Started {len(endpoints)} background collection threads")
+    
+    def _background_collector(self, endpoint: str):
+        """Background collection worker for a specific endpoint."""
+        collection_functions = {
+            'calendar': self._collect_calendar,
+            'email': self._collect_email,
+            'github': self._collect_github,
+            'news': self._collect_news,
+            'music': self._collect_music,
+            'vanity': self._collect_vanity,
+            'weather': self._collect_weather,
+            'jokes': self._collect_jokes
+        }
+        
+        collect_func = collection_functions.get(endpoint)
+        if not collect_func:
+            logger.warning(f"No collection function for endpoint: {endpoint}")
+            return
+        
+        # Initial delay to stagger startup
+        time.sleep(hash(endpoint) % 30)  # 0-30 second delay based on endpoint name
+        
+        while self.running:
+            try:
+                logger.info(f"Background collecting {endpoint} data...")
+                data = asyncio.run(collect_func())
+                self.cache[endpoint] = data
+                self.cache_timestamps[endpoint] = datetime.now()
+                logger.info(f"Successfully cached {endpoint} data")
+                
+                # Sleep for different intervals based on data type
+                sleep_intervals = {
+                    'calendar': 300,  # 5 minutes
+                    'email': 180,     # 3 minutes
+                    'github': 600,    # 10 minutes
+                    'news': 900,      # 15 minutes
+                    'music': 1800,    # 30 minutes
+                    'vanity': 1800,   # 30 minutes
+                    'weather': 900,   # 15 minutes
+                    'jokes': 3600     # 1 hour
+                }
+                sleep_time = sleep_intervals.get(endpoint, 600)
+                time.sleep(sleep_time)
+                
+            except Exception as e:
+                logger.error(f"Error in background collection for {endpoint}: {e}")
+                # Wait 5 minutes before retrying on error
+                time.sleep(300)
+    
+    def get_cached_data(self, endpoint: str) -> Optional[Dict[str, Any]]:
+        """Get cached data for an endpoint if available and fresh."""
+        if endpoint not in self.cache:
+            return None
+            
+        timestamp = self.cache_timestamps.get(endpoint)
+        if not timestamp:
+            return None
+            
+        # Check if cache is still fresh
+        if datetime.now() - timestamp > self.cache_duration:
+            logger.info(f"Cache for {endpoint} is stale")
+            return None
+            
+        return self.cache[endpoint]
+    
+    def stop(self):
+        """Stop all background collection threads."""
+        self.running = False
+        for thread in self.background_tasks.values():
+            if thread.is_alive():
+                thread.join(timeout=5)
+    
+    # Collection methods (these will be implemented to call the actual collectors)
+    async def _collect_calendar(self):
+        try:
+            collector = CalendarCollector()
+            return await collector.collect_data()
+        except Exception as e:
+            logger.error(f"Calendar collection error: {e}")
+            return {"error": str(e), "events": []}
+    
+    async def _collect_email(self):
+        try:
+            collector = GmailCollector()
+            return await collector.collect_data()
+        except Exception as e:
+            logger.error(f"Email collection error: {e}")
+            return {"error": str(e), "emails": []}
+    
+    async def _collect_github(self):
+        try:
+            collector = GitHubCollector()
+            return await collector.collect_data()
+        except Exception as e:
+            logger.error(f"GitHub collection error: {e}")
+            return {"error": str(e), "data": []}
+    
+    async def _collect_news(self):
+        try:
+            from collectors.news_collector import NewsCollector
+            collector = NewsCollector()
+            return await collector.collect_data()
+        except Exception as e:
+            logger.error(f"News collection error: {e}")
+            return {"error": str(e), "articles": []}
+    
+    async def _collect_music(self):
+        try:
+            from collectors.music_collector import MusicCollector
+            collector = MusicCollector()
+            return await collector.collect_data()
+        except Exception as e:
+            logger.error(f"Music collection error: {e}")
+            return {"error": str(e), "data": []}
+    
+    async def _collect_vanity(self):
+        try:
+            from collectors.vanity_alerts_collector import VanityAlertsCollector
+            collector = VanityAlertsCollector()
+            return await collector.collect_data()
+        except Exception as e:
+            logger.error(f"Vanity collection error: {e}")
+            return {"error": str(e), "alerts": []}
+    
+    async def _collect_weather(self):
+        try:
+            collector = WeatherCollector()
+            return await collector.collect_data()
+        except Exception as e:
+            logger.error(f"Weather collection error: {e}")
+            return {"error": str(e), "current": {}}
+    
+    async def _collect_jokes(self):
+        try:
+            collector = JokesCollector()
+            return await collector.collect_data()
+        except Exception as e:
+            logger.error(f"Jokes collection error: {e}")
+            return {"error": str(e), "joke": "Failed to load joke"}
+
+
+# Initialize background data manager
+background_manager = BackgroundDataManager()
+
 
 # Load configuration if it exists
 config_path = Path("config/config.yaml")
@@ -778,7 +959,7 @@ async def dashboard():
         
         <!-- Top Mini Widgets -->
         <div class="flex gap-5 mb-8 justify-center flex-wrap">
-            <div class="bg-white bg-opacity-15 rounded-xl p-4 backdrop-blur-sm border border-white border-opacity-30 min-w-80 text-center">
+            <div class="bg-white bg-opacity-15 rounded-xl p-4 backdrop-blur-sm border border-white border-opacity-30 min-w-60 text-center">
                 <h3 class="mb-2 text-lg text-white">😄 Daily Joke</h3>
                 <div id="joke-content" class="text-sm opacity-90 loading">Loading...</div>
             </div>
@@ -786,6 +967,27 @@ async def dashboard():
             <div class="bg-white bg-opacity-15 rounded-xl p-4 backdrop-blur-sm border border-white border-opacity-30 min-w-80 text-center">
                 <h3 class="mb-2 text-lg text-white">🌤️ Weather</h3>
                 <div id="weather-content" class="text-sm opacity-90 loading">Loading...</div>
+            </div>
+
+            <div class="bg-white bg-opacity-15 rounded-xl p-4 backdrop-blur-sm border border-white border-opacity-30 min-w-96 flex flex-col">
+                <h3 class="mb-2 text-lg text-white text-center">🤖 AI Assistant 
+                    <span class="widget-admin-gear" onclick="openWidgetAdmin('ai')" title="Configure AI Assistant">⚙️</span>
+                </h3>
+                <div class="flex-1 flex flex-col ai-chat-container">
+                    <div id="ai-summary-content" class="text-sm opacity-90 mb-3 p-2 bg-white bg-opacity-10 rounded-lg min-h-16 loading">Loading AI summary...</div>
+                    <div id="ai-chat-messages" class="chat-messages flex-1 max-h-32 overflow-y-auto"></div>
+                    <div class="chat-input-container mt-2">
+                        <div class="chat-provider-selector">
+                            <select id="ai-provider-select">
+                                <option value="">Loading providers...</option>
+                            </select>
+                        </div>
+                        <div class="chat-input-wrapper">
+                            <input type="text" id="ai-chat-input" placeholder="Ask your AI assistant..." onkeypress="handleChatKeyPress(event)">
+                            <button id="ai-chat-send" onclick="sendChatMessage()">Send</button>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
         
@@ -858,26 +1060,6 @@ async def dashboard():
                 <h2 class="mb-4 text-white shrink-0">❤️ Liked Items</h2>
                 <div class="flex-1 overflow-y-auto overflow-x-hidden">
                     <div id="liked-items-content" class="loading">Loading...</div>
-                </div>
-            </div>
-            
-            <div class="bg-white bg-opacity-10 rounded-2xl p-5 backdrop-blur-sm border border-white border-opacity-20 h-[600px] flex flex-col relative">
-                <h2 class="mb-4 text-white shrink-0">🤖 AI Assistant 
-                    <span class="widget-admin-gear" onclick="openWidgetAdmin('ai')" title="Configure AI Assistant">⚙️</span>
-                </h2>
-                <div class="flex-1 flex flex-col ai-chat-container">
-                    <div id="ai-chat-messages" class="chat-messages"></div>
-                    <div class="chat-input-container">
-                        <div class="chat-provider-selector">
-                            <select id="ai-provider-select">
-                                <option value="">Loading providers...</option>
-                            </select>
-                        </div>
-                        <div class="chat-input-wrapper">
-                            <input type="text" id="ai-chat-input" placeholder="Ask your AI assistant..." onkeypress="handleChatKeyPress(event)">
-                            <button id="ai-chat-send" onclick="sendChatMessage()">Send</button>
-                        </div>
-                    </div>
                 </div>
             </div>
         </div>
@@ -1383,6 +1565,7 @@ async def dashboard():
             await Promise.all([
                 loadJoke(),
                 loadWeather(),
+                loadAISummary(),
                 loadData('/api/calendar', 'calendar-content'),
                 loadData('/api/email', 'email-content'),
                 loadData('/api/github', 'github-content'),
@@ -1491,11 +1674,50 @@ async def dashboard():
             }
         }
         
+        // Load AI summary
+        async function loadAISummary() {
+            const element = document.getElementById('ai-summary-content');
+            if (!element) {
+                console.log('AI summary element not found');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/ai/summary');
+                const data = await response.json();
+                
+                if (data.error) {
+                    element.innerHTML = `<div class="error text-xs">❌ ${data.error}</div>`;
+                } else {
+                    // Store AI summary data globally
+                    window.dashboardData.aiSummary = data;
+                    
+                    const timestamp = new Date(data.timestamp).toLocaleTimeString();
+                    const dataSourcesInfo = `📊 Sources: ${data.data_sources.emails} emails, ${data.data_sources.events} events, ${data.data_sources.news} news, ${data.data_sources.github} GitHub`;
+                    
+                    element.innerHTML = `
+                        <div class="text-xs text-left">
+                            <div class="font-semibold mb-1">📝 5-Minute AI Summary</div>
+                            <div class="mb-2">${data.summary}</div>
+                            <div class="text-xs opacity-75">${dataSourcesInfo}</div>
+                            <div class="text-xs opacity-50">Updated: ${timestamp}</div>
+                        </div>
+                    `;
+                }
+            } catch (error) {
+                console.error('Error loading AI summary:', error);
+                element.innerHTML = `<div class="error text-xs">❌ Failed to load AI summary</div>`;
+            }
+        }
+        
         // Load data on page load
         loadAllData();
         
         // Auto-refresh every 5 minutes
         setInterval(loadAllData, 5 * 60 * 1000);
+        
+        // AI Summary refresh every 5 minutes (separate from main data refresh)
+        setInterval(loadAISummary, 5 * 60 * 1000);
 
         // Modal system for detailed item views
         function showModal(item, items, index, category) {
@@ -3445,6 +3667,14 @@ async def dashboard():
 async def get_calendar():
     """Get calendar events from Google Calendar"""
     try:
+        # Try to get cached data first
+        cached_data = background_manager.get_cached_data('calendar')
+        if cached_data:
+            logger.info("Returning cached calendar data")
+            return cached_data
+        
+        # Fallback to real-time collection if no cache available
+        logger.info("No cached calendar data, collecting in real-time")
         if COLLECTORS_AVAILABLE:
             try:
                 settings = Settings()
@@ -3516,6 +3746,14 @@ async def get_calendar():
 async def get_email():
     """Get email summary from Gmail"""
     try:
+        # Try to get cached data first
+        cached_data = background_manager.get_cached_data('email')
+        if cached_data:
+            logger.info("Returning cached email data")
+            return cached_data
+        
+        # Fallback to real-time collection if no cache available
+        logger.info("No cached email data, collecting in real-time")
         if COLLECTORS_AVAILABLE:
             try:
                 settings = Settings()
@@ -3684,6 +3922,14 @@ async def get_ticktick():
 async def get_news(filter: str = "all"):
     """Get filtered news headlines using the NewsCollector"""
     try:
+        # Try to get cached data first
+        cached_data = background_manager.get_cached_data('news')
+        if cached_data:
+            logger.info("Returning cached news data")
+            return cached_data
+        
+        # Fallback to real-time collection if no cache available
+        logger.info("No cached news data, collecting in real-time")
         if COLLECTORS_AVAILABLE:
             from collectors.news_collector import NewsCollector
             collector = NewsCollector()
@@ -3977,6 +4223,14 @@ async def get_music():
 async def get_vanity():
     """Get vanity alerts about Buildly, Gregory Lind, music, and book"""
     try:
+        # Try to get cached data first
+        cached_data = background_manager.get_cached_data('vanity')
+        if cached_data:
+            logger.info("Returning cached vanity data")
+            return cached_data
+        
+        # Fallback to real-time collection if no cache available
+        logger.info("No cached vanity data, collecting in real-time")
         if COLLECTORS_AVAILABLE:
             try:
                 from collectors.vanity_alerts_collector import VanityAlertsCollector
@@ -4721,6 +4975,114 @@ async def start_ai_training(request: Request):
         return {"error": str(e)}
 
 
+@app.get("/api/ai/summary")
+async def get_ai_summary():
+    """Get AI-generated summary of recent activity."""
+    if not AI_ASSISTANT_AVAILABLE:
+        return {"error": "AI Assistant not available"}
+    
+    try:
+        # Collect recent data from various sources
+        from datetime import datetime, timedelta
+        
+        # Get recent emails (last 24 hours)
+        recent_emails = []
+        try:
+            email_data = await get_email()
+            if 'emails' in email_data:
+                recent_emails = email_data['emails'][:5]  # Top 5 emails
+        except Exception as e:
+            logger.warning(f"Could not get email data for summary: {e}")
+        
+        # Get upcoming calendar events (next 3 days)
+        upcoming_events = []
+        try:
+            calendar_data = await get_calendar()
+            if 'events' in calendar_data:
+                upcoming_events = calendar_data['events'][:5]  # Top 5 events
+        except Exception as e:
+            logger.warning(f"Could not get calendar data for summary: {e}")
+        
+        # Get recent news headlines
+        recent_news = []
+        try:
+            news_data = await get_news()
+            if 'articles' in news_data:
+                recent_news = news_data['articles'][:3]  # Top 3 news items
+        except Exception as e:
+            logger.warning(f"Could not get news data for summary: {e}")
+        
+        # Get GitHub activity
+        github_activity = []
+        try:
+            github_data = await get_github()
+            if 'data' in github_data:
+                github_activity = github_data['data'][:3]  # Top 3 GitHub items
+        except Exception as e:
+            logger.warning(f"Could not get GitHub data for summary: {e}")
+        
+        # Create summary prompt
+        summary_prompt = f"""
+Please provide a brief, friendly summary of my current activities and priorities based on this data:
+
+RECENT EMAILS ({len(recent_emails)} items):
+{chr(10).join([f"- From {email.get('sender', 'Unknown')}: {email.get('subject', 'No subject')}" for email in recent_emails])}
+
+UPCOMING CALENDAR EVENTS ({len(upcoming_events)} items):
+{chr(10).join([f"- {event.get('summary', 'No title')} on {event.get('start', {}).get('date', 'Unknown date')}" for event in upcoming_events])}
+
+RECENT NEWS ({len(recent_news)} items):
+{chr(10).join([f"- {article.get('title', 'No title')}" for article in recent_news])}
+
+GITHUB ACTIVITY ({len(github_activity)} items):
+{chr(10).join([f"- {item.get('title', 'No title')} ({item.get('type', 'Unknown')})" for item in github_activity])}
+
+Please summarize this in 2-3 sentences focusing on:
+1. Important upcoming events or deadlines
+2. Key emails that need attention
+3. Notable news or work items
+4. Any patterns or priorities you notice
+
+Keep it concise, actionable, and friendly.
+"""
+        
+        # Get AI response
+        providers = ai_manager.list_providers()
+        if not providers:
+            return {"summary": "No AI providers available for summary generation."}
+        
+        # Use the first available provider
+        if isinstance(providers, dict):
+            provider_name = list(providers.keys())[0]
+        else:
+            provider_name = providers[0] if providers else None
+            
+        if not provider_name:
+            return {"summary": "No AI provider name available."}
+            
+        provider = ai_manager.get_provider(provider_name)
+        
+        if not provider:
+            return {"summary": "AI provider not available for summary generation."}
+        
+        response = await provider.chat(summary_prompt)
+        
+        return {
+            "summary": response.get('response', 'Unable to generate summary.'),
+            "timestamp": datetime.now().isoformat(),
+            "data_sources": {
+                "emails": len(recent_emails),
+                "events": len(upcoming_events),
+                "news": len(recent_news),
+                "github": len(github_activity)
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error generating AI summary: {e}")
+        return {"summary": f"Error generating summary: {str(e)}"}
+
+
 # Initialize default AI providers on startup
 async def initialize_ai_providers():
     """Initialize default AI providers."""
@@ -4812,8 +5174,29 @@ async def startup_event():
     logger.info("Dashboard startup complete")
 
 
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Clean up background threads on shutdown."""
+    logger.info("Shutting down background data collection...")
+    background_manager.stop()
+    logger.info("Background threads stopped")
+
+
 if __name__ == "__main__":
+    import socket
+    
+    # Get the local IP address for network access info
+    try:
+        hostname = socket.gethostname()
+        local_ip = socket.gethostbyname(hostname)
+    except:
+        local_ip = "127.0.0.1"
+    
     print("🌟 Starting Simple Dashboard Server...")
-    print("📍 Dashboard: http://localhost:8008")
-    print("🔧 API Docs: http://localhost:8008/docs")
+    print(f"📍 Dashboard (Local): http://localhost:8008")
+    print(f"📍 Dashboard (Network): http://{local_ip}:8008")
+    print(f"🔧 API Docs: http://localhost:8008/docs")
+    print("🌐 Server accessible from anywhere on the network!")
+    
+    # Always run on 0.0.0.0:8008 for network accessibility
     uvicorn.run(app, host="0.0.0.0", port=8008, log_level="info")

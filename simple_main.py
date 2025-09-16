@@ -2698,7 +2698,8 @@ async def dashboard():
         }
         
         function getCurrentGitHubToken() {
-            return 'GitHub Token (Configured)' if get_credentials('github') else 'Not configured';
+            // This would need to be implemented with proper API call
+            return 'GitHub Token (Configured)';
         }
         
         function getCurrentTickTickUser() {

@@ -82,43 +82,9 @@ async def dashboard():
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Personal Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { 
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
-            color: white;
-            min-height: 100vh;
-            padding: 20px;
-        }
-        .container { max-width: 1200px; margin: 0 auto; }
-        h1 { text-align: center; margin-bottom: 30px; font-size: 2.5em; }
-        .grid { 
-            display: grid; 
-            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); 
-            gap: 20px; 
-        }
-        .widget {
-            background: rgba(255,255,255,0.1);
-            border-radius: 15px;
-            padding: 20px;
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255,255,255,0.2);
-            height: 600px;
-            display: flex;
-            flex-direction: column;
-            position: relative;
-        }
-        .widget h2 { 
-            margin-bottom: 15px; 
-            color: #fff; 
-            flex-shrink: 0;
-        }
-        .widget-content {
-            flex: 1;
-            overflow-y: auto;
-            overflow-x: hidden;
-        }
+        /* Custom scrollbar styles */
         .widget-content::-webkit-scrollbar {
             width: 8px;
         }
@@ -133,93 +99,161 @@ async def dashboard():
         .widget-content::-webkit-scrollbar-thumb:hover {
             background: rgba(255,255,255,0.5);
         }
+        
+        /* Calendar-specific styles */
+        .calendar-day-divider {
+            margin: 15px 0;
+            padding: 8px 12px;
+            background: rgba(255,255,255,0.15);
+            border-radius: 8px;
+            border-left: 4px solid #4fc3f7;
+            font-weight: bold;
+            font-size: 0.9em;
+            color: #4fc3f7;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            backdrop-filter: blur(5px);
+        }
+        
+        .calendar-current-time {
+            position: relative;
+            margin: 5px 0;
+            height: 1px;
+            background: linear-gradient(to right, transparent, #ff6b6b, transparent);
+            box-shadow: 0 0 8px rgba(255, 107, 107, 0.6);
+            animation: pulse 2s infinite;
+        }
+        
+        .calendar-current-time::before {
+            content: 'NOW';
+            position: absolute;
+            left: 50%;
+            top: -8px;
+            transform: translateX(-50%);
+            background: #ff6b6b;
+            color: white;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 0.7em;
+            font-weight: bold;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        }
+        
+        .calendar-current-time::after {
+            content: '';
+            position: absolute;
+            left: 50%;
+            top: -3px;
+            transform: translateX(-50%);
+            width: 8px;
+            height: 8px;
+            background: #ff6b6b;
+            border-radius: 50%;
+            box-shadow: 0 0 10px rgba(255, 107, 107, 0.8);
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+        
+        .calendar-event {
+            margin: 8px 0;
+            padding: 0;
+            border: none;
+            background: none;
+        }
+        
+        .calendar-event.past-event {
+            opacity: 0.6;
+        }
+        
+        .calendar-event.current-event {
+            background: rgba(255, 107, 107, 0.1);
+            border-left: 3px solid #ff6b6b;
+            border-radius: 5px;
+            padding: 8px;
+            margin: 8px 0;
+        }
+        
+        .calendar-event.upcoming-event {
+            background: rgba(76, 195, 247, 0.1);
+            border-left: 3px solid #4fc3f7;
+            border-radius: 5px;
+            padding: 8px;
+            margin: 8px 0;
+        }
+        
+        /* Essential utility styles */
         .loading { text-align: center; opacity: 0.7; }
         .error { color: #ff6b6b; text-align: center; }
-        .item { 
-            background: rgba(255,255,255,0.1); 
-            margin: 8px 0; 
-            padding: 10px; 
-            border-radius: 8px; 
-        }
-        .item-title { font-weight: bold; margin-bottom: 5px; }
-        .item-meta { font-size: 0.9em; opacity: 0.8; }
-        .refresh-btn {
-            position: fixed;
-            bottom: 20px;
-            right: 20px;
-            background: #4CAF50;
-            color: white;
-            border: none;
-            border-radius: 50px;
-            padding: 15px 20px;
-            cursor: pointer;
-            font-size: 16px;
-        }
-        .filter-buttons {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 5px;
-            margin-bottom: 10px;
-            flex-shrink: 0;
-        }
-        .filter-btn {
-            background: rgba(255,255,255,0.2);
-            color: white;
-            border: 1px solid rgba(255,255,255,0.3);
-            border-radius: 15px;
-            padding: 5px 12px;
-            cursor: pointer;
-            font-size: 12px;
-            transition: all 0.3s ease;
-        }
-        .filter-btn:hover, .filter-btn.active {
-            background: rgba(255,255,255,0.3);
-            border-color: rgba(255,255,255,0.5);
-        }
-        .top-widgets {
-            display: flex;
-            gap: 20px;
-            margin-bottom: 30px;
-            justify-content: center;
-            flex-wrap: wrap;
-        }
-        .mini-widget {
-            background: rgba(255,255,255,0.15);
-            border-radius: 10px;
-            padding: 15px 20px;
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255,255,255,0.3);
-            min-width: 300px;
-            text-align: center;
-        }
-        .mini-widget h3 {
-            margin-bottom: 8px;
-            font-size: 1.1em;
-            color: #fff;
-        }
-        .mini-content {
-            font-size: 0.95em;
-            opacity: 0.9;
-        }
         
-        /* Make items clickable */
-        .item {
+        /* Item styles with proper Tailwind approach */
+        .item { 
+            background: rgba(255,255,255,0.1);
+            margin: 8px 0;
+            padding: 12px;
+            border-radius: 8px;
             cursor: pointer;
             transition: all 0.2s ease;
-        }
-        .item:hover {
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 8px;
-            transform: translateY(-1px);
+            border: 1px solid rgba(255,255,255,0.1);
         }
         
-        .item-summary {
-            cursor: default;
-            margin-bottom: 10px;
+        .item:hover {
+            background: rgba(255, 255, 255, 0.15);
+            transform: translateY(-1px);
+            border-color: rgba(255,255,255,0.2);
         }
-        .item-summary:hover {
-            background: none;
-            transform: none;
+        
+        .item-title { 
+            font-weight: bold; 
+            margin-bottom: 5px; 
+            color: white;
+        }
+        
+        .item-meta { 
+            font-size: 0.9em; 
+            opacity: 0.8; 
+            color: #e5e7eb;
+        }
+        
+        .item-summary { 
+            cursor: default; 
+            margin-bottom: 12px;
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.05);
+        }
+        
+        .item-summary:hover { 
+            background: rgba(255,255,255,0.05);
+            transform: none; 
+            border-color: rgba(255,255,255,0.05);
+        }
+        
+        /* Widget admin gear positioning */
+        .widget-admin-gear {
+            position: absolute;
+            top: 15px;
+            right: 50px;
+            background: rgba(255,255,255,0.2);
+            border: 1px solid rgba(255,255,255,0.3);
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            color: white;
+            cursor: pointer;
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0.7;
+            transition: all 0.3s ease;
+        }
+        
+        .widget-admin-gear:hover {
+            opacity: 1;
+            background: rgba(255,255,255,0.3);
         }
         
         /* Modal Styles */
@@ -722,118 +756,116 @@ async def dashboard():
         }
     </style>
 </head>
-<body>
-    <div class="container">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px;">
-            <h1 style="margin: 0; flex: 1; text-align: center;">📊 Personal Dashboard</h1>
-            <button id="admin-btn" onclick="openAdminPanel()" style="
-                background: rgba(255,255,255,0.2); 
-                border: 1px solid rgba(255,255,255,0.3); 
-                border-radius: 50%; 
-                width: 40px; 
-                height: 40px; 
-                color: white; 
-                cursor: pointer; 
-                font-size: 16px;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                transition: all 0.3s ease;
+<body class="min-h-screen bg-gradient-to-br from-blue-900 via-blue-800 to-blue-900 text-white p-5 font-sans">
+    <div class="max-w-7xl mx-auto">
+        <div class="flex justify-between items-center mb-8">
+            <h1 class="flex-1 text-center text-4xl font-bold m-0">📊 Personal Dashboard</h1>
+            <button id="admin-btn" onclick="openAdminPanel()" class="
+                bg-white bg-opacity-20 
+                border border-white border-opacity-30 
+                rounded-full 
+                w-10 h-10 
+                text-white 
+                cursor-pointer 
+                text-base
+                flex items-center justify-center
+                transition-all duration-300
+                hover:bg-opacity-30
             " onmouseover="this.style.background='rgba(255,255,255,0.3)'" onmouseout="this.style.background='rgba(255,255,255,0.2)'">
                 ⚙️
             </button>
         </div>
         
         <!-- Top Mini Widgets -->
-        <div class="top-widgets">
-            <div class="mini-widget">
-                <h3>😄 Daily Joke</h3>
-                <div id="joke-content" class="mini-content loading">Loading...</div>
+        <div class="flex gap-5 mb-8 justify-center flex-wrap">
+            <div class="bg-white bg-opacity-15 rounded-xl p-4 backdrop-blur-sm border border-white border-opacity-30 min-w-80 text-center">
+                <h3 class="mb-2 text-lg text-white">😄 Daily Joke</h3>
+                <div id="joke-content" class="text-sm opacity-90 loading">Loading...</div>
             </div>
             
-            <div class="mini-widget">
-                <h3>🌤️ Weather</h3>
-                <div id="weather-content" class="mini-content loading">Loading...</div>
+            <div class="bg-white bg-opacity-15 rounded-xl p-4 backdrop-blur-sm border border-white border-opacity-30 min-w-80 text-center">
+                <h3 class="mb-2 text-lg text-white">🌤️ Weather</h3>
+                <div id="weather-content" class="text-sm opacity-90 loading">Loading...</div>
             </div>
         </div>
         
-        <div class="grid">
-            <div class="widget">
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+            <div class="bg-white bg-opacity-10 rounded-2xl p-5 backdrop-blur-sm border border-white border-opacity-20 h-[600px] flex flex-col relative">
                 <button class="widget-admin-gear" onclick="openWidgetAdmin('calendar')" title="Configure Calendar">⚙️</button>
-                <h2>📅 Calendar Events</h2>
-                <div class="widget-content">
+                <h2 class="mb-4 text-white shrink-0">📅 Calendar Events</h2>
+                <div class="flex-1 overflow-y-auto overflow-x-hidden">
                     <div id="calendar-content" class="loading">Loading...</div>
                 </div>
             </div>
             
-            <div class="widget">
+            <div class="bg-white bg-opacity-10 rounded-2xl p-5 backdrop-blur-sm border border-white border-opacity-20 h-[600px] flex flex-col relative">
                 <button class="widget-admin-gear" onclick="openWidgetAdmin('email')" title="Configure Email">⚙️</button>
-                <h2>📧 Email Summary</h2>
-                <div class="widget-content">
+                <h2 class="mb-4 text-white shrink-0">📧 Email Summary</h2>
+                <div class="flex-1 overflow-y-auto overflow-x-hidden">
                     <div id="email-content" class="loading">Loading...</div>
                 </div>
             </div>
             
-            <div class="widget">
+            <div class="bg-white bg-opacity-10 rounded-2xl p-5 backdrop-blur-sm border border-white border-opacity-20 h-[600px] flex flex-col relative">
                 <button class="widget-admin-gear" onclick="openWidgetAdmin('github')" title="Configure GitHub">⚙️</button>
-                <h2>🐙 GitHub Activity</h2>
-                <div class="widget-content">
+                <h2 class="mb-4 text-white shrink-0">🐙 GitHub Activity</h2>
+                <div class="flex-1 overflow-y-auto overflow-x-hidden">
                     <div id="github-content" class="loading">Loading...</div>
                 </div>
             </div>
             
-            <div class="widget">
+            <div class="bg-white bg-opacity-10 rounded-2xl p-5 backdrop-blur-sm border border-white border-opacity-20 h-[600px] flex flex-col relative">
                 <button class="widget-admin-gear" onclick="openWidgetAdmin('ticktick')" title="Configure TickTick">⚙️</button>
-                <h2>✅ TickTick Tasks</h2>
-                <div class="widget-content">
+                <h2 class="mb-4 text-white shrink-0">✅ TickTick Tasks</h2>
+                <div class="flex-1 overflow-y-auto overflow-x-hidden">
                     <div id="ticktick-content" class="loading">Loading...</div>
                 </div>
             </div>
             
-            <div class="widget">
+            <div class="bg-white bg-opacity-10 rounded-2xl p-5 backdrop-blur-sm border border-white border-opacity-20 h-[600px] flex flex-col relative">
                 <button class="widget-admin-gear" onclick="openWidgetAdmin('news')" title="Configure News">⚙️</button>
-                <h2>📰 News Headlines</h2>
-                <div class="filter-buttons">
-                    <button onclick="filterNews('all')" class="filter-btn active" id="filter-all">All</button>
-                    <button onclick="filterNews('tech')" class="filter-btn" id="filter-tech">Tech/AI</button>
-                    <button onclick="filterNews('oregon')" class="filter-btn" id="filter-oregon">Oregon State</button>
-                    <button onclick="filterNews('timbers')" class="filter-btn" id="filter-timbers">Timbers</button>
-                    <button onclick="filterNews('starwars')" class="filter-btn" id="filter-starwars">Star Wars</button>
-                    <button onclick="filterNews('startrek')" class="filter-btn" id="filter-startrek">Star Trek</button>
+                <h2 class="mb-4 text-white shrink-0">📰 News Headlines</h2>
+                <div class="flex flex-wrap gap-1 mb-3 shrink-0">
+                    <button onclick="filterNews('all')" class="bg-white bg-opacity-20 text-white border border-white border-opacity-30 rounded-2xl px-3 py-1 cursor-pointer text-xs transition-all duration-300 ease hover:bg-opacity-30 hover:border-opacity-50 filter-btn active" id="filter-all">All</button>
+                    <button onclick="filterNews('tech')" class="bg-white bg-opacity-20 text-white border border-white border-opacity-30 rounded-2xl px-3 py-1 cursor-pointer text-xs transition-all duration-300 ease hover:bg-opacity-30 hover:border-opacity-50 filter-btn" id="filter-tech">Tech/AI</button>
+                    <button onclick="filterNews('oregon')" class="bg-white bg-opacity-20 text-white border border-white border-opacity-30 rounded-2xl px-3 py-1 cursor-pointer text-xs transition-all duration-300 ease hover:bg-opacity-30 hover:border-opacity-50 filter-btn" id="filter-oregon">Oregon State</button>
+                    <button onclick="filterNews('timbers')" class="bg-white bg-opacity-20 text-white border border-white border-opacity-30 rounded-2xl px-3 py-1 cursor-pointer text-xs transition-all duration-300 ease hover:bg-opacity-30 hover:border-opacity-50 filter-btn" id="filter-timbers">Timbers</button>
+                    <button onclick="filterNews('starwars')" class="bg-white bg-opacity-20 text-white border border-white border-opacity-30 rounded-2xl px-3 py-1 cursor-pointer text-xs transition-all duration-300 ease hover:bg-opacity-30 hover:border-opacity-50 filter-btn" id="filter-starwars">Star Wars</button>
+                    <button onclick="filterNews('startrek')" class="bg-white bg-opacity-20 text-white border border-white border-opacity-30 rounded-2xl px-3 py-1 cursor-pointer text-xs transition-all duration-300 ease hover:bg-opacity-30 hover:border-opacity-50 filter-btn" id="filter-startrek">Star Trek</button>
                 </div>
-                <div class="widget-content">
+                <div class="flex-1 overflow-y-auto overflow-x-hidden">
                     <div id="news-content" class="loading">Loading...</div>
                 </div>
             </div>
             
-            <div class="widget">
+            <div class="bg-white bg-opacity-10 rounded-2xl p-5 backdrop-blur-sm border border-white border-opacity-20 h-[600px] flex flex-col relative">
                 <button class="widget-admin-gear" onclick="openWidgetAdmin('music')" title="Configure Music">⚙️</button>
-                <h2>🎵 Music Trends</h2>
-                <div class="widget-content">
+                <h2 class="mb-4 text-white shrink-0">🎵 Music Trends</h2>
+                <div class="flex-1 overflow-y-auto overflow-x-hidden">
                     <div id="music-content" class="loading">Loading...</div>
                 </div>
             </div>
             
-            <div class="widget">
+            <div class="bg-white bg-opacity-10 rounded-2xl p-5 backdrop-blur-sm border border-white border-opacity-20 h-[600px] flex flex-col relative">
                 <button class="widget-admin-gear" onclick="openWidgetAdmin('vanity')" title="Configure Vanity Alerts">⚙️</button>
-                <h2>👁️ Vanity Alerts</h2>
-                <div class="widget-content">
+                <h2 class="mb-4 text-white shrink-0">👁️ Vanity Alerts</h2>
+                <div class="flex-1 overflow-y-auto overflow-x-hidden">
                     <div id="vanity-content" class="loading">Loading...</div>
                 </div>
             </div>
             
-            <div class="widget">
-                <h2>❤️ Liked Items</h2>
-                <div class="widget-content">
+            <div class="bg-white bg-opacity-10 rounded-2xl p-5 backdrop-blur-sm border border-white border-opacity-20 h-[600px] flex flex-col relative">
+                <h2 class="mb-4 text-white shrink-0">❤️ Liked Items</h2>
+                <div class="flex-1 overflow-y-auto overflow-x-hidden">
                     <div id="liked-items-content" class="loading">Loading...</div>
                 </div>
             </div>
             
-            <div class="widget">
-                <h2>🤖 AI Assistant 
+            <div class="bg-white bg-opacity-10 rounded-2xl p-5 backdrop-blur-sm border border-white border-opacity-20 h-[600px] flex flex-col relative">
+                <h2 class="mb-4 text-white shrink-0">🤖 AI Assistant 
                     <span class="widget-admin-gear" onclick="openWidgetAdmin('ai')" title="Configure AI Assistant">⚙️</span>
                 </h2>
-                <div class="widget-content ai-chat-container">
+                <div class="flex-1 flex flex-col ai-chat-container">
                     <div id="ai-chat-messages" class="chat-messages"></div>
                     <div class="chat-input-container">
                         <div class="chat-provider-selector">
@@ -856,7 +888,7 @@ async def dashboard():
         <!-- Dynamic content will be inserted here -->
     </div>
     
-    <button class="refresh-btn" onclick="loadAllData()">🔄 Refresh</button>
+    <button class="fixed bottom-5 right-5 bg-green-500 text-white border-none rounded-full px-5 py-4 cursor-pointer text-base hover:bg-green-600 transition-colors duration-300" onclick="loadAllData()">🔄 Refresh</button>
     
     <!-- Detail Popover Modal -->
     <div id="detail-modal" class="modal">
@@ -947,6 +979,110 @@ async def dashboard():
         
         // News filtering
         let currentNewsFilter = 'all';
+        
+        // Format calendar events with day dividers and current time indicator
+        function formatCalendarEvents(events) {
+            if (!events || events.length === 0) {
+                return '<p class="text-gray-300 text-sm">No upcoming events</p>';
+            }
+            
+            const now = new Date();
+            const today = now.toDateString();
+            
+            // Group events by date
+            const eventsByDate = {};
+            events.forEach(event => {
+                // Handle both direct date strings and nested dateTime objects
+                const startDate = event.start?.dateTime || event.start;
+                const eventDate = new Date(startDate).toDateString();
+                if (!eventsByDate[eventDate]) {
+                    eventsByDate[eventDate] = [];
+                }
+                eventsByDate[eventDate].push(event);
+            });
+            
+            let html = '';
+            const sortedDates = Object.keys(eventsByDate).sort((a, b) => new Date(a) - new Date(b));
+            
+            sortedDates.forEach((dateStr, dateIndex) => {
+                const date = new Date(dateStr);
+                const isToday = dateStr === today;
+                const dayName = date.toLocaleDateString('en-US', { weekday: 'long' });
+                const monthDay = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                
+                // Add day divider
+                html += `<div class="calendar-day-divider">
+                    ${isToday ? '🔥 TODAY' : dayName} - ${monthDay}
+                </div>`;
+                
+                // Sort events by time within the day
+                const dayEvents = eventsByDate[dateStr].sort((a, b) => {
+                    const aStart = new Date(a.start?.dateTime || a.start);
+                    const bStart = new Date(b.start?.dateTime || b.start);
+                    return aStart - bStart;
+                });
+                
+                let addedCurrentTime = false;
+                
+                dayEvents.forEach((event, eventIndex) => {
+                    // Handle both direct date strings and nested dateTime objects
+                    const startDate = event.start?.dateTime || event.start;
+                    const endDate = event.end?.dateTime || event.end;
+                    
+                    const eventStart = new Date(startDate);
+                    const eventEnd = endDate ? new Date(endDate) : eventStart;
+                    
+                    // Add current time indicator for today
+                    if (isToday && !addedCurrentTime && now < eventStart) {
+                        html += '<div class="calendar-current-time"></div>';
+                        addedCurrentTime = true;
+                    }
+                    
+                    // Determine event status
+                    let eventClass = 'calendar-event';
+                    if (isToday) {
+                        if (now >= eventStart && now <= eventEnd) {
+                            eventClass += ' current-event';
+                        } else if (now > eventEnd) {
+                            eventClass += ' past-event';
+                        } else {
+                            eventClass += ' upcoming-event';
+                        }
+                    } else if (date < now) {
+                        eventClass += ' past-event';
+                    } else {
+                        eventClass += ' upcoming-event';
+                    }
+                    
+                    const startTime = eventStart.toLocaleTimeString('en-US', { 
+                        hour: 'numeric', 
+                        minute: '2-digit',
+                        hour12: true 
+                    });
+                    
+                    const endTime = event.end ? eventEnd.toLocaleTimeString('en-US', { 
+                        hour: 'numeric', 
+                        minute: '2-digit',
+                        hour12: true 
+                    }) : '';
+                    
+                    const timeStr = endTime ? `${startTime} - ${endTime}` : startTime;
+                    
+                    html += `<div class="${eventClass}">
+                        <div class="font-semibold text-white text-sm">${event.summary || 'Untitled Event'}</div>
+                        <div class="text-gray-300 text-xs">${timeStr}</div>
+                        ${event.location ? `<div class="text-gray-400 text-xs">📍 ${event.location}</div>` : ''}
+                    </div>`;
+                });
+                
+                // Add current time indicator at the end of today if no events are left
+                if (isToday && !addedCurrentTime) {
+                    html += '<div class="calendar-current-time"></div>';
+                }
+            });
+            
+            return html;
+        }
         
         // Admin helper functions for server-side settings
         async function saveWidgetSettings(widgetName, isVisible) {
@@ -1108,12 +1244,11 @@ async def dashboard():
                 // Format data based on type
                 if (elementId === 'calendar-content') {
                     sectionData = data.events || [];
-                    element.innerHTML = data.events ? data.events.map(event => 
-                        `<div class="item">
-                            <div class="item-title">${event.title}</div>
-                            <div class="item-meta">${event.time}</div>
-                        </div>`
-                    ).join('') : '<div class="item">No events today</div>';
+                    if (data.events && data.events.length > 0) {
+                        element.innerHTML = formatCalendarEvents(data.events);
+                    } else {
+                        element.innerHTML = '<div class="item">No events this week</div>';
+                    }
                 }
                 else if (elementId === 'email-content') {
                     sectionData = data.recent || [];
@@ -3462,7 +3597,7 @@ async def get_github():
                                 })
                         
                         # Get assigned issues  
-                        issues_response = await client.get(f'https://api.github.com/search/issues?q=assignee:{username}+is:open', headers=headers)
+                        issues_response = await client.get(f'https://api.github.com/search/issues?q=assignee:{username}+is:issue+is:open', headers=headers)
                         if issues_response.status_code == 200:
                             for issue in issues_response.json().get('items', [])[:3]:
                                 repo_url_parts = issue.get('repository_url', '').split('/')
@@ -3486,12 +3621,55 @@ async def get_github():
                                     'github_url': issue.get('html_url', ''),
                                     'api_url': issue.get('url', '')
                                 })
+                        
+                        # Get recent activity - repositories you've pushed to
+                        repos_response = await client.get(f'https://api.github.com/user/repos?sort=pushed&per_page=5', headers=headers)
+                        if repos_response.status_code == 200:
+                            for repo in repos_response.json()[:3]:
+                                github_items.append({
+                                    'type': 'Recent Repository', 
+                                    'title': repo.get('name', ''),
+                                    'repo': repo.get('name', ''),
+                                    'repository': repo.get('full_name', ''), 
+                                    'description': repo.get('description', 'No description'),
+                                    'updated_at': repo.get('pushed_at', ''),
+                                    'language': repo.get('language', 'Unknown'),
+                                    'stars': repo.get('stargazers_count', 0),
+                                    'forks': repo.get('forks_count', 0),
+                                    'private': repo.get('private', False),
+                                    'html_url': repo.get('html_url', ''),
+                                    'github_url': repo.get('html_url', ''),
+                                    'api_url': repo.get('url', '')
+                                })
+                        
+                        # Get recent pull requests authored by you
+                        prs_response = await client.get(f'https://api.github.com/search/issues?q=author:{username}+is:pr+sort:updated', headers=headers)
+                        if prs_response.status_code == 200:
+                            for pr in prs_response.json().get('items', [])[:3]:
+                                repo_url_parts = pr.get('repository_url', '').split('/')
+                                repo_name = repo_url_parts[-1] if repo_url_parts else 'unknown'
+                                repo_owner = repo_url_parts[-2] if len(repo_url_parts) > 1 else 'unknown'
+                                
+                                github_items.append({
+                                    'type': 'Pull Request', 
+                                    'title': pr.get('title', ''),
+                                    'repo': repo_name,
+                                    'repository': f"{repo_owner}/{repo_name}", 
+                                    'number': pr.get('number', ''),
+                                    'state': pr.get('state', 'open'),
+                                    'created_at': pr.get('created_at', ''),
+                                    'updated_at': pr.get('updated_at', ''),
+                                    'body': pr.get('body', ''),
+                                    'html_url': pr.get('html_url', ''),
+                                    'labels': [label.get('name', '') for label in pr.get('labels', [])],
+                                    'github_url': pr.get('html_url', ''),
+                                    'api_url': pr.get('url', '')
+                                })
                     
-                    if github_items:
-                        return {"items": github_items}
+                    return {"items": github_items}
             except Exception as e:
                 print(f"GitHub API error: {e}")
-                pass
+                return {"items": [], "error": str(e)}
         
         return {"items": []}
     except Exception as e:

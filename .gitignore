@@ -51,6 +51,15 @@ config/credentials.yaml
 config/google_oauth_config.json
 tokens/
 .env
+.env.local
+.env.production
+.env.staging
+
+# API keys and secrets
+*_credentials.json
+*.key
+*.pem
+*_oauth_state.json
 
 # Temporary files
 temp/

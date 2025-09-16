@@ -5,6 +5,7 @@ TickTick data collector for fetching tasks and projects.
 import asyncio
 import logging
 import base64
+import os
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
 from urllib.parse import quote
@@ -29,9 +30,12 @@ class TickTickCollector:
         self.settings = settings
         self.base_url = "https://api.ticktick.com/open/v1"
         self.auth_url = "https://ticktick.com/oauth"
-        self.client_id = "LWv12xUi59IkcCP5Gx"
-        self.client_secret = "A%8ImK5zniXiA92@q)#mY_&8RqgF70^2"
+        self.client_id = os.getenv("TICKTICK_CLIENT_ID", "LWv12xUi59IkcCP5Gx")
+        self.client_secret = os.getenv("TICKTICK_CLIENT_SECRET")
         self.redirect_uri = "http://localhost:8008/auth/ticktick/callback"
+        
+        if not self.client_secret:
+            raise ValueError("TICKTICK_CLIENT_SECRET environment variable is required")
         
     def get_auth_url(self, state: str = None) -> str:
         """Generate OAuth authorization URL."""

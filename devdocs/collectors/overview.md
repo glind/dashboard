@@ -54,7 +54,7 @@ class MyCollector(BaseCollector):
 ```
 
 ### 2. Add API Endpoint
-In `simple_main.py`:
+In `main.py`:
 ```python
 @app.get("/api/mycollector")
 async def get_my_data():

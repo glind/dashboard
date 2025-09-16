@@ -369,7 +369,8 @@ class MusicCollector:
                 
                 # 2. Last.fm Top Tracks
                 try:
-                    lastfm_url = "http://ws.audioscrobbler.com/2.0/?method=chart.gettoptracks&api_key=8de1b7e8f7a5f3f9c5b7b3a6d4e8c2a1&format=json&limit=20"
+                    lastfm_api_key = os.getenv('LASTFM_API_KEY', '8de1b7e8f7a5f3f9c5b7b3a6d4e8c2a1')  # Fallback for demo
+                    lastfm_url = f"http://ws.audioscrobbler.com/2.0/?method=chart.gettoptracks&api_key={lastfm_api_key}&format=json&limit=20"
                     async with session.get(lastfm_url, headers=headers, timeout=10) as response:
                         if response.status == 200:
                             data = await response.json()

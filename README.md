@@ -43,7 +43,7 @@ Open http://localhost:8008
 - **🎵 Music** - Trends and recommendations
 
 ## 🔧 Architecture
-- **Backend**: Python FastAPI server (`simple_main.py`)
+- **Backend**: Python FastAPI server (`main.py`)
 - **Frontend**: Single HTML page with embedded CSS/JS
 - **Data**: Real-time collection from authenticated APIs
 - **Persistence**: SQLite database for user preferences

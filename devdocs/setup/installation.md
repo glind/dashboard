@@ -25,7 +25,7 @@ source .venv/bin/activate
 pip install -r requirements.txt
 cp config/config.yaml.example config/config.yaml
 cp config/credentials.yaml.example config/credentials.yaml
-python3 simple_main.py
+python3 main.py
 ```
 
 ## Dependencies
@@ -36,11 +36,16 @@ python3 simple_main.py
 - **Feedparser** - RSS feeds
 - **Google API client libraries** - Gmail/Calendar
 - **PyYAML** - Configuration files
+- **Ollama** - Local AI models (optional)
+- **OpenAI** - AI API integration (optional)
+- **Google Gemini** - AI API integration (optional)
 
 ## Configuration
 1. **Google APIs**: Set up OAuth in Google Cloud Console
 2. **GitHub**: Create personal access token
 3. **TickTick**: OAuth credentials (optional)
-4. **Weather**: API key for weather service
+4. **Weather**: OpenWeatherMap API key (optional)
+5. **AI Providers**: Configure Ollama, OpenAI, or Gemini
+6. **Vanity Alerts**: RSS feeds for mention monitoring
 
 See `api/authentication.md` for detailed setup.

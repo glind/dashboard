@@ -46,8 +46,8 @@ class TodoistSettings(BaseSettings):
 
 class TickTickSettings(BaseSettings):
     """TickTick API configuration."""
-    client_id: Optional[str] = Field(default="LWv12xUi59IkcCP5Gx", description="TickTick client ID")
-    client_secret: Optional[str] = Field(default="A%8ImK5zniXiA92@q)#mY_&8RqgF70^2", description="TickTick client secret")
+    client_id: Optional[str] = Field(default=None, description="TickTick client ID")
+    client_secret: Optional[str] = Field(default=None, description="TickTick client secret")
     redirect_uri: Optional[str] = Field(default="http://localhost:8008/auth/ticktick/callback", description="OAuth redirect URI")
     
     class Config:

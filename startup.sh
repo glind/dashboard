@@ -15,7 +15,7 @@ NC='\033[0m' # No Color
 # Configuration
 VENV_DIR=".venv"
 PYTHON_CMD="python3"
-SERVER_FILE="simple_main.py"
+SERVER_FILE="main.py"
 SERVER_PORT="8008"
 PID_FILE="dashboard.pid"
 
@@ -232,6 +232,6 @@ case "${1:-start}" in
         echo "  logs     - Show live logs"
         echo ""
         echo -e "${YELLOW}🚨 IMPORTANT: Always use this script to start the dashboard${NC}"
-        echo -e "${YELLOW}   Never use 'python3 simple_main.py' directly${NC}"
+        echo -e "${YELLOW}   Never use 'python3 main.py' directly${NC}"
         ;;
 esac

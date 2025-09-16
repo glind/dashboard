@@ -1322,7 +1322,33 @@ async def dashboard():
                 } else {
                     // Store weather data globally
                     window.dashboardData.weather = [data];
-                    element.innerHTML = `${data.temperature} • ${data.description}<br><small>${data.location}</small>`;
+                    
+                    // Create forecast preview (next 3 days)
+                    let forecastHtml = '';
+                    if (data.forecast && data.forecast.length > 0) {
+                        const nextThreeDays = data.forecast.slice(0, 3);
+                        forecastHtml = `
+                            <div style="display: flex; gap: 8px; margin-top: 8px; font-size: 11px;">
+                                ${nextThreeDays.map(f => `
+                                    <div style="text-align: center; flex: 1; background: rgba(255,255,255,0.1); padding: 4px; border-radius: 4px;">
+                                        <div style="font-weight: bold;">${f.day}</div>
+                                        <div style="margin: 2px 0;">🌤️</div>
+                                        <div>${f.high}°/${f.low}°</div>
+                                        ${f.precipitation_chance > 30 ? `<div style="color: #87ceeb;">☔ ${f.precipitation_chance}%</div>` : ''}
+                                    </div>
+                                `).join('')}
+                            </div>
+                        `;
+                    }
+                    
+                    element.innerHTML = `
+                        <div style="text-align: center;">
+                            <div style="font-size: 16px; font-weight: bold;">${data.temperature}</div>
+                            <div style="font-size: 12px; margin: 2px 0;">${data.description}</div>
+                            <div style="font-size: 10px; opacity: 0.8;">${data.location}</div>
+                            ${forecastHtml}
+                        </div>
+                    `;
                 }
             } catch (error) {
                 console.error('Error loading weather:', error);
@@ -1709,12 +1735,21 @@ async def dashboard():
                                 </div>` : ''}
                             </div>
                             ${item.forecast && item.forecast.length > 0 ? `
-                                <h4>Weather Forecast</h4>
+                                <h4>5-Day Weather Forecast</h4>
                                 <div style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 8px; margin: 10px 0;">
                                     ${item.forecast.map(f => `
-                                        <div style="display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px solid rgba(255,255,255,0.1);">
-                                            <span><strong>${f.day}</strong></span>
-                                            <span>${f.high}°/${f.low}° - ${f.condition}</span>
+                                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.1);">
+                                            <div style="flex: 1;">
+                                                <strong>${f.day}</strong>
+                                                <div style="font-size: 12px; color: #ccc;">${f.date}</div>
+                                            </div>
+                                            <div style="flex: 2; text-align: center;">
+                                                <div style="font-size: 14px;">${f.condition}</div>
+                                                ${f.precipitation_chance > 0 ? `<div style="font-size: 12px; color: #87ceeb;">☔ ${f.precipitation_chance}% chance</div>` : ''}
+                                            </div>
+                                            <div style="flex: 1; text-align: right;">
+                                                <span style="font-weight: bold;">${f.high}°</span>/<span style="color: #ccc;">${f.low}°</span>
+                                            </div>
                                         </div>
                                     `).join('')}
                                 </div>
@@ -2663,7 +2698,7 @@ async def dashboard():
         }
         
         function getCurrentGitHubToken() {
-            return 'ghp_XrIl****ntD1lxg5N (Active)';
+            return 'GitHub Token (Configured)' if get_credentials('github') else 'Not configured';
         }
         
         function getCurrentTickTickUser() {
@@ -3840,34 +3875,94 @@ async def get_joke():
 
 @app.get("/api/weather")
 async def get_weather():
-    """Get current weather"""
+    """Get current weather and forecast"""
     try:
         logger.info(f"Weather API called. COLLECTORS_AVAILABLE={COLLECTORS_AVAILABLE}")
         if COLLECTORS_AVAILABLE:
             try:
                 weather_collector = WeatherCollector()
                 logger.info("Instantiated WeatherCollector.")
-                weather_data = await weather_collector.get_current_weather()
-                logger.info(f"WeatherCollector.get_current_weather() returned: {weather_data}")
+                weather_data = await weather_collector.collect_data()
+                logger.info(f"WeatherCollector.collect_data() returned: {weather_data}")
                 if weather_data:
-                    return {
-                        "temperature": f"{weather_data.temperature:.0f}°F",
-                        "description": weather_data.description.title(),
-                        "location": weather_data.location,
-                        "feels_like": f"{weather_data.feels_like:.0f}°F"
+                    # Format the data for display
+                    result = {
+                        "temperature": f"{weather_data.get('temperature', 0):.0f}°F",
+                        "description": weather_data.get('description', 'Unknown').title(),
+                        "location": weather_data.get('location', 'Unknown Location'),
+                        "feels_like": f"{weather_data.get('feels_like', 0):.0f}°F",
+                        "humidity": weather_data.get('humidity', 0),
+                        "pressure": weather_data.get('pressure', 0),
+                        "wind_speed": weather_data.get('wind_speed', 0),
+                        "wind_direction": weather_data.get('wind_direction', 0),
+                        "visibility": weather_data.get('visibility', 0),
+                        "uv_index": weather_data.get('uv_index', 0),
+                        "icon": weather_data.get('icon', '01d'),
+                        "api_status": weather_data.get('api_status', 'unknown'),
+                        "setup_note": weather_data.get('setup_note', ''),
+                        "timestamp": weather_data.get('timestamp', ''),
+                        "forecast": []
                     }
+                    
+                    # Format forecast data for display
+                    if 'forecast' in weather_data and weather_data['forecast']:
+                        from datetime import datetime
+                        for f in weather_data['forecast']:
+                            try:
+                                # Parse date and format for display
+                                forecast_date = datetime.strptime(f['date'], '%Y-%m-%d')
+                                day_name = forecast_date.strftime('%a')  # Mon, Tue, etc.
+                                
+                                result["forecast"].append({
+                                    "date": f['date'],
+                                    "day": day_name,
+                                    "high": f['high'],
+                                    "low": f['low'],
+                                    "condition": f['description'],
+                                    "icon": f['icon'],
+                                    "precipitation_chance": f['precipitation_chance']
+                                })
+                            except Exception as e:
+                                logger.error(f"Error formatting forecast item: {e}")
+                    
+                    return result
                 else:
                     logger.warning("WeatherCollector returned None, using fallback data.")
             except Exception as collector_exc:
                 logger.error(f"Exception in WeatherCollector: {collector_exc}", exc_info=True)
         else:
             logger.warning("COLLECTORS_AVAILABLE is False, using fallback data.")
-        # Fallback weather data
+        
+        # Fallback weather data with forecast
+        from datetime import datetime, timedelta
+        base_date = datetime.now()
         return {
             "temperature": "72°F",
             "description": "Partly Cloudy",
             "location": "Oregon City, OR",
-            "feels_like": "75°F"
+            "feels_like": "75°F",
+            "humidity": 65,
+            "pressure": 1013,
+            "wind_speed": 5.2,
+            "wind_direction": 230,
+            "visibility": 10.0,
+            "uv_index": 6.0,
+            "icon": "02d",
+            "api_status": "fallback_data",
+            "setup_note": "Configure weather API for live data",
+            "timestamp": datetime.now().isoformat(),
+            "forecast": [
+                {
+                    "date": (base_date + timedelta(days=i)).strftime('%Y-%m-%d'),
+                    "day": (base_date + timedelta(days=i)).strftime('%a'),
+                    "high": 75 - i,
+                    "low": 55 + i,
+                    "condition": ["Sunny", "Partly Cloudy", "Cloudy", "Light Rain", "Partly Cloudy"][i],
+                    "icon": ["01d", "02d", "03d", "10d", "02d"][i],
+                    "precipitation_chance": [10, 20, 40, 80, 30][i]
+                }
+                for i in range(5)
+            ]
         }
     except Exception as e:
         logger.error(f"Exception in /api/weather endpoint: {e}", exc_info=True)

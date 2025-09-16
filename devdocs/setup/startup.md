@@ -7,7 +7,7 @@
 
 ## ❌ NEVER use these:
 - `python3 main.py`
-- `python3 simple_main.py` 
+- `python3 main.py` 
 - `python -m uvicorn`
 - Any other direct method
 

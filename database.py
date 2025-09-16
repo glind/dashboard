@@ -226,6 +226,87 @@ class DatabaseManager:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_user_feedback_item ON user_feedback(item_type, item_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_user_feedback_timestamp ON user_feedback(feedback_timestamp)")
             
+            # AI Assistant tables
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS ai_providers (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT UNIQUE NOT NULL,
+                    provider_type TEXT NOT NULL,
+                    base_url TEXT,
+                    api_key TEXT,
+                    model_name TEXT,
+                    config_data TEXT,
+                    is_active INTEGER DEFAULT 0,
+                    is_default INTEGER DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS ai_conversations (
+                    id TEXT PRIMARY KEY,
+                    provider_id INTEGER NOT NULL,
+                    title TEXT,
+                    context_data TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (provider_id) REFERENCES ai_providers (id)
+                )
+            """)
+            
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS ai_messages (
+                    id TEXT PRIMARY KEY,
+                    conversation_id TEXT NOT NULL,
+                    role TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    metadata TEXT,
+                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (conversation_id) REFERENCES ai_conversations (id)
+                )
+            """)
+            
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS ai_training_data (
+                    id TEXT PRIMARY KEY,
+                    data_type TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    context TEXT,
+                    user_feedback TEXT,
+                    source_table TEXT,
+                    source_id TEXT,
+                    relevance_score REAL DEFAULT 0.5,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS ai_model_training (
+                    id TEXT PRIMARY KEY,
+                    provider_id INTEGER NOT NULL,
+                    training_status TEXT DEFAULT 'pending',
+                    training_data_hash TEXT,
+                    model_version TEXT,
+                    training_started_at TIMESTAMP,
+                    training_completed_at TIMESTAMP,
+                    performance_metrics TEXT,
+                    error_log TEXT,
+                    FOREIGN KEY (provider_id) REFERENCES ai_providers (id)
+                )
+            """)
+            
+            # AI Assistant indexes
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_ai_providers_active ON ai_providers(is_active)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_ai_providers_default ON ai_providers(is_default)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_ai_conversations_provider ON ai_conversations(provider_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_ai_messages_conversation ON ai_messages(conversation_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_ai_messages_timestamp ON ai_messages(timestamp)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_ai_training_data_type ON ai_training_data(data_type)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_ai_training_data_created ON ai_training_data(created_at)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_ai_model_training_provider ON ai_model_training(provider_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_ai_model_training_status ON ai_model_training(training_status)")
+            
             conn.commit()
             logger.info("Database initialized successfully")
     
@@ -1293,10 +1374,217 @@ class DatabaseManager:
                 return liked_items
                 
         except Exception as e:
-            logger.error(f"Error getting liked items: {e}")
-            return []
+
+                    logger.error(f"Error getting liked items: {e}")
+                    return []
+
+    # AI Assistant methods
+    def save_ai_provider(self, name: str, provider_type: str, config: Dict[str, Any]) -> str:
+        """Save AI provider configuration."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            provider_id = f"provider_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            
+            # If this is set as default, unset others
+            if config.get('is_default', False):
+                cursor.execute("UPDATE ai_providers SET is_default = 0")
+            
+            cursor.execute("""
+                INSERT INTO ai_providers (name, provider_type, base_url, api_key, model_name, 
+                                        config_data, is_active, is_default)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                name, provider_type, config.get('base_url'), config.get('api_key'),
+                config.get('model_name'), json.dumps(config), 
+                config.get('is_active', 1), config.get('is_default', 0)
+            ))
+            conn.commit()
+            return provider_id
+
+    def get_ai_providers(self, active_only: bool = False) -> List[Dict[str, Any]]:
+        """Get AI providers."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            query = "SELECT * FROM ai_providers"
+            if active_only:
+                query += " WHERE is_active = 1"
+            query += " ORDER BY is_default DESC, name"
+            
+            cursor.execute(query)
+            providers = []
+            for row in cursor.fetchall():
+                provider = dict(row)
+                provider['config_data'] = json.loads(provider['config_data']) if provider['config_data'] else {}
+                providers.append(provider)
+            return providers
+
+    def get_default_ai_provider(self) -> Optional[Dict[str, Any]]:
+        """Get default AI provider."""
+        providers = self.get_ai_providers(active_only=True)
+        for provider in providers:
+            if provider['is_default']:
+                return provider
+        return providers[0] if providers else None
+
+    def save_ai_conversation(self, conversation_id: str, provider_id: int, title: str = None, context: Dict = None):
+        """Save AI conversation."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT OR REPLACE INTO ai_conversations (id, provider_id, title, context_data, updated_at)
+                VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+            """, (conversation_id, provider_id, title, json.dumps(context or {})))
+            conn.commit()
+
+    def save_ai_message(self, message_id: str, conversation_id: str, role: str, content: str, metadata: Dict = None):
+        """Save AI message."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO ai_messages (id, conversation_id, role, content, metadata)
+                VALUES (?, ?, ?, ?, ?)
+            """, (message_id, conversation_id, role, content, json.dumps(metadata or {})))
+            conn.commit()
+
+    def get_ai_conversation_history(self, conversation_id: str, limit: int = 50) -> List[Dict[str, Any]]:
+        """Get AI conversation history."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT * FROM ai_messages 
+                WHERE conversation_id = ? 
+                ORDER BY timestamp DESC 
+                LIMIT ?
+            """, (conversation_id, limit))
+            
+            messages = []
+            for row in cursor.fetchall():
+                message = dict(row)
+                message['metadata'] = json.loads(message['metadata']) if message['metadata'] else {}
+                messages.append(message)
+            return list(reversed(messages))  # Return in chronological order
+
+    def save_ai_training_data(self, data_type: str, content: str, context: str = None, 
+                             source_table: str = None, source_id: str = None, relevance_score: float = 0.5):
+        """Save training data for AI models."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            training_id = f"training_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
+            cursor.execute("""
+                INSERT INTO ai_training_data (id, data_type, content, context, source_table, source_id, relevance_score)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (training_id, data_type, content, context, source_table, source_id, relevance_score))
+            conn.commit()
+            return training_id
+
+    def get_ai_training_data(self, data_types: List[str] = None, limit: int = 1000) -> List[Dict[str, Any]]:
+        """Get training data for AI models."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            
+            if data_types:
+                placeholders = ','.join('?' * len(data_types))
+                query = f"""
+                    SELECT * FROM ai_training_data 
+                    WHERE data_type IN ({placeholders})
+                    ORDER BY created_at DESC 
+                    LIMIT ?
+                """
+                cursor.execute(query, data_types + [limit])
+            else:
+                cursor.execute("""
+                    SELECT * FROM ai_training_data 
+                    ORDER BY created_at DESC 
+                    LIMIT ?
+                """, (limit,))
+            
+            return [dict(row) for row in cursor.fetchall()]
+
+    def update_ai_training_from_feedback(self):
+        """Update training data based on user feedback."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Get recent liked items for training
+                cursor.execute("""
+                    SELECT item_type, item_id, item_title, item_content, item_metadata, category
+                    FROM user_feedback 
+                    WHERE feedback_type = 'like' 
+                    AND feedback_timestamp > datetime('now', '-30 days')
+                """)
+                
+                liked_items = cursor.fetchall()
+                for item in liked_items:
+                    content = f"Title: {item['item_title']}\nContent: {item['item_content']}"
+                    if item['item_metadata']:
+                        try:
+                            metadata = json.loads(item['item_metadata'])
+                            content += f"\nMetadata: {json.dumps(metadata)}"
+                        except:
+                            content += f"\nMetadata: {item['item_metadata']}"
+                    
+                    self.save_ai_training_data(
+                        data_type=f"liked_{item['item_type']}",
+                        content=content,
+                        context=f"User liked this {item['item_type']} content",
+                        source_table="user_feedback",
+                        source_id=item['item_id'],
+                        relevance_score=0.8
+                    )
+                
+                logger.info(f"Updated AI training data with {len(liked_items)} liked items")
+                
+        except Exception as e:
+            logger.error(f"Error updating AI training from feedback: {e}")
+
+    def start_ai_model_training(self, provider_id: int, training_data_hash: str) -> str:
+        """Start AI model training."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            training_id = f"training_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            cursor.execute("""
+                INSERT INTO ai_model_training (id, provider_id, training_status, training_data_hash, training_started_at)
+                VALUES (?, ?, 'started', ?, CURRENT_TIMESTAMP)
+            """, (training_id, provider_id, training_data_hash))
+            conn.commit()
+            return training_id
+
+    def update_ai_model_training_status(self, training_id: str, status: str, model_version: str = None, 
+                                       performance_metrics: Dict = None, error_log: str = None):
+        """Update AI model training status."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            
+            update_fields = ["training_status = ?"]
+            params = [status]
+            
+            if status == 'completed':
+                update_fields.append("training_completed_at = CURRENT_TIMESTAMP")
+            
+            if model_version:
+                update_fields.append("model_version = ?")
+                params.append(model_version)
+                
+            if performance_metrics:
+                update_fields.append("performance_metrics = ?")
+                params.append(json.dumps(performance_metrics))
+                
+            if error_log:
+                update_fields.append("error_log = ?")
+                params.append(error_log)
+            
+            params.append(training_id)
+            
+            cursor.execute(f"""
+                UPDATE ai_model_training 
+                SET {', '.join(update_fields)}
+                WHERE id = ?
+            """, params)
+            conn.commit()
 
 
+# Global database instance
 # Global database instance
 db = DatabaseManager()
 

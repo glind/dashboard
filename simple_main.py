@@ -17,6 +17,7 @@ from pathlib import Path
 import logging
 import sys
 import httpx
+import aiohttp
 from bs4 import BeautifulSoup
 
 # Add the project root to the path so we can import our collectors
@@ -41,6 +42,15 @@ try:
 except ImportError as e:
     print(f"Note: Could not import collectors: {e}")
     COLLECTORS_AVAILABLE = False
+
+# Try to import AI Assistant modules
+try:
+    from processors.ai_providers import ai_manager, create_provider, OllamaProvider, OpenAIProvider, GeminiProvider
+    from processors.ai_training_collector import training_collector
+    AI_ASSISTANT_AVAILABLE = True
+except ImportError as e:
+    print(f"Note: Could not import AI Assistant modules: {e}")
+    AI_ASSISTANT_AVAILABLE = False
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -591,6 +601,125 @@ async def dashboard():
             color: #ff6b6b;
             font-weight: bold;
         }
+        
+        /* AI Chat Styles */
+        .ai-chat-container {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+        }
+        
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px 0;
+            margin-bottom: 10px;
+        }
+        
+        .chat-message {
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 12px;
+            max-width: 85%;
+            word-wrap: break-word;
+        }
+        
+        .chat-message.user {
+            background: rgba(74, 144, 226, 0.3);
+            margin-left: auto;
+            text-align: right;
+        }
+        
+        .chat-message.assistant {
+            background: rgba(255, 255, 255, 0.15);
+            margin-right: auto;
+        }
+        
+        .chat-message.system {
+            background: rgba(255, 193, 7, 0.2);
+            text-align: center;
+            font-style: italic;
+            max-width: 100%;
+        }
+        
+        .chat-message-time {
+            font-size: 0.7em;
+            opacity: 0.6;
+            margin-top: 5px;
+        }
+        
+        .chat-input-container {
+            flex-shrink: 0;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            padding: 10px;
+        }
+        
+        .chat-provider-selector {
+            margin-bottom: 8px;
+        }
+        
+        .chat-provider-selector select {
+            width: 100%;
+            padding: 6px;
+            border: none;
+            border-radius: 4px;
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            font-size: 0.9em;
+        }
+        
+        .chat-provider-selector select option {
+            background: #2a5298;
+            color: white;
+        }
+        
+        .chat-input-wrapper {
+            display: flex;
+            gap: 8px;
+        }
+        
+        .chat-input-wrapper input {
+            flex: 1;
+            padding: 10px;
+            border: none;
+            border-radius: 6px;
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            font-size: 0.9em;
+        }
+        
+        .chat-input-wrapper input::placeholder {
+            color: rgba(255, 255, 255, 0.7);
+        }
+        
+        .chat-input-wrapper button {
+            padding: 10px 15px;
+            border: none;
+            border-radius: 6px;
+            background: #4CAF50;
+            color: white;
+            cursor: pointer;
+            font-size: 0.9em;
+            transition: background 0.3s;
+        }
+        
+        .chat-input-wrapper button:hover {
+            background: #45a049;
+        }
+        
+        .chat-input-wrapper button:disabled {
+            background: rgba(255, 255, 255, 0.3);
+            cursor: not-allowed;
+        }
+        
+        .typing-indicator {
+            display: none;
+            padding: 10px;
+            font-style: italic;
+            opacity: 0.7;
+            text-align: center;
+        }
     </style>
 </head>
 <body>
@@ -697,6 +826,26 @@ async def dashboard():
                 <h2>❤️ Liked Items</h2>
                 <div class="widget-content">
                     <div id="liked-items-content" class="loading">Loading...</div>
+                </div>
+            </div>
+            
+            <div class="widget">
+                <h2>🤖 AI Assistant 
+                    <span class="widget-admin-gear" onclick="openWidgetAdmin('ai')" title="Configure AI Assistant">⚙️</span>
+                </h2>
+                <div class="widget-content ai-chat-container">
+                    <div id="ai-chat-messages" class="chat-messages"></div>
+                    <div class="chat-input-container">
+                        <div class="chat-provider-selector">
+                            <select id="ai-provider-select">
+                                <option value="">Loading providers...</option>
+                            </select>
+                        </div>
+                        <div class="chat-input-wrapper">
+                            <input type="text" id="ai-chat-input" placeholder="Ask your AI assistant..." onkeypress="handleChatKeyPress(event)">
+                            <button id="ai-chat-send" onclick="sendChatMessage()">Send</button>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -2327,6 +2476,57 @@ async def dashboard():
                     `;
                     break;
                     
+                case 'ai':
+                    adminContent += `
+                        <div class="admin-section">
+                            <h3>🤖 AI Assistant Configuration</h3>
+                            <div class="admin-form">
+                                <div style="padding: 15px; background: rgba(255,255,255,0.1); border-radius: 10px; margin-bottom: 15px;">
+                                    <h4>Provider Management</h4>
+                                    <div id="ai-providers-list">Loading providers...</div>
+                                    <br>
+                                    <button class="admin-btn" onclick="addAIProvider()">Add New Provider</button>
+                                    <button class="admin-btn" onclick="addNetworkOllama()">Quick: Add Network Ollama</button>
+                                    <button class="admin-btn" onclick="detectOllamaModels()">Detect Models</button>
+                                    <button class="admin-btn" onclick="loadAIProviders()">Refresh Providers</button>
+                                </div>
+                                
+                                <div style="padding: 15px; background: rgba(255,255,255,0.1); border-radius: 10px; margin-bottom: 15px;">
+                                    <h4>Training Data Management</h4>
+                                    <div id="ai-training-summary">Loading training summary...</div>
+                                    <br>
+                                    <button class="admin-btn" onclick="collectAITrainingData()">Collect Training Data</button>
+                                    <button class="admin-btn" onclick="startAITraining()">Start Training</button>
+                                    <button class="admin-btn" onclick="getTrainingSummary()">View Summary</button>
+                                </div>
+                                
+                                <div style="padding: 15px; background: rgba(255,255,255,0.1); border-radius: 10px;">
+                                    <h4>Quick Setup</h4>
+                                    <p style="color: #ccc; font-size: 0.9em;">
+                                        <strong>Ollama (Local):</strong> http://localhost:11434 (default)<br>
+                                        <strong>Ollama (Network):</strong> http://hostname.local:11434 (e.g., pop-os.local:11434)<br>
+                                        <strong>OpenAI:</strong> Requires API key from OpenAI<br>
+                                        <strong>Gemini:</strong> Requires API key from Google AI Studio
+                                    </p>
+                                    <div style="margin-top: 10px; padding: 10px; background: rgba(255,193,7,0.2); border-radius: 5px;">
+                                        <strong>💡 Network Ollama Setup:</strong><br>
+                                        <span style="font-size: 0.8em;">
+                                        • Use hostname.local:11434 for network instances<br>
+                                        • Example: http://pop-os.local:11434<br>
+                                        • Ensure Ollama server allows external connections
+                                        </span>
+                                    </div>
+                                </div>
+                                
+                                <div class="save-close-buttons">
+                                    <button class="admin-btn" onclick="saveAndCloseWidget('ai')">Save & Close</button>
+                                    <button class="admin-btn" onclick="closeWidgetAdmin()">Cancel</button>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                    break;
+                    
                 default:
                     adminContent = `
                         <div class="admin-section">
@@ -2351,7 +2551,11 @@ async def dashboard():
             
             // Load current settings
             loadCurrentSettings(widgetType);
-            loadCurrentSettings(widgetType);
+            
+            // Special loading for AI widget
+            if (widgetType === 'ai') {
+                setTimeout(() => loadAIAdminData(), 100);
+            }
         }
         
         async function addNewsSource() {
@@ -2583,7 +2787,481 @@ async def dashboard():
         // Load widget preferences on page load
         document.addEventListener('DOMContentLoaded', function() {
             loadWidgetPreferences();
+            loadAIProviders();
         });
+        
+        // AI Chat functionality
+        let currentConversation = null;
+        let aiProviders = [];
+        
+        async function loadAIProviders() {
+            try {
+                const response = await fetch('/api/ai/providers');
+                const data = await response.json();
+                
+                if (data.error) {
+                    console.log('AI Assistant not available:', data.error);
+                    document.getElementById('ai-provider-select').innerHTML = '<option value="">AI Not Available</option>';
+                    return;
+                }
+                
+                aiProviders = data.providers || [];
+                const select = document.getElementById('ai-provider-select');
+                select.innerHTML = '';
+                
+                if (aiProviders.length === 0) {
+                    select.innerHTML = '<option value="">No providers configured</option>';
+                } else {
+                    aiProviders.forEach(provider => {
+                        const option = document.createElement('option');
+                        option.value = provider.name;
+                        option.textContent = `${provider.name} (${provider.provider_type}) ${provider.health_status ? '✅' : '❌'}`;
+                        if (provider.is_default) {
+                            option.selected = true;
+                        }
+                        select.appendChild(option);
+                    });
+                }
+            } catch (error) {
+                console.error('Error loading AI providers:', error);
+                document.getElementById('ai-provider-select').innerHTML = '<option value="">Error loading providers</option>';
+            }
+        }
+        
+        function handleChatKeyPress(event) {
+            if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                sendChatMessage();
+            }
+        }
+        
+        async function sendChatMessage() {
+            const input = document.getElementById('ai-chat-input');
+            const message = input.value.trim();
+            const provider = document.getElementById('ai-provider-select').value;
+            
+            if (!message) return;
+            if (!provider) {
+                alert('Please select an AI provider first');
+                return;
+            }
+            
+            // Clear input and disable button
+            input.value = '';
+            const sendBtn = document.getElementById('ai-chat-send');
+            sendBtn.disabled = true;
+            sendBtn.textContent = 'Sending...';
+            
+            // Add user message to chat
+            addChatMessage('user', message);
+            
+            // Show typing indicator
+            showTypingIndicator();
+            
+            try {
+                const response = await fetch('/api/ai/chat', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        message: message,
+                        conversation_id: currentConversation,
+                        provider: provider
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.error) {
+                    addChatMessage('system', `Error: ${data.error}`);
+                } else {
+                    currentConversation = data.conversation_id;
+                    addChatMessage('assistant', data.response);
+                }
+                
+            } catch (error) {
+                console.error('Chat error:', error);
+                addChatMessage('system', 'Error: Could not send message');
+            } finally {
+                hideTypingIndicator();
+                sendBtn.disabled = false;
+                sendBtn.textContent = 'Send';
+                input.focus();
+            }
+        }
+        
+        function addChatMessage(role, content) {
+            const messagesContainer = document.getElementById('ai-chat-messages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `chat-message ${role}`;
+            
+            const contentDiv = document.createElement('div');
+            contentDiv.textContent = content;
+            
+            const timeDiv = document.createElement('div');
+            timeDiv.className = 'chat-message-time';
+            timeDiv.textContent = new Date().toLocaleTimeString();
+            
+            messageDiv.appendChild(contentDiv);
+            messageDiv.appendChild(timeDiv);
+            messagesContainer.appendChild(messageDiv);
+            
+            // Scroll to bottom
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+        
+        function showTypingIndicator() {
+            const indicator = document.createElement('div');
+            indicator.className = 'typing-indicator';
+            indicator.id = 'typing-indicator';
+            indicator.textContent = 'AI is typing...';
+            document.getElementById('ai-chat-messages').appendChild(indicator);
+            document.getElementById('ai-chat-messages').scrollTop = document.getElementById('ai-chat-messages').scrollHeight;
+        }
+        
+        function hideTypingIndicator() {
+            const indicator = document.getElementById('typing-indicator');
+            if (indicator) {
+                indicator.remove();
+            }
+        }
+        
+        async function collectAITrainingData() {
+            try {
+                const response = await fetch('/api/ai/training/collect', {
+                    method: 'POST'
+                });
+                const data = await response.json();
+                
+                if (data.success) {
+                    alert(`Training data collected: ${data.samples_collected} samples`);
+                } else {
+                    alert(`Error: ${data.error}`);
+                }
+            } catch (error) {
+                console.error('Error collecting training data:', error);
+                alert('Error collecting training data');
+            }
+        }
+        
+        async function startAITraining() {
+            const provider = document.getElementById('ai-provider-select').value;
+            
+            if (!provider) {
+                alert('Please select an AI provider first');
+                return;
+            }
+            
+            if (!confirm('Start AI model training? This may take some time.')) {
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/ai/training/start', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        provider: provider
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    alert(`Training started: ${data.training_id}\\nResult: ${data.result.status}`);
+                } else {
+                    alert(`Error: ${data.error}`);
+                }
+            } catch (error) {
+                console.error('Error starting training:', error);
+                alert('Error starting AI training');
+            }
+        }
+        
+        async function addAIProvider() {
+            const name = prompt('Provider name:');
+            if (!name) return;
+            
+            const type = prompt('Provider type (ollama, openai, gemini):');
+            if (!type) return;
+            
+            let config = {};
+            
+            if (type.toLowerCase() === 'ollama') {
+                const baseUrl = prompt('Ollama base URL:', 'http://localhost:11434');
+                const modelName = prompt('Model name:', 'llama2');
+                if (!baseUrl) {
+                    alert('Base URL is required for Ollama');
+                    return;
+                }
+                config = {
+                    base_url: baseUrl,
+                    model_name: modelName,
+                    is_active: true,
+                    is_default: false
+                };
+            } else if (type.toLowerCase() === 'openai') {
+                const apiKey = prompt('OpenAI API Key:');
+                const modelName = prompt('Model name:', 'gpt-3.5-turbo');
+                if (!apiKey) {
+                    alert('API Key is required for OpenAI');
+                    return;
+                }
+                config = {
+                    api_key: apiKey,
+                    model_name: modelName,
+                    is_active: true,
+                    is_default: false
+                };
+            } else if (type.toLowerCase() === 'gemini') {
+                const apiKey = prompt('Gemini API Key:');
+                const modelName = prompt('Model name:', 'gemini-pro');
+                if (!apiKey) {
+                    alert('API Key is required for Gemini');
+                    return;
+                }
+                config = {
+                    api_key: apiKey,
+                    model_name: modelName,
+                    is_active: true,
+                    is_default: false
+                };
+            } else {
+                alert('Unknown provider type');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/ai/providers', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        name: name,
+                        provider_type: type,
+                        config: config
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    alert(`Provider '${name}' added successfully!`);
+                    loadAIProviders();
+                    displayAIProviders();
+                } else {
+                    alert(`Error: ${data.error}`);
+                }
+            } catch (error) {
+                console.error('Error adding AI provider:', error);
+                alert('Error adding AI provider');
+            }
+        }
+        
+        async function addNetworkOllama() {
+            const hostname = prompt('Enter hostname (e.g., pop-os.local, ubuntu.local):');
+            if (!hostname) return;
+            
+            const port = prompt('Port (default 11434):', '11434');
+            const modelName = prompt('Model name:', 'llama2');
+            
+            const baseUrl = `http://${hostname}:${port}`;
+            const name = `Ollama (${hostname})`;
+            
+            const config = {
+                base_url: baseUrl,
+                model_name: modelName,
+                is_active: true,
+                is_default: false
+            };
+            
+            try {
+                const response = await fetch('/api/ai/providers', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        name: name,
+                        provider_type: 'ollama',
+                        config: config
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    alert(`Network Ollama provider '${name}' added successfully!\\nURL: ${baseUrl}`);
+                    loadAIProviders();
+                    displayAIProviders();
+                } else {
+                    alert(`Error: ${data.error}`);
+                }
+            } catch (error) {
+                console.error('Error adding network Ollama provider:', error);
+                alert('Error adding network Ollama provider');
+            }
+        }
+        
+        async function detectOllamaModels() {
+            const hostname = prompt('Enter Ollama hostname (e.g., pop-os.local, localhost):');
+            if (!hostname) return;
+            
+            const port = prompt('Port (default 11434):', '11434');
+            const baseUrl = `http://${hostname}:${port}`;
+            
+            try {
+                const response = await fetch(`${baseUrl}/api/tags`);
+                if (response.ok) {
+                    const data = await response.json();
+                    const models = data.models || [];
+                    
+                    if (models.length === 0) {
+                        alert('No models found on this Ollama server');
+                        return;
+                    }
+                    
+                    let modelList = 'Available models:\\n';
+                    models.forEach((model, index) => {
+                        modelList += `${index + 1}. ${model.name}\\n`;
+                    });
+                    
+                    const selectedIndex = prompt(`${modelList}\\nSelect model number (1-${models.length}):`);
+                    const modelIndex = parseInt(selectedIndex) - 1;
+                    
+                    if (modelIndex >= 0 && modelIndex < models.length) {
+                        const selectedModel = models[modelIndex];
+                        const providerName = `Ollama (${hostname}) - ${selectedModel.name}`;
+                        
+                        const config = {
+                            base_url: baseUrl,
+                            model_name: selectedModel.name,
+                            is_active: true,
+                            is_default: false
+                        };
+                        
+                        const createResponse = await fetch('/api/ai/providers', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({
+                                name: providerName,
+                                provider_type: 'ollama',
+                                config: config
+                            })
+                        });
+                        
+                        const createData = await createResponse.json();
+                        
+                        if (createData.success) {
+                            alert(`Successfully added provider '${providerName}'`);
+                            loadAIProviders();
+                            displayAIProviders();
+                        } else {
+                            alert(`Error: ${createData.error}`);
+                        }
+                    } else {
+                        alert('Invalid selection');
+                    }
+                } else {
+                    alert(`Could not connect to Ollama server at ${baseUrl}`);
+                }
+            } catch (error) {
+                console.error('Error detecting Ollama models:', error);
+                alert(`Error connecting to ${baseUrl}: ${error.message}`);
+            }
+        }
+        
+        async function displayAIProviders() {
+            const container = document.getElementById('ai-providers-list');
+            if (!container) return;
+            
+            try {
+                const response = await fetch('/api/ai/providers');
+                const data = await response.json();
+                
+                if (data.error) {
+                    container.innerHTML = `<span style="color: #ff6b6b;">Error: ${data.error}</span>`;
+                    return;
+                }
+                
+                const providers = data.providers || [];
+                
+                if (providers.length === 0) {
+                    container.innerHTML = '<span style="color: #ccc;">No providers configured</span>';
+                    return;
+                }
+                
+                let html = '<table style="width: 100%; border-collapse: collapse;">';
+                html += '<tr><th style="text-align: left; padding: 5px; border-bottom: 1px solid rgba(255,255,255,0.3);">Name</th><th style="text-align: left; padding: 5px; border-bottom: 1px solid rgba(255,255,255,0.3);">Type</th><th style="text-align: left; padding: 5px; border-bottom: 1px solid rgba(255,255,255,0.3);">Status</th><th style="text-align: left; padding: 5px; border-bottom: 1px solid rgba(255,255,255,0.3);">Default</th></tr>';
+                
+                providers.forEach(provider => {
+                    const status = provider.health_status ? '✅ Online' : '❌ Offline';
+                    const defaultMark = provider.is_default ? '⭐' : '';
+                    html += `<tr>
+                        <td style="padding: 5px;">${provider.name}</td>
+                        <td style="padding: 5px;">${provider.provider_type}</td>
+                        <td style="padding: 5px;">${status}</td>
+                        <td style="padding: 5px;">${defaultMark}</td>
+                    </tr>`;
+                });
+                
+                html += '</table>';
+                container.innerHTML = html;
+                
+            } catch (error) {
+                console.error('Error displaying AI providers:', error);
+                container.innerHTML = '<span style="color: #ff6b6b;">Error loading providers</span>';
+            }
+        }
+        
+        async function getTrainingSummary() {
+            const container = document.getElementById('ai-training-summary');
+            if (!container) return;
+            
+            try {
+                const response = await fetch('/api/ai/training/summary');
+                const data = await response.json();
+                
+                if (data.error) {
+                    container.innerHTML = `<span style="color: #ff6b6b;">Error: ${data.error}</span>`;
+                    return;
+                }
+                
+                let html = `
+                    <strong>Total Samples:</strong> ${data.total_samples}<br>
+                    <strong>Average Relevance:</strong> ${(data.avg_relevance * 100).toFixed(1)}%<br>
+                `;
+                
+                if (data.by_type && Object.keys(data.by_type).length > 0) {
+                    html += '<strong>By Type:</strong><br>';
+                    for (const [type, count] of Object.entries(data.by_type)) {
+                        html += `&nbsp;&nbsp;${type}: ${count}<br>`;
+                    }
+                }
+                
+                if (data.date_range && data.date_range.earliest) {
+                    html += `<strong>Date Range:</strong> ${data.date_range.earliest} to ${data.date_range.latest}`;
+                }
+                
+                container.innerHTML = html;
+                
+            } catch (error) {
+                console.error('Error getting training summary:', error);
+                container.innerHTML = '<span style="color: #ff6b6b;">Error loading summary</span>';
+            }
+        }
+        
+        // Load AI admin data when opening AI widget admin
+        function loadAIAdminData() {
+            displayAIProviders();
+            getTrainingSummary();
+        }
     </script>
 </body>
 </html>
@@ -3234,6 +3912,15 @@ async def save_feedback(request: Request):
         )
         
         if success:
+            # Auto-retrain AI models when new feedback is received
+            if AI_ASSISTANT_AVAILABLE and feedback_type == 'like':
+                try:
+                    # Update AI training data asynchronously
+                    db.update_ai_training_from_feedback()
+                    logger.info(f"Updated AI training data with new {feedback_type} feedback")
+                except Exception as e:
+                    logger.warning(f"Could not update AI training data: {e}")
+            
             return {
                 "status": "success",
                 "message": f"Feedback '{feedback_type}' saved for {item_type}",
@@ -3367,11 +4054,355 @@ async def save_admin_settings(request: Request):
         else:
             return {"error": "Invalid setting type"}
         
+        # Auto-retrain AI models when widget configurations change
+        if AI_ASSISTANT_AVAILABLE and setting_type in ['vanity_config', 'news_config', 'music_config']:
+            try:
+                # Update AI training data with new configuration preferences
+                db.update_ai_training_from_feedback()
+                logger.info(f"Updated AI training data with new {setting_type} configuration")
+            except Exception as e:
+                logger.warning(f"Could not update AI training data: {e}")
+        
         return {"success": True, "message": f"{setting_type} saved successfully"}
         
     except Exception as e:
         logger.error(f"Error saving admin settings: {e}")
         return {"error": str(e)}
+
+
+# AI Assistant API Endpoints
+@app.get("/api/ai/providers")
+async def get_ai_providers():
+    """Get available AI providers."""
+    if not AI_ASSISTANT_AVAILABLE:
+        return {"error": "AI Assistant not available"}
+    
+    try:
+        providers = db.get_ai_providers()
+        health_status = await ai_manager.health_check_all()
+        
+        for provider in providers:
+            provider['health_status'] = health_status.get(provider['name'], False)
+        
+        return {
+            "providers": providers,
+            "manager_providers": ai_manager.list_providers()
+        }
+    except Exception as e:
+        logger.error(f"Error getting AI providers: {e}")
+        return {"error": str(e)}
+
+
+@app.post("/api/ai/providers")
+async def create_ai_provider(request: Request):
+    """Create a new AI provider."""
+    if not AI_ASSISTANT_AVAILABLE:
+        return {"error": "AI Assistant not available"}
+    
+    try:
+        data = await request.json()
+        provider_type = data.get('provider_type', '').lower()
+        name = data.get('name', '')
+        config = data.get('config', {})
+        
+        if not provider_type or not name:
+            return {"error": "Provider type and name are required"}
+        
+        # Create provider instance
+        provider = create_provider(provider_type, name, config)
+        
+        # Test connection
+        health_ok = await provider.health_check()
+        if not health_ok:
+            return {"error": f"Failed to connect to {provider_type} provider"}
+        
+        # Save to database
+        provider_id = db.save_ai_provider(name, provider_type, config)
+        
+        # Register with manager
+        ai_manager.register_provider(provider, config.get('is_default', False))
+        
+        return {
+            "success": True,
+            "provider_id": provider_id,
+            "message": f"AI provider '{name}' created successfully"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error creating AI provider: {e}")
+        return {"error": str(e)}
+
+
+@app.get("/api/ai/chat/conversations")
+async def get_conversations():
+    """Get AI chat conversations."""
+    if not AI_ASSISTANT_AVAILABLE:
+        return {"error": "AI Assistant not available"}
+    
+    try:
+        with db.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT c.*, p.name as provider_name 
+                FROM ai_conversations c
+                JOIN ai_providers p ON c.provider_id = p.id
+                ORDER BY c.updated_at DESC
+                LIMIT 20
+            """)
+            
+            conversations = []
+            for row in cursor.fetchall():
+                conv = dict(row)
+                conv['context_data'] = json.loads(conv['context_data']) if conv['context_data'] else {}
+                conversations.append(conv)
+            
+            return {"conversations": conversations}
+            
+    except Exception as e:
+        logger.error(f"Error getting conversations: {e}")
+        return {"error": str(e)}
+
+
+@app.post("/api/ai/chat")
+async def chat_with_ai(request: Request):
+    """Chat with AI assistant."""
+    if not AI_ASSISTANT_AVAILABLE:
+        return {"error": "AI Assistant not available"}
+    
+    try:
+        data = await request.json()
+        message = data.get('message', '')
+        conversation_id = data.get('conversation_id')
+        provider_name = data.get('provider')
+        
+        if not message:
+            return {"error": "Message is required"}
+        
+        # Get provider
+        provider = ai_manager.get_provider(provider_name)
+        if not provider:
+            return {"error": "No AI provider available"}
+        
+        # Create conversation if needed
+        if not conversation_id:
+            conversation_id = f"conv_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            db.save_ai_conversation(conversation_id, 1, f"Chat {datetime.now().strftime('%H:%M')}")
+        
+        # Get conversation history
+        messages = db.get_ai_conversation_history(conversation_id, limit=10)
+        
+        # Convert to provider format
+        chat_messages = []
+        for msg in messages:
+            chat_messages.append({
+                'role': msg['role'],
+                'content': msg['content']
+            })
+        
+        # Add current message
+        chat_messages.append({
+            'role': 'user',
+            'content': message
+        })
+        
+        # Get AI response
+        response = await provider.chat(chat_messages)
+        
+        # Save messages
+        user_msg_id = f"msg_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}_user"
+        ai_msg_id = f"msg_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}_ai"
+        
+        db.save_ai_message(user_msg_id, conversation_id, 'user', message)
+        db.save_ai_message(ai_msg_id, conversation_id, 'assistant', response)
+        
+        return {
+            "response": response,
+            "conversation_id": conversation_id,
+            "provider": provider.name
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in AI chat: {e}")
+        return {"error": str(e)}
+
+
+@app.get("/api/ai/training/summary")
+async def get_training_summary():
+    """Get AI training data summary."""
+    if not AI_ASSISTANT_AVAILABLE:
+        return {"error": "AI Assistant not available"}
+    
+    try:
+        summary = training_collector.get_training_summary()
+        return summary
+        
+    except Exception as e:
+        logger.error(f"Error getting training summary: {e}")
+        return {"error": str(e)}
+
+
+@app.post("/api/ai/training/collect")
+async def collect_training_data():
+    """Collect new training data."""
+    if not AI_ASSISTANT_AVAILABLE:
+        return {"error": "AI Assistant not available"}
+    
+    try:
+        # Update training data from user feedback
+        db.update_ai_training_from_feedback()
+        
+        # Collect fresh training data
+        training_data = await training_collector.prepare_training_dataset()
+        
+        return {
+            "success": True,
+            "samples_collected": len(training_data),
+            "message": "Training data collected successfully"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error collecting training data: {e}")
+        return {"error": str(e)}
+
+
+@app.post("/api/ai/training/start")
+async def start_ai_training(request: Request):
+    """Start AI model training."""
+    if not AI_ASSISTANT_AVAILABLE:
+        return {"error": "AI Assistant not available"}
+    
+    try:
+        data = await request.json()
+        provider_name = data.get('provider')
+        
+        provider = ai_manager.get_provider(provider_name)
+        if not provider:
+            return {"error": "Provider not found"}
+        
+        # Get training data
+        training_data = db.get_ai_training_data(limit=1000)
+        
+        if not training_data:
+            return {"error": "No training data available"}
+        
+        # Generate training hash
+        training_hash = provider.generate_training_hash(training_data)
+        
+        # Start training
+        training_id = db.start_ai_model_training(1, training_hash)  # Using provider_id = 1 for now
+        
+        # Start training asynchronously
+        training_result = await provider.train(training_data)
+        
+        if training_result.get('status') == 'success':
+            db.update_ai_model_training_status(training_id, 'completed', 
+                                             training_result.get('model_name'),
+                                             training_result)
+        else:
+            db.update_ai_model_training_status(training_id, 'failed', 
+                                             error_log=training_result.get('error'))
+        
+        return {
+            "success": True,
+            "training_id": training_id,
+            "result": training_result
+        }
+        
+    except Exception as e:
+        logger.error(f"Error starting AI training: {e}")
+        return {"error": str(e)}
+
+
+# Initialize default AI providers on startup
+async def initialize_ai_providers():
+    """Initialize default AI providers."""
+    if not AI_ASSISTANT_AVAILABLE:
+        return
+    
+    try:
+        # Check if we have any providers
+        existing_providers = db.get_ai_providers()
+        
+        if not existing_providers:
+            # Try to create default Ollama providers (local and common network hosts)
+            ollama_hosts = [
+                {'name': 'Local Ollama', 'url': 'http://localhost:11434'},
+                {'name': 'Network Ollama (pop-os.local)', 'url': 'http://pop-os.local:11434'},
+                {'name': 'Network Ollama (ubuntu.local)', 'url': 'http://ubuntu.local:11434'}
+            ]
+            
+            default_set = False
+            
+            for host_config in ollama_hosts:
+                # First try to get available models
+                try:
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get(f"{host_config['url']}/api/tags") as response:
+                            if response.status == 200:
+                                data = await response.json()
+                                models = data.get('models', [])
+                                if models:
+                                    # Use the first available model
+                                    model_name = models[0]['name']
+                                    logger.info(f"Found model {model_name} at {host_config['url']}")
+                                else:
+                                    model_name = 'llama2'  # fallback
+                            else:
+                                continue
+                except:
+                    continue
+                
+                ollama_config = {
+                    'base_url': host_config['url'],
+                    'model_name': model_name,
+                    'is_active': True,
+                    'is_default': not default_set  # First working one becomes default
+                }
+                
+                try:
+                    ollama_provider = create_provider('ollama', host_config['name'], ollama_config)
+                    health_ok = await ollama_provider.health_check()
+                    
+                    if health_ok:
+                        db.save_ai_provider(host_config['name'], 'ollama', ollama_config)
+                        ai_manager.register_provider(ollama_provider, not default_set)
+                        logger.info(f"Ollama provider initialized: {host_config['name']} at {host_config['url']} with model {model_name}")
+                        if not default_set:
+                            default_set = True
+                    else:
+                        logger.debug(f"Ollama server not available at {host_config['url']}")
+                        
+                except Exception as e:
+                    logger.debug(f"Could not initialize Ollama provider at {host_config['url']}: {e}")
+            
+            if not default_set:
+                logger.warning("No Ollama servers found - you can add providers manually in the AI Assistant admin panel")
+        else:
+            # Load existing providers into manager
+            for provider_data in existing_providers:
+                if provider_data['is_active']:
+                    try:
+                        provider = create_provider(
+                            provider_data['provider_type'],
+                            provider_data['name'],
+                            provider_data['config_data']
+                        )
+                        ai_manager.register_provider(provider, provider_data['is_default'])
+                        logger.info(f"Loaded AI provider: {provider_data['name']}")
+                        
+                    except Exception as e:
+                        logger.error(f"Error loading provider {provider_data['name']}: {e}")
+                        
+    except Exception as e:
+        logger.error(f"Error initializing AI providers: {e}")
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Initialize services on startup."""
+    await initialize_ai_providers()
+    logger.info("Dashboard startup complete")
+
 
 if __name__ == "__main__":
     print("🌟 Starting Simple Dashboard Server...")

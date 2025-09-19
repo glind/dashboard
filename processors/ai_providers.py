@@ -99,21 +99,13 @@ class OllamaProvider(AIProvider):
                                         continue
                             return content
                         else:
-                            # Handle regular response - collect all streaming chunks
-                            content = ""
-                            async for line in response.content:
-                                if line:
-                                    try:
-                                        line_text = line.decode().strip()
-                                        if line_text:
-                                            data = json.loads(line_text)
-                                            if 'message' in data and 'content' in data['message']:
-                                                content += data['message']['content']
-                                            if data.get('done', False):
-                                                break
-                                    except json.JSONDecodeError:
-                                        continue
-                            return content
+                            # Handle non-streaming response - get full JSON response
+                            response_text = await response.text()
+                            data = json.loads(response_text)
+                            if 'message' in data and 'content' in data['message']:
+                                return data['message']['content']
+                            else:
+                                return "No content received from Ollama"
                     else:
                         error_msg = f"Ollama API error: {response.status}"
                         logger.error(error_msg)

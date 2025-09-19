@@ -4,7 +4,7 @@ Weather data collector using OpenWeatherMap API.
 
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, Any, Optional
 import aiohttp
 import os
@@ -207,8 +207,7 @@ class WeatherCollector:
         
         for i, (high, low, desc, icon, precip) in enumerate(mock_data):
             forecasts.append(ForecastData(
-                date=base_date.replace(hour=0, minute=0, second=0, microsecond=0) + 
-                     asyncio.get_event_loop().time() * 0 + i * 86400,  # Add i days
+                date=base_date.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=i),
                 temperature_high=high,
                 temperature_low=low,
                 description=desc,

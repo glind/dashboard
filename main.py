@@ -168,15 +168,76 @@ class BackgroundDataManager:
     # Collection methods (these will be implemented to call the actual collectors)
     async def _collect_calendar(self):
         try:
-            collector = CalendarCollector()
-            return await collector.collect_data()
+            from config.settings import Settings
+            from datetime import timedelta
+            settings = Settings()
+            collector = CalendarCollector(settings)
+            start_date = datetime.now()
+            end_date = start_date + timedelta(days=7)
+            events_data = await collector.collect_events(start_date, end_date)
+            
+            if events_data:
+                formatted_events = []
+                for event in events_data[:10]:
+                    title = event.get('summary', 'Untitled Event')
+                    event_time = "All day"
+                    start_dt = None
+                    end_dt = None
+                    
+                    if not event.get('is_all_day', False) and event.get('start_time'):
+                        try:
+                            start_dt = event['start_time']
+                            # Handle both datetime objects and strings
+                            if hasattr(start_dt, 'strftime'):
+                                event_time = start_dt.strftime("%I:%M %p")
+                                if event.get('end_time') and hasattr(event['end_time'], 'strftime'):
+                                    end_dt = event['end_time']
+                                    event_time += f" - {end_dt.strftime('%I:%M %p')}"
+                            else:
+                                # If it's a string, try to parse it
+                                start_dt = datetime.fromisoformat(str(start_dt).replace('Z', '+00:00'))
+                                event_time = start_dt.strftime("%I:%M %p")
+                                if event.get('end_time'):
+                                    end_dt = datetime.fromisoformat(str(event['end_time']).replace('Z', '+00:00'))
+                                    event_time += f" - {end_dt.strftime('%I:%M %p')}"
+                        except Exception as e:
+                            logger.warning(f"Error formatting event time: {e}")
+                            event_time = str(event.get('start_time', 'All day'))
+                    
+                    # Build comprehensive event data matching the original format
+                    formatted_event = {
+                        "title": title,
+                        "summary": title,
+                        "time": event_time,
+                        "description": event.get('description', ''),
+                        "location": event.get('location', ''),
+                        "organizer": event.get('organizer', '') if isinstance(event.get('organizer'), str) else event.get('organizer', {}).get('email', '') if event.get('organizer') else '',
+                        "attendees": [att.get('email', '') if isinstance(att, dict) else str(att) for att in event.get('attendees', [])],
+                        "start": {"dateTime": event.get('start_time').isoformat() if hasattr(event.get('start_time'), 'isoformat') else str(event.get('start_time'))} if event.get('start_time') else None,
+                        "end": {"dateTime": event.get('end_time').isoformat() if hasattr(event.get('end_time'), 'isoformat') else str(event.get('end_time'))} if event.get('end_time') else None,
+                        "event_id": event.get('id', ''),
+                        "calendar_url": f"https://calendar.google.com/calendar/event?eid={event.get('id', '')}" if event.get('id') else "https://calendar.google.com/calendar",
+                        "is_all_day": event.get('is_all_day', False),
+                        "status": event.get('status', ''),
+                        "created": event.get('created', ''),
+                        "updated": event.get('updated', ''),
+                        "html_link": event.get('html_link', '')
+                    }
+                    
+                    formatted_events.append(formatted_event)
+                
+                return {"events": formatted_events}
+            else:
+                return {"events": []}
         except Exception as e:
             logger.error(f"Calendar collection error: {e}")
             return {"error": str(e), "events": []}
     
     async def _collect_email(self):
         try:
-            collector = GmailCollector()
+            from config.settings import Settings
+            settings = Settings()
+            collector = GmailCollector(settings)
             return await collector.collect_data()
         except Exception as e:
             logger.error(f"Email collection error: {e}")
@@ -184,8 +245,71 @@ class BackgroundDataManager:
     
     async def _collect_github(self):
         try:
-            collector = GitHubCollector()
-            return await collector.collect_data()
+            # Use the same logic as the GitHub API endpoint
+            from database import get_credentials
+            github_creds = get_credentials('github')
+            if github_creds and github_creds.get('token'):
+                username = github_creds.get('username', 'glind')
+                token = github_creds.get('token')
+                headers = {'Authorization': f'token {token}', 'Accept': 'application/vnd.github.v3+json'}
+                
+                github_items = []
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    # Get review requests
+                    review_response = await client.get(f'https://api.github.com/search/issues?q=review-requested:{username}+is:open+is:pr', headers=headers)
+                    if review_response.status_code == 200:
+                        for pr in review_response.json().get('items', [])[:3]:
+                            repo_url_parts = pr.get('repository_url', '').split('/')
+                            repo_name = repo_url_parts[-1] if repo_url_parts else 'unknown'
+                            repo_owner = repo_url_parts[-2] if len(repo_url_parts) > 1 else 'unknown'
+                            
+                            github_items.append({
+                                'type': 'Review Requested', 
+                                'title': pr.get('title', ''),
+                                'repo': repo_name, 
+                                'repository': f"{repo_owner}/{repo_name}",
+                                'number': pr.get('number', ''),
+                                'user': pr.get('user', {}).get('login', 'Unknown') if pr.get('user') else 'Unknown',
+                                'state': pr.get('state', 'open'),
+                                'created_at': pr.get('created_at', ''),
+                                'updated_at': pr.get('updated_at', ''),
+                                'body': pr.get('body', ''),
+                                'html_url': pr.get('html_url', ''),
+                                'labels': [label.get('name', '') for label in pr.get('labels', [])],
+                                'assignees': [ass.get('login', '') for ass in pr.get('assignees', [])],
+                                'github_url': pr.get('html_url', ''),
+                                'api_url': pr.get('url', '')
+                            })
+                    
+                    # Get assigned issues (just the first few for caching)
+                    issues_response = await client.get(f'https://api.github.com/search/issues?q=assignee:{username}+is:issue+is:open', headers=headers)
+                    if issues_response.status_code == 200:
+                        for issue in issues_response.json().get('items', [])[:3]:
+                            repo_url_parts = issue.get('repository_url', '').split('/')
+                            repo_name = repo_url_parts[-1] if repo_url_parts else 'unknown'
+                            repo_owner = repo_url_parts[-2] if len(repo_url_parts) > 1 else 'unknown'
+                            
+                            github_items.append({
+                                'type': 'Assigned Issue',
+                                'title': issue.get('title', ''),
+                                'repo': repo_name,
+                                'repository': f"{repo_owner}/{repo_name}",
+                                'number': issue.get('number', ''),
+                                'user': issue.get('user', {}).get('login', 'Unknown') if issue.get('user') else 'Unknown',
+                                'state': issue.get('state', 'open'),
+                                'created_at': issue.get('created_at', ''),
+                                'updated_at': issue.get('updated_at', ''),
+                                'body': issue.get('body', ''),
+                                'html_url': issue.get('html_url', ''),
+                                'labels': [label.get('name', '') for label in issue.get('labels', [])],
+                                'assignees': [ass.get('login', '') for ass in issue.get('assignees', [])],
+                                'github_url': issue.get('html_url', ''),
+                                'api_url': issue.get('url', '')
+                            })
+                
+                return {"data": github_items, "total": len(github_items)}
+            else:
+                return {"data": [], "total": 0, "error": "No GitHub credentials"}
         except Exception as e:
             logger.error(f"GitHub collection error: {e}")
             return {"error": str(e), "data": []}
@@ -219,7 +343,9 @@ class BackgroundDataManager:
     
     async def _collect_weather(self):
         try:
-            collector = WeatherCollector()
+            from config.settings import Settings
+            settings = Settings()
+            collector = WeatherCollector(settings)
             return await collector.collect_data()
         except Exception as e:
             logger.error(f"Weather collection error: {e}")
@@ -227,7 +353,9 @@ class BackgroundDataManager:
     
     async def _collect_jokes(self):
         try:
-            collector = JokesCollector()
+            from config.settings import Settings
+            settings = Settings()
+            collector = JokesCollector(settings)
             return await collector.collect_data()
         except Exception as e:
             logger.error(f"Jokes collection error: {e}")
@@ -254,8 +382,18 @@ if static_dir.exists():
     app.mount("/static", StaticFiles(directory="static"), name="static")
 
 @app.get("/", response_class=HTMLResponse)
-async def dashboard():
-    """Serve the main dashboard page"""
+async def dashboard(code: str = None, state: str = None, error: str = None):
+    """Serve the main dashboard page or handle OAuth callbacks"""
+    
+    # Check if this is a TickTick OAuth callback
+    if code or error:
+        # This looks like an OAuth callback, redirect to the proper callback handler
+        if error:
+            return RedirectResponse(f"/auth/ticktick/callback?error={error}")
+        else:
+            return RedirectResponse(f"/auth/ticktick/callback?code={code}" + (f"&state={state}" if state else ""))
+    
+    # Normal dashboard request
     return """
 <!DOCTYPE html>
 <html lang="en">
@@ -263,6 +401,7 @@ async def dashboard():
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Personal Dashboard</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📊</text></svg>">
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         /* Custom scrollbar styles */
@@ -972,6 +1111,7 @@ async def dashboard():
             <div class="bg-white bg-opacity-15 rounded-xl p-4 backdrop-blur-sm border border-white border-opacity-30 min-w-96 flex flex-col">
                 <h3 class="mb-2 text-lg text-white text-center">🤖 AI Assistant 
                     <span class="widget-admin-gear" onclick="openWidgetAdmin('ai')" title="Configure AI Assistant">⚙️</span>
+                    <button class="ml-2 px-2 py-1 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded" onclick="refreshAISummary()" title="Refresh AI Summary">🔄</button>
                 </h3>
                 <div class="flex-1 flex flex-col ai-chat-container">
                     <div id="ai-summary-content" class="text-sm opacity-90 mb-3 p-2 bg-white bg-opacity-10 rounded-lg min-h-16 loading">Loading AI summary...</div>
@@ -1433,18 +1573,19 @@ async def dashboard():
                     }
                 }
                 else if (elementId === 'email-content') {
-                    sectionData = data.recent || [];
+                    sectionData = data.emails || [];
                     element.innerHTML = `
                         <div class="item-summary">
                             <div class="item-title">📨 Unread: ${data.unread || 0}</div>
-                            <div class="item-meta">Total: ${data.total || 0}</div>
+                            <div class="item-meta">Total: ${data.emails ? data.emails.length : 0}</div>
                         </div>
-                        ${data.recent ? data.recent.map(email => 
+                        ${data.emails && data.emails.length > 0 ? data.emails.slice(0, 5).map(email => 
                             `<div class="item">
-                                <div class="item-title">${email.subject}</div>
-                                <div class="item-meta">From: ${email.sender}</div>
+                                <div class="item-title">${email.subject || 'No Subject'}</div>
+                                <div class="item-meta">From: ${email.sender || 'Unknown'}</div>
+                                <div class="item-meta">${email.timestamp ? new Date(email.timestamp).toLocaleDateString() : ''}</div>
                             </div>`
-                        ).join('') : ''}
+                        ).join('') : '<div class="item">No emails found</div>'}
                     `;
                 }
                 else if (elementId === 'github-content') {
@@ -1686,14 +1827,14 @@ async def dashboard():
                 const response = await fetch('/api/ai/summary');
                 const data = await response.json();
                 
-                if (data.error) {
-                    element.innerHTML = `<div class="error text-xs">❌ ${data.error}</div>`;
-                } else {
+                if (data.error || data.summary.startsWith('Error')) {
+                    element.innerHTML = `<div class="error text-xs">❌ ${data.error || data.summary}</div>`;
+                } else if (data.summary && data.data_sources) {
                     // Store AI summary data globally
                     window.dashboardData.aiSummary = data;
                     
-                    const timestamp = new Date(data.timestamp).toLocaleTimeString();
-                    const dataSourcesInfo = `📊 Sources: ${data.data_sources.emails} emails, ${data.data_sources.events} events, ${data.data_sources.news} news, ${data.data_sources.github} GitHub`;
+                    const timestamp = data.timestamp ? new Date(data.timestamp).toLocaleTimeString() : 'Unknown';
+                    const dataSourcesInfo = `📊 Sources: ${data.data_sources.emails || 0} emails, ${data.data_sources.events || 0} events, ${data.data_sources.news || 0} news, ${data.data_sources.github || 0} GitHub`;
                     
                     element.innerHTML = `
                         <div class="text-xs text-left">
@@ -1703,10 +1844,23 @@ async def dashboard():
                             <div class="text-xs opacity-50">Updated: ${timestamp}</div>
                         </div>
                     `;
+                } else {
+                    element.innerHTML = `<div class="text-xs">📝 AI summary unavailable</div>`;
                 }
             } catch (error) {
                 console.error('Error loading AI summary:', error);
                 element.innerHTML = `<div class="error text-xs">❌ Failed to load AI summary</div>`;
+            }
+        }
+        
+        // Refresh AI summary manually
+        async function refreshAISummary() {
+            const element = document.getElementById('ai-summary-content');
+            if (element) {
+                element.classList.add('loading');
+                element.innerHTML = 'Refreshing AI summary...';
+                await loadAISummary();
+                element.classList.remove('loading');
             }
         }
         
@@ -3750,7 +3904,27 @@ async def get_email():
         cached_data = background_manager.get_cached_data('email')
         if cached_data:
             logger.info("Returning cached email data")
-            return cached_data
+            # Convert cached data format to expected format
+            if 'high_priority' in cached_data or 'medium_priority' in cached_data or 'low_priority' in cached_data:
+                # This is the new format from GmailCollector.collect_data()
+                all_emails = []
+                all_emails.extend(cached_data.get('high_priority', []))
+                all_emails.extend(cached_data.get('medium_priority', []))
+                all_emails.extend(cached_data.get('low_priority', []))
+                
+                # Sort by timestamp if available
+                all_emails.sort(key=lambda x: x.get('timestamp', x.get('received_date', '')), reverse=True)
+                
+                return {
+                    "emails": all_emails[:50],  # Return top 50 emails
+                    "unread": sum(1 for email in all_emails if not email.get('read', True)),
+                    "total": len(all_emails),
+                    "analysis_stats": cached_data.get('analysis_stats', {}),
+                    "total_todos": cached_data.get('total_todos', [])
+                }
+            else:
+                # Old format, return as-is
+                return cached_data
         
         # Fallback to real-time collection if no cache available
         logger.info("No cached email data, collecting in real-time")
@@ -3776,6 +3950,7 @@ async def get_email():
                             "sender": email.get('sender', 'Unknown Sender'),
                             "from": email.get('from', email.get('sender', 'Unknown Sender')),
                             "date": email.get('date', email.get('timestamp', 'Unknown date')),
+                            "timestamp": email.get('timestamp', email.get('date', 'Unknown date')),
                             "body": email_body,
                             "snippet": email.get('snippet', ''),
                             "read": email.get('read', True),
@@ -3785,11 +3960,11 @@ async def get_email():
                             "labels": email.get('labels', []),
                             "attachments": email.get('attachments', [])
                         })
-                    return {"unread": unread_count, "total": len(emails_data), "recent": recent_emails}
+                    return {"emails": recent_emails, "unread": unread_count, "total": len(emails_data)}
             except:
                 pass
         
-        return {"unread": 0, "total": 0, "recent": []}
+        return {"emails": [], "unread": 0, "total": 0}
     except Exception as e:
         return {"error": str(e)}
 
@@ -3916,7 +4091,33 @@ async def get_github():
 @app.get("/api/ticktick")
 async def get_ticktick():
     """Get TickTick tasks"""
-    return {"tasks": [], "authenticated": False, "auth_url": "/auth/ticktick"}
+    try:
+        if COLLECTORS_AVAILABLE:
+            from database import get_auth_token
+            token_data = get_auth_token('ticktick')
+            
+            if token_data and token_data.get('access_token'):
+                # Token exists, try to fetch tasks
+                settings = Settings()
+                collector = TickTickCollector(settings)
+                tasks_data = await collector.collect_data()
+                return {
+                    "tasks": tasks_data.get('tasks', []),
+                    "authenticated": True,
+                    "user": token_data.get('user_info', {})
+                }
+            else:
+                # No token, need to authenticate
+                return {
+                    "tasks": [], 
+                    "authenticated": False, 
+                    "auth_url": "/auth/ticktick"
+                }
+        else:
+            return {"error": "TickTick collector not available"}
+    except Exception as e:
+        logger.error(f"TickTick API error: {e}")
+        return {"tasks": [], "authenticated": False, "auth_url": "/auth/ticktick", "error": str(e)}
 
 @app.get("/api/news")
 async def get_news(filter: str = "all"):
@@ -4985,57 +5186,91 @@ async def get_ai_summary():
         # Collect recent data from various sources
         from datetime import datetime, timedelta
         
-        # Get recent emails (last 24 hours)
+        # Initialize with safe defaults
         recent_emails = []
+        upcoming_events = []
+        recent_news = []
+        github_activity = []
+        
+        # Get recent emails (last 24 hours)
         try:
             email_data = await get_email()
-            if 'emails' in email_data:
-                recent_emails = email_data['emails'][:5]  # Top 5 emails
+            if email_data:
+                # Combine all priority levels into one list
+                all_emails = []
+                if 'high_priority' in email_data:
+                    all_emails.extend(email_data['high_priority'])
+                if 'medium_priority' in email_data:
+                    all_emails.extend(email_data['medium_priority'])
+                if 'low_priority' in email_data:
+                    all_emails.extend(email_data['low_priority'][:3])  # Limit low priority to 3
+                
+                for email in all_emails[:5]:  # Total limit of 5 emails
+                    if isinstance(email, dict):
+                        recent_emails.append({
+                            'sender': str(email.get('sender', 'Unknown')),
+                            'subject': str(email.get('subject', 'No subject'))
+                        })
         except Exception as e:
             logger.warning(f"Could not get email data for summary: {e}")
         
         # Get upcoming calendar events (next 3 days)
-        upcoming_events = []
         try:
             calendar_data = await get_calendar()
-            if 'events' in calendar_data:
-                upcoming_events = calendar_data['events'][:5]  # Top 5 events
+            if calendar_data and 'events' in calendar_data:
+                for event in calendar_data['events'][:5]:
+                    if isinstance(event, dict):
+                        upcoming_events.append({
+                            'summary': str(event.get('summary', 'No title')),
+                            'date': str(event.get('start', {}).get('date', 'Unknown date') if isinstance(event.get('start'), dict) else 'Unknown date')
+                        })
         except Exception as e:
             logger.warning(f"Could not get calendar data for summary: {e}")
         
         # Get recent news headlines
-        recent_news = []
         try:
             news_data = await get_news()
-            if 'articles' in news_data:
-                recent_news = news_data['articles'][:3]  # Top 3 news items
+            if news_data and 'articles' in news_data:
+                for article in news_data['articles'][:3]:
+                    if isinstance(article, dict):
+                        recent_news.append({
+                            'title': str(article.get('title', 'No title'))
+                        })
         except Exception as e:
             logger.warning(f"Could not get news data for summary: {e}")
         
         # Get GitHub activity
-        github_activity = []
         try:
             github_data = await get_github()
-            if 'data' in github_data:
-                github_activity = github_data['data'][:3]  # Top 3 GitHub items
+            if github_data and 'items' in github_data:
+                for item in github_data['items'][:3]:
+                    if isinstance(item, dict):
+                        github_activity.append({
+                            'title': str(item.get('title', 'No title')),
+                            'type': str(item.get('type', 'Unknown'))
+                        })
         except Exception as e:
             logger.warning(f"Could not get GitHub data for summary: {e}")
         
-        # Create summary prompt
-        summary_prompt = f"""
-Please provide a brief, friendly summary of my current activities and priorities based on this data:
+        # Create summary prompt with safe string formatting
+        email_list = '\n'.join([f"- From {email['sender']}: {email['subject']}" for email in recent_emails]) if recent_emails else "No recent emails"
+        events_list = '\n'.join([f"- {event['summary']} on {event['date']}" for event in upcoming_events]) if upcoming_events else "No upcoming events"
+        news_list = '\n'.join([f"- {article['title']}" for article in recent_news]) if recent_news else "No recent news"
+        github_list = '\n'.join([f"- {item['title']} ({item['type']})" for item in github_activity]) if github_activity else "No GitHub activity"
+        
+        summary_prompt = f"""Please provide a brief, friendly summary of my current activities and priorities based on this data:
 
 RECENT EMAILS ({len(recent_emails)} items):
-{chr(10).join([f"- From {email.get('sender', 'Unknown')}: {email.get('subject', 'No subject')}" for email in recent_emails])}
+{email_list}
 
 UPCOMING CALENDAR EVENTS ({len(upcoming_events)} items):
-{chr(10).join([f"- {event.get('summary', 'No title')} on {event.get('start', {}).get('date', 'Unknown date')}" for event in upcoming_events])}
+{events_list}
 
 RECENT NEWS ({len(recent_news)} items):
-{chr(10).join([f"- {article.get('title', 'No title')}" for article in recent_news])}
+{news_list}
 
 GITHUB ACTIVITY ({len(github_activity)} items):
-{chr(10).join([f"- {item.get('title', 'No title')} ({item.get('type', 'Unknown')})" for item in github_activity])}
+{github_list}
 
 Please summarize this in 2-3 sentences focusing on:
 1. Important upcoming events or deadlines
@@ -5043,20 +5278,20 @@ Please summarize this in 2-3 sentences focusing on:
 3. Notable news or work items
 4. Any patterns or priorities you notice
 
-Keep it concise, actionable, and friendly.
-"""
+Keep it concise, actionable, and friendly."""
         
         # Get AI response
         providers = ai_manager.list_providers()
         if not providers:
             return {"summary": "No AI providers available for summary generation."}
         
-        # Use the first available provider
-        if isinstance(providers, dict):
-            provider_name = list(providers.keys())[0]
-        else:
-            provider_name = providers[0] if providers else None
-            
+        # list_providers() returns a list of dicts, not a dict
+        provider_name = None
+        for provider_info in providers:
+            if isinstance(provider_info, dict) and 'name' in provider_info:
+                provider_name = provider_info['name']
+                break
+                
         if not provider_name:
             return {"summary": "No AI provider name available."}
             
@@ -5065,18 +5300,35 @@ Keep it concise, actionable, and friendly.
         if not provider:
             return {"summary": "AI provider not available for summary generation."}
         
-        response = await provider.chat(summary_prompt)
-        
-        return {
-            "summary": response.get('response', 'Unable to generate summary.'),
-            "timestamp": datetime.now().isoformat(),
-            "data_sources": {
-                "emails": len(recent_emails),
-                "events": len(upcoming_events),
-                "news": len(recent_news),
-                "github": len(github_activity)
+        try:
+            # Format messages properly for the chat interface
+            messages = [
+                {"role": "user", "content": summary_prompt}
+            ]
+            response = await provider.chat(messages)
+            
+            return {
+                "summary": response if isinstance(response, str) else 'Unable to generate summary.',
+                "timestamp": datetime.now().isoformat(),
+                "data_sources": {
+                    "emails": len(recent_emails),
+                    "events": len(upcoming_events),
+                    "news": len(recent_news),
+                    "github": len(github_activity)
+                }
             }
-        }
+        except Exception as chat_error:
+            logger.error(f"Error in AI chat: {chat_error}")
+            return {
+                "summary": f"AI summary temporarily unavailable. Data available: {len(recent_emails)} emails, {len(upcoming_events)} events, {len(recent_news)} news, {len(github_activity)} GitHub items.",
+                "timestamp": datetime.now().isoformat(),
+                "data_sources": {
+                    "emails": len(recent_emails),
+                    "events": len(upcoming_events),
+                    "news": len(recent_news),
+                    "github": len(github_activity)
+                }
+            }
         
     except Exception as e:
         logger.error(f"Error generating AI summary: {e}")
@@ -5165,6 +5417,131 @@ async def initialize_ai_providers():
                         
     except Exception as e:
         logger.error(f"Error initializing AI providers: {e}")
+
+
+# TickTick Authentication Endpoints
+@app.get("/auth/ticktick")
+async def ticktick_auth():
+    """Initiate TickTick OAuth flow."""
+    try:
+        if COLLECTORS_AVAILABLE:
+            settings = Settings()
+            collector = TickTickCollector(settings)
+            auth_url = collector.get_auth_url()
+            
+            # Redirect to TickTick OAuth
+            return RedirectResponse(auth_url)
+        else:
+            return {"error": "TickTick collector not available"}
+    except Exception as e:
+        logger.error(f"TickTick auth error: {e}")
+        return {"error": str(e)}
+
+
+@app.get("/auth/ticktick/callback")
+async def ticktick_callback(code: str = None, state: str = None, error: str = None):
+    """Handle TickTick OAuth callback."""
+    try:
+        if error:
+            return HTMLResponse(f"""
+                <html>
+                    <head><title>TickTick Connection Failed</title></head>
+                    <body style="font-family: Arial, sans-serif; padding: 20px; text-align: center;">
+                        <h2>❌ TickTick Connection Failed</h2>
+                        <p>Error: {error}</p>
+                        <p>You can close this window and try again.</p>
+                        <script>
+                            setTimeout(() => {{
+                                window.close();
+                            }}, 3000);
+                        </script>
+                    </body>
+                </html>
+            """)
+            
+        if COLLECTORS_AVAILABLE and code:
+            settings = Settings()
+            collector = TickTickCollector(settings)
+            
+            # Exchange code for token
+            token_data = await collector.exchange_code_for_token(code)
+            
+            if token_data:
+                # Redirect back to dashboard with success
+                return HTMLResponse("""
+                    <html>
+                        <head><title>TickTick Connected</title></head>
+                        <body style="font-family: Arial, sans-serif; padding: 20px; text-align: center;">
+                            <h2>✅ TickTick Connected Successfully!</h2>
+                            <p>You can now close this window and return to your dashboard.</p>
+                            <script>
+                                setTimeout(() => {
+                                    window.close();
+                                }, 3000);
+                            </script>
+                        </body>
+                    </html>
+                """)
+            else:
+                return HTMLResponse("""
+                    <html>
+                        <head><title>TickTick Connection Failed</title></head>
+                        <body style="font-family: Arial, sans-serif; padding: 20px; text-align: center;">
+                            <h2>❌ Failed to get access token</h2>
+                            <p>You can close this window and try again.</p>
+                            <script>
+                                setTimeout(() => {
+                                    window.close();
+                                }, 3000);
+                            </script>
+                        </body>
+                    </html>
+                """)
+        else:
+            return HTMLResponse("""
+                <html>
+                    <head><title>TickTick Connection Failed</title></head>
+                    <body style="font-family: Arial, sans-serif; padding: 20px; text-align: center;">
+                        <h2>❌ Authorization code required</h2>
+                        <p>You can close this window and try again.</p>
+                        <script>
+                            setTimeout(() => {
+                                window.close();
+                            }, 3000);
+                        </script>
+                    </body>
+                </html>
+            """)
+    except Exception as e:
+        logger.error(f"TickTick callback error: {e}")
+        return HTMLResponse(f"""
+            <html>
+                <head><title>TickTick Connection Error</title></head>
+                <body style="font-family: Arial, sans-serif; padding: 20px; text-align: center;">
+                    <h2>❌ Connection Error</h2>
+                    <p>Error: {str(e)}</p>
+                    <p>You can close this window and try again.</p>
+                    <script>
+                        setTimeout(() => {{
+                            window.close();
+                        }}, 3000);
+                    </script>
+                </body>
+            </html>
+        """)
+
+
+@app.post("/auth/ticktick/disconnect")
+async def ticktick_disconnect():
+    """Disconnect TickTick integration."""
+    try:
+        # Use the existing database functions to clear the token
+        from database import save_auth_token
+        save_auth_token('ticktick', {}, None)  # Clear the token
+        return {"success": True, "message": "TickTick disconnected successfully"}
+    except Exception as e:
+        logger.error(f"TickTick disconnect error: {e}")
+        return {"error": str(e)}
 
 
 @app.on_event("startup")

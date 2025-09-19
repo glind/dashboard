@@ -32,7 +32,7 @@ class TickTickCollector:
         self.auth_url = "https://ticktick.com/oauth"
         self.client_id = os.getenv("TICKTICK_CLIENT_ID", "LWv12xUi59IkcCP5Gx")
         self.client_secret = os.getenv("TICKTICK_CLIENT_SECRET")
-        self.redirect_uri = "http://localhost:8008/auth/ticktick/callback"
+        self.redirect_uri = "http://localhost:8008"
         
         if not self.client_secret:
             raise ValueError("TICKTICK_CLIENT_SECRET environment variable is required")

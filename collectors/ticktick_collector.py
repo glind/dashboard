@@ -34,8 +34,16 @@ class TickTickCollector:
         self.client_secret = os.getenv("TICKTICK_CLIENT_SECRET")
         self.redirect_uri = "http://localhost:8008"
         
-        if not self.client_secret:
-            raise ValueError("TICKTICK_CLIENT_SECRET environment variable is required")
+        # Check for direct API token first (easier setup)
+        self.api_token = os.getenv("TICKTICK_API_TOKEN")
+        if DATABASE_AVAILABLE:
+            creds = get_credentials('ticktick')
+            if creds and creds.get('api_token'):
+                self.api_token = creds.get('api_token')
+        
+        # If no API token and no client_secret, warn user
+        if not self.api_token and not self.client_secret:
+            logger.warning("TickTick: No API token or client credentials found. Set TICKTICK_API_TOKEN or add credentials to database.")
         
     def get_auth_url(self, state: str = None) -> str:
         """Generate OAuth authorization URL."""
@@ -90,13 +98,18 @@ class TickTickCollector:
                 raise Exception(f"Token exchange failed: {response.status_code}")
     
     async def get_access_token(self) -> Optional[str]:
-        """Get valid access token from database or settings."""
+        """Get valid access token from database, settings, or direct token."""
+        # First check for direct API token (simplest approach)
+        if self.api_token:
+            return self.api_token
+            
+        # Then check OAuth tokens in database
         if DATABASE_AVAILABLE:
             token_data = get_auth_token('ticktick')
             if token_data:
                 return token_data.get('access_token')
         
-        # Fallback to settings or credentials
+        # Fallback to credentials database
         if DATABASE_AVAILABLE:
             creds = get_credentials("ticktick")
             if creds:

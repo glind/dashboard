@@ -4799,6 +4799,135 @@ async def save_admin_settings(request: Request):
         return {"error": str(e)}
 
 
+# Google OAuth Authentication Endpoints
+@app.get("/auth/google/calendar")
+async def google_calendar_auth():
+    """Initiate Google Calendar OAuth flow."""
+    try:
+        from google_auth_oauthlib.flow import Flow
+        import os
+        
+        # Check if credentials file exists
+        creds_file = "config/google_oauth_config.json"
+        if not os.path.exists(creds_file):
+            raise HTTPException(status_code=404, detail=f"Google OAuth config file not found at {creds_file}. Please set up Google Cloud Console credentials.")
+        
+        # Create OAuth flow with comprehensive scopes
+        # Include all scopes that Google typically returns to avoid scope mismatch
+        flow = Flow.from_client_secrets_file(
+            creds_file,
+            scopes=[
+                'https://www.googleapis.com/auth/calendar.readonly',
+                'https://www.googleapis.com/auth/gmail.readonly',
+                'https://www.googleapis.com/auth/userinfo.profile',
+                'https://www.googleapis.com/auth/userinfo.email',
+                'openid'
+            ],
+            redirect_uri='http://localhost:8008/auth/google/callback'
+        )
+        
+        authorization_url, state = flow.authorization_url(
+            access_type='offline',
+            include_granted_scopes='true',
+            prompt='consent'  # Force consent to ensure refresh_token is provided
+        )
+        
+        return RedirectResponse(url=authorization_url)
+        
+    except ImportError:
+        raise HTTPException(status_code=500, detail="Google OAuth libraries not installed. Run: pip install google-auth-oauthlib google-api-python-client")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"OAuth setup failed: {str(e)}")
+
+@app.get("/auth/google/gmail")
+async def google_gmail_auth():
+    """Initiate Google Gmail OAuth flow (same as calendar since we use combined scopes)."""
+    return await google_calendar_auth()
+
+@app.get("/auth/google/callback")
+async def google_oauth_callback(code: str = None, state: str = None, error: str = None):
+    """Handle Google OAuth callback."""
+    if error:
+        raise HTTPException(status_code=400, detail=f"OAuth error: {error}")
+    
+    if not code:
+        raise HTTPException(status_code=400, detail="No authorization code provided")
+    
+    try:
+        from google_auth_oauthlib.flow import Flow
+        import os
+        
+        creds_file = "config/google_oauth_config.json"
+        if not os.path.exists(creds_file):
+            raise HTTPException(status_code=404, detail="Google OAuth config file not found")
+        
+        # Create OAuth flow with comprehensive scopes
+        # Google automatically adds profile/email/openid scopes, so we include them
+        flow = Flow.from_client_secrets_file(
+            creds_file,
+            scopes=[
+                'https://www.googleapis.com/auth/calendar.readonly',
+                'https://www.googleapis.com/auth/gmail.readonly',
+                'https://www.googleapis.com/auth/userinfo.profile',
+                'https://www.googleapis.com/auth/userinfo.email',
+                'openid'
+            ],
+            redirect_uri='http://localhost:8008/auth/google/callback'
+        )
+        
+        # Exchange code for token (disable scope validation to handle Google's automatic additions)
+        flow.fetch_token(code=code)
+        
+        # Save credentials
+        credentials = flow.credentials
+        
+        # Ensure tokens directory exists
+        os.makedirs('tokens', exist_ok=True)
+        
+        # Save credentials to tokens file
+        tokens_file = 'tokens/google_credentials.json'
+        with open(tokens_file, 'w') as f:
+            f.write(credentials.to_json())
+        
+        logger.info(f"Google credentials saved to {tokens_file}")
+        
+        # Return success page that closes the popup
+        return HTMLResponse(content="""
+        <html>
+            <head><title>Google Authentication Success</title></head>
+            <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
+                <h2 style="color: green;">✅ Google Authentication Successful!</h2>
+                <p>Your Google Calendar and Gmail access has been configured.</p>
+                <p>You can close this window and return to your dashboard.</p>
+                <script>
+                    setTimeout(() => {
+                        window.close();
+                    }, 3000);
+                </script>
+            </body>
+        </html>
+        """)
+        
+    except ImportError:
+        raise HTTPException(status_code=500, detail="Google OAuth libraries not installed")
+    except Exception as e:
+        logger.error(f"OAuth callback error: {e}")
+        raise HTTPException(status_code=500, detail=f"OAuth callback failed: {str(e)}")
+
+@app.post("/auth/google/disconnect")
+async def google_disconnect():
+    """Disconnect Google authentication."""
+    try:
+        import os
+        tokens_file = 'tokens/google_credentials.json'
+        if os.path.exists(tokens_file):
+            os.remove(tokens_file)
+            logger.info("Google credentials removed")
+        return {"success": True, "message": "Google authentication disconnected"}
+    except Exception as e:
+        logger.error(f"Error disconnecting Google: {e}")
+        return {"success": False, "error": str(e)}
+
 # AI Assistant API Endpoints
 @app.get("/api/ai/providers")
 async def get_ai_providers():

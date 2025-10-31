@@ -121,6 +121,23 @@ check_config() {
     echo -e "${GREEN}   ✅ Configuration ready${NC}"
 }
 
+# Function to check database integrity
+check_database() {
+    echo -e "${BLUE}🗄️  Checking database integrity...${NC}"
+    
+    if [ -f "dashboard.db" ]; then
+        # Check if we can access the database and key tables exist
+        if sqlite3 dashboard.db "SELECT name FROM sqlite_master WHERE type='table' AND name='vanity_alerts';" | grep -q vanity_alerts; then
+            echo -e "${GREEN}   ✅ Database integrity check passed${NC}"
+        else
+            echo -e "${YELLOW}   ⚠️  Database appears corrupted, will be recreated on startup${NC}"
+            mv dashboard.db "dashboard.db.corrupted.$(date +%s)" 2>/dev/null || true
+        fi
+    else
+        echo -e "${BLUE}   ℹ️  Database will be created on first startup${NC}"
+    fi
+}
+
 # Function to start the server
 start_server() {
     echo -e "${BLUE}🌟 Starting dashboard server...${NC}"
@@ -146,7 +163,7 @@ start_server() {
         echo -e "${GREEN}✅ Dashboard started successfully!${NC}"
         echo ""
         echo -e "${GREEN}📍 Dashboard URL (Local): http://localhost:$SERVER_PORT${NC}"
-        echo -e "${GREEN}📍 Dashboard URL (Network): http://$(hostname -I | awk '{print $1}'):$SERVER_PORT${NC}"
+        echo -e "${GREEN}📍 Dashboard URL (Network): http://$(ipconfig getifaddr en0 2>/dev/null || echo "localhost"):$SERVER_PORT${NC}"
         echo -e "${GREEN}🔧 API Docs: http://localhost:$SERVER_PORT/docs${NC}"
         echo -e "${GREEN}📋 Process ID: $pid${NC}"
         echo ""
@@ -179,7 +196,7 @@ show_status() {
         if ps -p "$pid" > /dev/null 2>&1; then
             echo -e "${GREEN}✅ Running (PID: $pid)${NC}"
             echo -e "   Local URL: http://localhost:$SERVER_PORT"
-            echo -e "   Network URL: http://$(hostname -I | awk '{print $1}'):$SERVER_PORT"
+            echo -e "   Network URL: http://$(ipconfig getifaddr en0 2>/dev/null || echo "localhost"):$SERVER_PORT"
             echo -e "   Uptime: $(ps -o etime= -p "$pid" | tr -d ' ')"
         else
             echo -e "${RED}❌ Not running (stale PID file)${NC}"
@@ -197,6 +214,7 @@ case "${1:-start}" in
         setup_venv
         install_requirements
         check_config
+        check_database
         start_server
         ;;
     "stop")
@@ -209,6 +227,7 @@ case "${1:-start}" in
         setup_venv
         install_requirements
         check_config
+        check_database
         start_server
         ;;
     "status")
@@ -221,6 +240,17 @@ case "${1:-start}" in
             echo -e "${RED}❌ No log file found${NC}"
         fi
         ;;
+    "repair")
+        echo -e "${YELLOW}🔧 Repairing database...${NC}"
+        stop_server
+        if [ -f "dashboard.db" ]; then
+            backup_name="dashboard.db.backup.$(date +%s)"
+            mv dashboard.db "$backup_name"
+            echo -e "${BLUE}   Backed up database to $backup_name${NC}"
+        fi
+        echo -e "${GREEN}   Database will be recreated on next startup${NC}"
+        echo -e "${BLUE}   Run './startup.sh start' to recreate and start${NC}"
+        ;;
     *)
         echo -e "${BLUE}Personal Dashboard Control Script${NC}"
         echo ""
@@ -232,6 +262,7 @@ case "${1:-start}" in
         echo "  restart  - Restart the dashboard"
         echo "  status   - Show dashboard status"
         echo "  logs     - Show live logs"
+        echo "  repair   - Repair/recreate corrupted database"
         echo ""
         echo -e "${YELLOW}🚨 IMPORTANT: Always use this script to start the dashboard${NC}"
         echo -e "${YELLOW}   Never use 'python3 main.py' directly${NC}"

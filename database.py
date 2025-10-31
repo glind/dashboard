@@ -5,6 +5,7 @@ Database models and initialization for the Personal Dashboard.
 import sqlite3
 import json
 import logging
+import os
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Set
@@ -25,7 +26,9 @@ class DatabaseManager:
     
     def init_database(self):
         """Initialize database tables."""
-        with self.get_connection() as conn:
+        try:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
             
             # Credentials table
@@ -173,6 +176,21 @@ class DatabaseManager:
                 )
             """)
             
+            # Vanity Alerts table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS vanity_alerts (
+                    id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    url TEXT,
+                    snippet TEXT,
+                    source TEXT,
+                    search_term TEXT,
+                    confidence_score REAL DEFAULT 0.0,
+                    is_liked INTEGER DEFAULT 0,
+                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
             # Data cleanup log table
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS data_cleanup_log (
@@ -309,6 +327,21 @@ class DatabaseManager:
             
             conn.commit()
             logger.info("Database initialized successfully")
+            
+        except Exception as e:
+            logger.error(f"Database initialization failed: {e}")
+            # Attempt to rollback
+            try:
+                conn.rollback()
+            except:
+                pass
+            raise RuntimeError(f"Database initialization failed: {e}")
+        
+        finally:
+            try:
+                conn.close()
+            except:
+                pass
     
     @contextmanager
     def get_connection(self):

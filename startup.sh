@@ -172,7 +172,7 @@ start_server() {
         
         # Test the server is responding
         sleep 2
-        if curl -s -o /dev/null -w "%{http_code}" "http://localhost:$SERVER_PORT/health" | grep -q "200"; then
+        if curl -s -o /dev/null -w "%{http_code}" "http://localhost:$SERVER_PORT" | grep -q "200"; then
             echo -e "${GREEN}🎉 Server health check passed!${NC}"
         else
             echo -e "${YELLOW}⚠️  Server started but health check failed (may still be initializing)${NC}"

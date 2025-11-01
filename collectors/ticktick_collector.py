@@ -392,3 +392,37 @@ class TickTickCollector:
         # Test with a simple API call
         result = await self.make_authenticated_request("project")
         return result is not None
+    
+    async def collect_data(self) -> Dict[str, Any]:
+        """Collect TickTick data (tasks and projects)."""
+        try:
+            if not await self.is_authenticated():
+                logger.warning("TickTick not authenticated")
+                return {
+                    "tasks": [],
+                    "projects": [],
+                    "authenticated": False,
+                    "error": "Not authenticated"
+                }
+            
+            # Collect tasks and projects
+            tasks = await self.collect_tasks()
+            projects = await self.collect_projects()
+            stats = await self.get_task_statistics()
+            
+            return {
+                "tasks": tasks,
+                "projects": projects,
+                "statistics": stats,
+                "authenticated": True,
+                "timestamp": datetime.now().isoformat()
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in TickTick collect_data: {e}")
+            return {
+                "tasks": [],
+                "projects": [],
+                "authenticated": False,
+                "error": str(e)
+            }

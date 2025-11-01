@@ -314,6 +314,82 @@ class DatabaseManager:
                 )
             """)
             
+            # News sources management table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS news_sources (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    url TEXT UNIQUE NOT NULL,
+                    category TEXT DEFAULT 'general',
+                    is_active INTEGER DEFAULT 1,
+                    is_custom INTEGER DEFAULT 0,
+                    last_fetched TIMESTAMP,
+                    fetch_count INTEGER DEFAULT 0,
+                    error_count INTEGER DEFAULT 0,
+                    user_preference INTEGER DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Investment tracking table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS investments (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    symbol TEXT NOT NULL,
+                    name TEXT,
+                    type TEXT NOT NULL, -- 'stock', 'crypto', 'currency'
+                    exchange TEXT,
+                    current_price REAL,
+                    previous_price REAL,
+                    change_percent REAL,
+                    market_cap REAL,
+                    volume REAL,
+                    last_updated TIMESTAMP,
+                    is_tracked INTEGER DEFAULT 1,
+                    external_source TEXT, -- '5003_api', 'external_api', etc.
+                    external_id TEXT,
+                    user_notes TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Local services monitoring table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS local_services (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    service_name TEXT,
+                    port INTEGER,
+                    ip_address TEXT,
+                    hostname TEXT,
+                    service_type TEXT, -- 'web', 'api', 'database', etc.
+                    status TEXT DEFAULT 'unknown', -- 'running', 'stopped', 'error'
+                    last_checked TIMESTAMP,
+                    response_time REAL,
+                    endpoint_url TEXT,
+                    is_monitored INTEGER DEFAULT 1,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Network discovery table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS network_devices (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ip_address TEXT UNIQUE NOT NULL,
+                    hostname TEXT,
+                    mac_address TEXT,
+                    device_type TEXT,
+                    manufacturer TEXT,
+                    open_ports TEXT, -- JSON array of open ports
+                    services TEXT, -- JSON array of detected services
+                    last_seen TIMESTAMP,
+                    is_online INTEGER DEFAULT 0,
+                    response_time REAL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
             # AI Assistant indexes
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_ai_providers_active ON ai_providers(is_active)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_ai_providers_default ON ai_providers(is_default)")
@@ -324,6 +400,17 @@ class DatabaseManager:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_ai_training_data_created ON ai_training_data(created_at)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_ai_model_training_provider ON ai_model_training(provider_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_ai_model_training_status ON ai_model_training(training_status)")
+            
+            # New table indexes
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_news_sources_active ON news_sources(is_active)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_news_sources_category ON news_sources(category)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_investments_symbol ON investments(symbol)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_investments_type ON investments(type)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_investments_tracked ON investments(is_tracked)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_local_services_port ON local_services(port)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_local_services_status ON local_services(status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_network_devices_ip ON network_devices(ip_address)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_network_devices_online ON network_devices(is_online)")
             
             conn.commit()
             logger.info("Database initialized successfully")
@@ -1570,6 +1657,186 @@ class DatabaseManager:
                 
         except Exception as e:
             logger.error(f"Error updating AI training from feedback: {e}")
+
+    # News Sources Management
+    def add_news_source(self, name: str, url: str, category: str = 'general', is_custom: bool = True) -> int:
+        """Add a new news source."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO news_sources (name, url, category, is_custom)
+                VALUES (?, ?, ?, ?)
+            """, (name, url, category, 1 if is_custom else 0))
+            conn.commit()
+            return cursor.lastrowid
+
+    def get_news_sources(self, active_only: bool = True) -> List[Dict[str, Any]]:
+        """Get all news sources."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            query = "SELECT * FROM news_sources"
+            if active_only:
+                query += " WHERE is_active = 1"
+            query += " ORDER BY user_preference DESC, name"
+            
+            cursor.execute(query)
+            return [dict(row) for row in cursor.fetchall()]
+
+    def update_news_source_preference(self, source_id: int, preference: int):
+        """Update user preference for a news source (0-5 scale)."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE news_sources 
+                SET user_preference = ?, updated_at = CURRENT_TIMESTAMP 
+                WHERE id = ?
+            """, (preference, source_id))
+            conn.commit()
+
+    def toggle_news_source(self, source_id: int, active: bool):
+        """Toggle news source active status."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE news_sources 
+                SET is_active = ?, updated_at = CURRENT_TIMESTAMP 
+                WHERE id = ?
+            """, (1 if active else 0, source_id))
+            conn.commit()
+
+    def update_news_source_stats(self, source_id: int, success: bool = True):
+        """Update news source fetch statistics."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            if success:
+                cursor.execute("""
+                    UPDATE news_sources 
+                    SET fetch_count = fetch_count + 1, last_fetched = CURRENT_TIMESTAMP,
+                        updated_at = CURRENT_TIMESTAMP 
+                    WHERE id = ?
+                """, (source_id,))
+            else:
+                cursor.execute("""
+                    UPDATE news_sources 
+                    SET error_count = error_count + 1, updated_at = CURRENT_TIMESTAMP 
+                    WHERE id = ?
+                """, (source_id,))
+            conn.commit()
+
+    # Investment Tracking
+    def save_investment_data(self, symbol: str, name: str, inv_type: str, data: Dict[str, Any]):
+        """Save investment data."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT OR REPLACE INTO investments 
+                (symbol, name, type, exchange, current_price, previous_price, 
+                 change_percent, market_cap, volume, last_updated, external_source, external_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                symbol, name, inv_type, 
+                data.get('exchange'), data.get('current_price'), data.get('previous_price'),
+                data.get('change_percent'), data.get('market_cap'), data.get('volume'),
+                datetime.now(), data.get('source'), data.get('external_id')
+            ))
+            conn.commit()
+
+    def get_tracked_investments(self) -> List[Dict[str, Any]]:
+        """Get all tracked investments."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT * FROM investments WHERE is_tracked = 1 
+                ORDER BY type, symbol
+            """)
+            return [dict(row) for row in cursor.fetchall()]
+
+    def toggle_investment_tracking(self, investment_id: int, tracked: bool):
+        """Toggle investment tracking."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE investments SET is_tracked = ? WHERE id = ?
+            """, (1 if tracked else 0, investment_id))
+            conn.commit()
+
+    # Local Services Monitoring
+    def save_local_service(self, service_name: str, port: int, ip_address: str = '127.0.0.1', 
+                          service_type: str = 'web', endpoint_url: str = None):
+        """Save or update local service information."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT OR REPLACE INTO local_services 
+                (service_name, port, ip_address, service_type, endpoint_url, last_checked)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (service_name, port, ip_address, service_type, endpoint_url, datetime.now()))
+            conn.commit()
+            return cursor.lastrowid
+
+    def update_service_status(self, service_id: int, status: str, response_time: float = None):
+        """Update service status and response time."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE local_services 
+                SET status = ?, response_time = ?, last_checked = ?
+                WHERE id = ?
+            """, (status, response_time, datetime.now(), service_id))
+            conn.commit()
+
+    def get_monitored_services(self) -> List[Dict[str, Any]]:
+        """Get all monitored services."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT * FROM local_services WHERE is_monitored = 1 
+                ORDER BY port
+            """)
+            return [dict(row) for row in cursor.fetchall()]
+
+    # Network Device Discovery
+    def save_network_device(self, ip_address: str, hostname: str = None, mac_address: str = None,
+                           device_type: str = None, manufacturer: str = None, open_ports: List[int] = None,
+                           services: List[str] = None, is_online: bool = True, response_time: float = None):
+        """Save or update network device information."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT OR REPLACE INTO network_devices 
+                (ip_address, hostname, mac_address, device_type, manufacturer, 
+                 open_ports, services, last_seen, is_online, response_time)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                ip_address, hostname, mac_address, device_type, manufacturer,
+                json.dumps(open_ports or []), json.dumps(services or []),
+                datetime.now(), 1 if is_online else 0, response_time
+            ))
+            conn.commit()
+            return cursor.lastrowid
+
+    def get_network_devices(self, online_only: bool = False) -> List[Dict[str, Any]]:
+        """Get network devices."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            query = "SELECT * FROM network_devices"
+            if online_only:
+                query += " WHERE is_online = 1"
+            query += " ORDER BY ip_address"
+            
+            cursor.execute(query)
+            devices = []
+            for row in cursor.fetchall():
+                device = dict(row)
+                # Parse JSON fields
+                try:
+                    device['open_ports'] = json.loads(device['open_ports']) if device['open_ports'] else []
+                    device['services'] = json.loads(device['services']) if device['services'] else []
+                except:
+                    device['open_ports'] = []
+                    device['services'] = []
+                devices.append(device)
+            return devices
 
     def start_ai_model_training(self, provider_id: int, training_data_hash: str) -> str:
         """Start AI model training."""

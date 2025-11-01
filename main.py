@@ -41,6 +41,8 @@ try:
     from collectors.ticktick_collector import TickTickCollector
     from collectors.jokes_collector import JokesCollector
     from collectors.weather_collector import WeatherCollector
+    from collectors.investments_collector import InvestmentsCollector
+    from collectors.local_services_collector import LocalServicesCollector
     from config.settings import Settings
     COLLECTORS_AVAILABLE = True
 except ImportError as e:
@@ -4093,19 +4095,36 @@ async def get_ticktick():
     """Get TickTick tasks"""
     try:
         if COLLECTORS_AVAILABLE:
-            from database import get_auth_token
-            token_data = get_auth_token('ticktick')
+            from database import get_auth_token, get_credentials
             
-            if token_data and token_data.get('access_token'):
+            # Check both OAuth tokens and direct API tokens
+            token_data = get_auth_token('ticktick')
+            creds = get_credentials('ticktick')
+            
+            has_oauth = token_data and token_data.get('access_token')
+            has_api_token = creds and creds.get('api_token')
+            
+            if has_oauth or has_api_token:
                 # Token exists, try to fetch tasks
                 settings = Settings()
                 collector = TickTickCollector(settings)
                 tasks_data = await collector.collect_data()
-                return {
-                    "tasks": tasks_data.get('tasks', []),
-                    "authenticated": True,
-                    "user": token_data.get('user_info', {})
-                }
+                
+                if tasks_data.get('authenticated'):
+                    return {
+                        "tasks": tasks_data.get('tasks', []),
+                        "projects": tasks_data.get('projects', []),
+                        "statistics": tasks_data.get('statistics', {}),
+                        "authenticated": True,
+                        "user": token_data.get('user_info', {}) if token_data else {}
+                    }
+                else:
+                    return {
+                        "tasks": [], 
+                        "authenticated": False, 
+                        "auth_url": "/auth/ticktick",
+                        "error": tasks_data.get('error', 'Authentication failed')
+                    }
             else:
                 # No token, need to authenticate
                 return {
@@ -4121,72 +4140,80 @@ async def get_ticktick():
 
 @app.get("/api/news")
 async def get_news(filter: str = "all"):
-    """Get filtered news headlines using the NewsCollector"""
+    """Get filtered news headlines from database"""
     try:
-        # Try to get cached data first
-        cached_data = background_manager.get_cached_data('news')
-        if cached_data:
-            logger.info("Returning cached news data")
-            return cached_data
+        # Get news articles from database
+        with db.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT title, url, snippet, source, published_date, topics, relevance_score
+                FROM news_articles 
+                ORDER BY published_date DESC 
+                LIMIT 50
+            ''')
+            db_articles = cursor.fetchall()
+            
+        logger.info(f"Found {len(db_articles)} articles in database")
         
-        # Fallback to real-time collection if no cache available
-        logger.info("No cached news data, collecting in real-time")
-        if COLLECTORS_AVAILABLE:
-            from collectors.news_collector import NewsCollector
-            collector = NewsCollector()
-            news_data = await collector.collect_data()
+        # Get previously rated news items to filter them out
+        rated_item_ids = db.get_rated_item_ids('news')
+        
+        # Process articles from database
+        articles = []
+        for article in db_articles:
+            # Create a unique ID for this article
+            article_id = f"news_{hash(article['title'] + str(article['url'] if article['url'] else ''))}"
             
-            # Get previously rated news items to filter them out
-            rated_item_ids = db.get_rated_item_ids('news')
+            # Skip if already rated
+            if article_id in rated_item_ids:
+                continue
             
-            # Filter articles based on the filter parameter and exclude rated items
-            articles = []
-            if news_data and 'articles' in news_data:
-                for article in news_data['articles']:
-                    # Create a unique ID for this article
-                    article_id = f"news_{article.get('id', '')}" or f"news_{hash(article['title'] + article.get('url', ''))}"
-                    
-                    # Skip if already rated
-                    if article_id in rated_item_ids:
-                        continue
-                        
-                    # Apply filter logic
-                    article_data = {
-                        "id": article_id,  # Add ID for tracking
-                        "title": article['title'],
-                        "source": article['source'],
-                        "url": article['url'],
-                        "description": article['snippet'] or "No description available",
-                        "published_at": article.get('published_date', 'Unknown'),
-                        "category": ', '.join(article.get('topics', ['General'])),
-                        "relevance_score": article.get('relevance_score', 0.0)
-                    }
-                    
-                    if filter == "all":
-                        articles.append(article_data)
-                    elif filter == "tech" and any(topic.lower() in ['star wars', 'star trek'] for topic in article.get('topics', [])):
-                        articles.append(article_data)
-                    elif filter == "oregon" and any('oregon' in topic.lower() for topic in article.get('topics', [])):
-                        articles.append(article_data)
-                    elif filter == "timbers" and any('timbers' in topic.lower() or 'portland' in topic.lower() for topic in article.get('topics', [])):
-                        articles.append(article_data)
-            
-            # If no articles from collector, fall back to Hacker News
-            if not articles:
-                articles = await get_hacker_news_articles()
-                # Filter out rated Hacker News articles too
-                articles = [article for article in articles if article.get('id', '') not in rated_item_ids]
+            # Parse topics
+            try:
+                import json
+                topics = json.loads(article['topics']) if article['topics'] else ['General']
+            except:
+                topics = ['General']
                 
-            return {
-                "articles": articles[:20],  # Limit to 20 articles
-                "filter": filter,
-                "total": len(articles),
-                "source": "NewsCollector" if articles else "Fallback"
+            # Apply filter logic
+            article_data = {
+                "id": article_id,
+                "title": article['title'],
+                "source": article['source'],
+                "url": article['url'],
+                "description": article['snippet'] or "No description available",
+                "published_at": article['published_date'],
+                "category": ', '.join(topics),
+                "relevance_score": article['relevance_score'] or 0.0
             }
-        else:
-            # Fallback when collectors not available
+            
+            # Filter based on category
+            if filter == "all":
+                articles.append(article_data)
+            elif filter == "tech" and any(topic.lower() in ['technology', 'ai', 'star wars', 'star trek'] for topic in topics):
+                articles.append(article_data)
+            elif filter == "oregon" and any('oregon' in topic.lower() for topic in topics):
+                articles.append(article_data)
+            elif filter == "timbers" and any('timbers' in topic.lower() or 'portland' in topic.lower() for topic in topics):
+                articles.append(article_data)
+            elif filter == "starwars" and any('star wars' in topic.lower() for topic in topics):
+                articles.append(article_data)
+            elif filter == "startrek" and any('star trek' in topic.lower() for topic in topics):
+                articles.append(article_data)
+        
+        # If no articles from database, fall back to Hacker News
+        if not articles:
+            logger.warning("No articles found in database, falling back to Hacker News")
             articles = await get_hacker_news_articles()
-            return {"articles": articles, "filter": filter, "source": "Fallback"}
+            # Filter out rated Hacker News articles too
+            articles = [article for article in articles if article.get('id', '') not in rated_item_ids]
+            
+        return {
+            "articles": articles[:20],  # Limit to 20 articles
+            "filter": filter,
+            "total": len(articles),
+            "source": "Database" if articles else "Fallback"
+        }
             
     except Exception as e:
         logger.error(f"Error in news API: {e}")
@@ -4601,6 +4628,117 @@ async def get_weather():
     except Exception as e:
         logger.error(f"Exception in /api/weather endpoint: {e}", exc_info=True)
         return {"error": str(e)}
+
+@app.get("/api/investments")
+async def get_investments():
+    """Get investment data from local API and external sources"""
+    try:
+        if COLLECTORS_AVAILABLE:
+            collector = InvestmentsCollector()
+            investment_data = await collector.collect_data()
+            return investment_data
+        else:
+            return {"error": "Investment collector not available"}
+    except Exception as e:
+        logger.error(f"Investment API error: {e}")
+        return {"investments": [], "portfolio_summary": {}, "error": str(e)}
+
+@app.post("/api/investments/track")
+async def track_investment(request: Request):
+    """Add a new investment to tracking"""
+    try:
+        data = await request.json()
+        symbol = data.get('symbol', '').upper()
+        name = data.get('name', '')
+        inv_type = data.get('type', 'stock')  # stock, crypto, currency
+        
+        if not symbol:
+            raise HTTPException(status_code=400, detail="Symbol is required")
+        
+        if COLLECTORS_AVAILABLE:
+            collector = InvestmentsCollector()
+            success = await collector.add_investment_to_tracking(symbol, name, inv_type)
+            
+            if success:
+                return {"success": True, "message": f"Added {symbol} to tracking"}
+            else:
+                return {"success": False, "message": f"{symbol} is already being tracked"}
+        else:
+            return {"success": False, "error": "Investment collector not available"}
+    except Exception as e:
+        logger.error(f"Track investment API error: {e}")
+        return {"success": False, "error": str(e)}
+
+@app.get("/api/local-services")
+async def get_local_services():
+    """Get local services and network device information"""
+    try:
+        if COLLECTORS_AVAILABLE:
+            collector = LocalServicesCollector()
+            services_data = await collector.collect_data()
+            return services_data
+        else:
+            return {"error": "Local services collector not available"}
+    except Exception as e:
+        logger.error(f"Local services API error: {e}")
+        return {"local_services": [], "network_devices": [], "system_info": {}, "error": str(e)}
+
+@app.get("/api/news-sources")
+async def get_news_sources():
+    """Get all news sources with management options"""
+    try:
+        sources = db.get_news_sources(active_only=False)
+        return {"sources": sources}
+    except Exception as e:
+        logger.error(f"News sources API error: {e}")
+        return {"sources": [], "error": str(e)}
+
+@app.post("/api/news-sources")
+async def add_news_source(request: Request):
+    """Add a custom news source"""
+    try:
+        data = await request.json()
+        name = data.get('name', '')
+        url = data.get('url', '')
+        category = data.get('category', 'general')
+        
+        if not name or not url:
+            raise HTTPException(status_code=400, detail="Name and URL are required")
+        
+        source_id = db.add_news_source(name, url, category, is_custom=True)
+        return {"success": True, "source_id": source_id, "message": f"Added news source: {name}"}
+    except Exception as e:
+        logger.error(f"Add news source API error: {e}")
+        return {"success": False, "error": str(e)}
+
+@app.put("/api/news-sources/{source_id}/preference")
+async def update_news_source_preference(source_id: int, request: Request):
+    """Update user preference for a news source"""
+    try:
+        data = await request.json()
+        preference = data.get('preference', 0)  # 0-5 scale
+        
+        if not 0 <= preference <= 5:
+            raise HTTPException(status_code=400, detail="Preference must be between 0 and 5")
+        
+        db.update_news_source_preference(source_id, preference)
+        return {"success": True, "message": "Updated news source preference"}
+    except Exception as e:
+        logger.error(f"Update news source preference API error: {e}")
+        return {"success": False, "error": str(e)}
+
+@app.put("/api/news-sources/{source_id}/toggle")
+async def toggle_news_source(source_id: int, request: Request):
+    """Toggle news source active status"""
+    try:
+        data = await request.json()
+        active = data.get('active', True)
+        
+        db.toggle_news_source(source_id, active)
+        return {"success": True, "message": f"News source {'activated' if active else 'deactivated'}"}
+    except Exception as e:
+        logger.error(f"Toggle news source API error: {e}")
+        return {"success": False, "error": str(e)}
 
 @app.post("/api/feedback")
 async def save_feedback(request: Request):

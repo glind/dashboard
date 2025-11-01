@@ -41,6 +41,15 @@ class NewsCollector:
         self._cache_timestamp = None
         self._cache_duration = timedelta(minutes=20)
         
+        # Database manager for dynamic sources
+        try:
+            from database import DatabaseManager
+            self.db = DatabaseManager()
+            self.use_database = True
+        except ImportError:
+            self.use_database = False
+            logger.warning("Database not available, using static news sources")
+        
         self.topics = {
             'oregon_state': [
                 'Oregon State University', 'OSU Beavers', 'Corvallis', 'OSU', 'Oregon State',
@@ -138,13 +147,49 @@ class NewsCollector:
             'https://www.ign.com/articles?format=rss',
             'https://www.theverge.com/rss/index.xml'
         ]
+    
+    def get_dynamic_news_sources(self) -> Dict[str, List[str]]:
+        """Get news sources from database if available."""
+        if not self.use_database:
+            return self.rss_feeds
+            
+        try:
+            # Get active news sources from database
+            sources = self.db.get_news_sources(active_only=True)
+            
+            # Group by category
+            dynamic_sources = {}
+            for source in sources:
+                category = source['category']
+                if category not in dynamic_sources:
+                    dynamic_sources[category] = []
+                dynamic_sources[category].append(source['url'])
+            
+            # Merge with default sources, prioritizing database sources
+            merged_sources = dict(self.rss_feeds)  # Start with defaults
+            for category, urls in dynamic_sources.items():
+                if category in merged_sources:
+                    # Add database sources to existing category
+                    merged_sources[category] = list(set(merged_sources[category] + urls))
+                else:
+                    # New category from database
+                    merged_sources[category] = urls
+            
+            return merged_sources
+            
+        except Exception as e:
+            logger.error(f"Error getting dynamic news sources: {e}")
+            return self.rss_feeds
         
     async def collect_all_news(self) -> List[NewsArticle]:
         """Collect news from all sources and topics."""
         all_articles = []
         
+        # Get dynamic sources from database
+        news_sources = self.get_dynamic_news_sources()
+        
         # Collect from RSS feeds
-        for topic, feeds in self.rss_feeds.items():
+        for topic, feeds in news_sources.items():
             topic_articles = await self._collect_rss_articles(topic, feeds)
             all_articles.extend(topic_articles)
         

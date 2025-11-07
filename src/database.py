@@ -13,7 +13,8 @@ from contextlib import contextmanager
 
 logger = logging.getLogger(__name__)
 
-DATABASE_PATH = "dashboard.db"
+# Database path relative to project root (one level up from src/)
+DATABASE_PATH = str(Path(__file__).parent.parent / "dashboard.db")
 
 
 class DatabaseManager:
@@ -138,6 +139,7 @@ class DatabaseManager:
                     topics TEXT,
                     relevance_score REAL,
                     is_liked INTEGER DEFAULT 0,
+                    is_read INTEGER DEFAULT 0,
                     user_feedback TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
@@ -236,11 +238,24 @@ class DatabaseManager:
                     brand TEXT,
                     description TEXT,
                     health_endpoint TEXT,
+                    production_url TEXT,
+                    api_url TEXT,
                     is_active INTEGER DEFAULT 1,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+            
+            # Add new columns if they don't exist (migration)
+            try:
+                cursor.execute("ALTER TABLE dashboard_projects ADD COLUMN production_url TEXT")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+            
+            try:
+                cursor.execute("ALTER TABLE dashboard_projects ADD COLUMN api_url TEXT")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
             
             # Create indexes for better performance
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_collected_data_service_date ON collected_data(service_name, collection_date)")
@@ -254,6 +269,15 @@ class DatabaseManager:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_todos_status ON universal_todos(status)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_todos_source ON universal_todos(source)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_news_articles_liked ON news_articles(is_liked)")
+            
+            # Migration: Add is_read column to news_articles if it doesn't exist
+            try:
+                cursor.execute("SELECT is_read FROM news_articles LIMIT 1")
+            except sqlite3.OperationalError:
+                logger.info("Adding is_read column to news_articles table")
+                cursor.execute("ALTER TABLE news_articles ADD COLUMN is_read INTEGER DEFAULT 0")
+            
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_news_articles_read ON news_articles(is_read)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_music_content_liked ON music_content(is_liked)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_vanity_alerts_liked ON vanity_alerts(is_liked)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_personality_profile_type ON user_personality_profile(content_type)")
@@ -368,6 +392,26 @@ class DatabaseManager:
                     FOREIGN KEY (message_id) REFERENCES ai_messages (id),
                     FOREIGN KEY (conversation_id) REFERENCES ai_conversations (id)
                 )
+            """)
+            
+            # Safe senders whitelist for email risk assessment
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS safe_email_senders (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    sender_email TEXT UNIQUE NOT NULL,
+                    sender_domain TEXT NOT NULL,
+                    added_reason TEXT,
+                    marked_safe_count INTEGER DEFAULT 1,
+                    last_seen TIMESTAMP,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Create index for fast domain lookups
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_safe_senders_domain 
+                ON safe_email_senders(sender_domain)
             """)
             
             # News sources management table
@@ -533,10 +577,25 @@ class DatabaseManager:
             return [row['service_name'] for row in cursor.fetchall()]
     
     # Authentication tokens management
-    def save_auth_token(self, service_name: str, token_data: Dict[str, Any], expires_at: Optional[datetime] = None):
-        """Save authentication token."""
+    def save_auth_token(self, service_name: str, access_token: str, refresh_token: Optional[str] = None, 
+                       expires_in: Optional[int] = None, token_data: Optional[Dict[str, Any]] = None, 
+                       expires_at: Optional[datetime] = None):
+        """Save authentication token with flexible parameters."""
         with self.get_connection() as conn:
             cursor = conn.cursor()
+            
+            # Build token_data dict if not provided
+            if token_data is None:
+                token_data = {
+                    "access_token": access_token,
+                    "refresh_token": refresh_token,
+                    "expires_in": expires_in
+                }
+            
+            # Calculate expires_at if expires_in provided
+            if expires_at is None and expires_in:
+                expires_at = datetime.now() + timedelta(seconds=expires_in)
+            
             token_json = json.dumps(token_data)
             
             cursor.execute("""
@@ -546,6 +605,41 @@ class DatabaseManager:
             
             conn.commit()
             logger.info(f"Auth token saved for {service_name}")
+    
+    def save_oauth_state(self, service_name: str, state: str):
+        """Save OAuth state for CSRF protection."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            expires_at = datetime.now() + timedelta(minutes=10)  # State expires in 10 minutes
+            
+            cursor.execute("""
+                INSERT INTO auth_tokens (service_name, token_data, expires_at, updated_at)
+                VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+            """, (f"{service_name}_oauth_state", json.dumps({"state": state}), expires_at))
+            
+            conn.commit()
+    
+    def verify_oauth_state(self, service_name: str, state: str) -> bool:
+        """Verify OAuth state for CSRF protection."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT token_data, expires_at FROM auth_tokens 
+                WHERE service_name = ? AND expires_at > CURRENT_TIMESTAMP
+            """, (f"{service_name}_oauth_state",))
+            
+            row = cursor.fetchone()
+            if row:
+                stored_data = json.loads(row['token_data'])
+                stored_state = stored_data.get("state")
+                
+                # Delete the state after verification (one-time use)
+                cursor.execute("DELETE FROM auth_tokens WHERE service_name = ?", 
+                             (f"{service_name}_oauth_state",))
+                conn.commit()
+                
+                return stored_state == state
+            return False
     
     def get_auth_token(self, service_name: str) -> Optional[Dict[str, Any]]:
         """Get authentication token."""
@@ -580,7 +674,9 @@ class DatabaseManager:
         # For Google, also check file-based storage as fallback
         if service_name == "google":
             from pathlib import Path
-            google_file = Path("tokens/google_credentials.json")
+            # Get project root (one level up from src/)
+            project_root = Path(__file__).parent.parent
+            google_file = project_root / "tokens" / "google_credentials.json"
             if google_file.exists():
                 return True
                 
@@ -1036,8 +1132,8 @@ class DatabaseManager:
                 cursor = conn.cursor()
                 cursor.execute("""
                     INSERT OR REPLACE INTO news_articles 
-                    (id, title, url, snippet, source, published_date, topics, relevance_score, user_feedback)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (id, title, url, snippet, source, published_date, topics, relevance_score, user_feedback, is_read)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT is_read FROM news_articles WHERE id = ?), 0))
                 """, (
                     article_data.get('id'),
                     article_data.get('title'),
@@ -1047,13 +1143,60 @@ class DatabaseManager:
                     article_data.get('published_date'),
                     json.dumps(article_data.get('topics', [])),
                     article_data.get('relevance_score', 0.0),
-                    article_data.get('user_feedback')
+                    article_data.get('user_feedback'),
+                    article_data.get('id')  # For the subquery
                 ))
                 conn.commit()
                 return True
         except Exception as e:
             logger.error(f"Error saving news article: {e}")
             return False
+    
+    def mark_article_read(self, article_id: str) -> bool:
+        """Mark a news article as read."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    UPDATE news_articles SET is_read = 1 WHERE id = ?
+                """, (article_id,))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error marking article as read: {e}")
+            return False
+    
+    def get_unread_articles(self, limit: int = 50) -> List[Dict[str, Any]]:
+        """Get unread news articles."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT id, title, url, snippet, source, published_date, topics, relevance_score, is_liked, is_read
+                    FROM news_articles
+                    WHERE is_read = 0
+                    ORDER BY published_date DESC, relevance_score DESC
+                    LIMIT ?
+                """, (limit,))
+                
+                articles = []
+                for row in cursor.fetchall():
+                    articles.append({
+                        'id': row[0],
+                        'title': row[1],
+                        'url': row[2],
+                        'snippet': row[3],
+                        'source': row[4],
+                        'published_date': row[5],
+                        'topics': json.loads(row[6]) if row[6] else [],
+                        'relevance_score': row[7],
+                        'is_liked': bool(row[8]),
+                        'is_read': bool(row[9])
+                    })
+                return articles
+        except Exception as e:
+            logger.error(f"Error getting unread articles: {e}")
+            return []
 
     def save_music_content(self, music_data: Dict[str, Any]) -> bool:
         """Save music content to the database."""
@@ -2065,11 +2208,17 @@ class DatabaseManager:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
+            # Debug logging
+            logger.info(f"Saving dashboard - start_command: {project_data.get('start_command')}")
+            logger.info(f"Saving dashboard - production_url: {project_data.get('production_url')}")
+            logger.info(f"Saving dashboard - api_url: {project_data.get('api_url')}")
+            
             cursor.execute("""
                 INSERT INTO dashboard_projects 
                 (name, path, type, port, start_command, url, github_pages_url, 
-                 custom_domain, brand, description, health_endpoint, is_active, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                 custom_domain, brand, description, health_endpoint, production_url, 
+                 api_url, is_active, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 ON CONFLICT(name) DO UPDATE SET
                     path = excluded.path,
                     type = excluded.type,
@@ -2081,6 +2230,8 @@ class DatabaseManager:
                     brand = excluded.brand,
                     description = excluded.description,
                     health_endpoint = excluded.health_endpoint,
+                    production_url = excluded.production_url,
+                    api_url = excluded.api_url,
                     is_active = excluded.is_active,
                     updated_at = CURRENT_TIMESTAMP
             """, (
@@ -2095,7 +2246,9 @@ class DatabaseManager:
                 project_data.get('brand'),
                 project_data.get('description'),
                 project_data.get('health_endpoint'),
-                project_data.get('is_active', 1)
+                project_data.get('production_url'),
+                project_data.get('api_url'),
+                project_data.get('is_active', 1) if isinstance(project_data.get('is_active'), int) else (1 if project_data.get('active', True) else 0)
             ))
             
             project_id = cursor.lastrowid
@@ -2143,7 +2296,8 @@ class DatabaseManager:
             
             allowed_fields = ['path', 'type', 'port', 'start_command', 'url', 
                             'github_pages_url', 'custom_domain', 'brand', 
-                            'description', 'health_endpoint', 'is_active']
+                            'description', 'health_endpoint', 'production_url', 
+                            'api_url', 'is_active']
             
             for field in allowed_fields:
                 if field in updates:
@@ -2320,6 +2474,121 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Error getting feedback stats: {e}")
             return {}
+    
+    # Safe Email Senders Management
+    def add_safe_sender(self, sender_email: str, reason: str = "User marked as safe") -> bool:
+        """Add an email sender to the safe senders whitelist."""
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+            
+            # Extract domain from email
+            import re
+            domain_match = re.search(r'@([a-zA-Z0-9.-]+)', sender_email)
+            sender_domain = domain_match.group(1).lower() if domain_match else ''
+            
+            cursor.execute("""
+                INSERT INTO safe_email_senders (sender_email, sender_domain, added_reason, last_seen, updated_at)
+                VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                ON CONFLICT(sender_email) DO UPDATE SET
+                    marked_safe_count = marked_safe_count + 1,
+                    last_seen = CURRENT_TIMESTAMP,
+                    updated_at = CURRENT_TIMESTAMP
+            """, (sender_email.lower(), sender_domain, reason))
+            
+            conn.commit()
+            logger.info(f"Added safe sender: {sender_email}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error adding safe sender {sender_email}: {e}")
+            return False
+    
+    def is_safe_sender(self, sender_email: str) -> bool:
+        """Check if an email sender is in the safe senders whitelist."""
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                SELECT id FROM safe_email_senders
+                WHERE sender_email = ? COLLATE NOCASE
+            """, (sender_email.lower(),))
+            
+            result = cursor.fetchone()
+            return result is not None
+            
+        except Exception as e:
+            logger.error(f"Error checking safe sender {sender_email}: {e}")
+            return False
+    
+    def is_safe_domain(self, domain: str) -> bool:
+        """Check if a domain has any safe senders."""
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                SELECT id FROM safe_email_senders
+                WHERE sender_domain = ? COLLATE NOCASE
+                LIMIT 1
+            """, (domain.lower(),))
+            
+            result = cursor.fetchone()
+            return result is not None
+            
+        except Exception as e:
+            logger.error(f"Error checking safe domain {domain}: {e}")
+            return False
+    
+    def get_safe_senders(self) -> List[Dict[str, Any]]:
+        """Get all safe senders."""
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                SELECT sender_email, sender_domain, added_reason, 
+                       marked_safe_count, last_seen, created_at
+                FROM safe_email_senders
+                ORDER BY last_seen DESC
+            """)
+            
+            safe_senders = []
+            for row in cursor.fetchall():
+                safe_senders.append({
+                    'sender_email': row[0],
+                    'sender_domain': row[1],
+                    'added_reason': row[2],
+                    'marked_safe_count': row[3],
+                    'last_seen': row[4],
+                    'created_at': row[5]
+                })
+            
+            return safe_senders
+            
+        except Exception as e:
+            logger.error(f"Error getting safe senders: {e}")
+            return []
+    
+    def remove_safe_sender(self, sender_email: str) -> bool:
+        """Remove an email sender from the safe senders whitelist."""
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                DELETE FROM safe_email_senders
+                WHERE sender_email = ? COLLATE NOCASE
+            """, (sender_email.lower(),))
+            
+            conn.commit()
+            logger.info(f"Removed safe sender: {sender_email}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error removing safe sender {sender_email}: {e}")
+            return False
 
 
 # Global database instance

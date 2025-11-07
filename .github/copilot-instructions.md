@@ -1,8 +1,9 @@
 <!-- Use this file to provide workspace-specific custom instructions to Copilot. For more details, visit https://code.visualstudio.com/docs/copilot/copilot-customization#_use-a-githubcopilotinstructionsmd-file -->
 
 ## 🚨 CRITICAL STARTUP PROTOCOL 🚨
-**ALWAYS use `./startup.sh` to start the dashboard - NEVER use `python3 main.py` directly!**
-- ✅ Correct: `./startup.sh`
+**ALWAYS use `./ops/startup.sh` to start the dashboard - NEVER use `python3 src/main.py` directly!**
+- ✅ Correct: `./ops/startup.sh`
+- ❌ Wrong: `python3 src/main.py`
 - ❌ Wrong: `python3 main.py`
 - ❌ Wrong: `python -m uvicorn`
 - ❌ Wrong: Any other method
@@ -13,6 +14,14 @@
 - Initializes the database
 - Sets up proper environment variables
 - Starts the server on the correct port (8008)
+
+## Project Structure (Buildly Way)
+- **src/** - All application code (main.py, collectors/, processors/, etc.)
+- **ops/** - Deployment assets (Dockerfile, docker-compose.yml, startup.sh)
+- **devdocs/** - ALL documentation (single source of truth)
+- **tests/** - Smoke tests only
+- **BUILDLY.yaml** - Marketplace metadata
+- **LICENSE.md** - BSL 1.1 → Apache-2.0 (Nov 5, 2027)
 
 ## Memory System
 - Always check `LONG_TERM_MEMORY.md` before starting any work

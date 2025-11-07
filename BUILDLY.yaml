@@ -1,0 +1,78 @@
+# Buildly Marketplace Metadata
+# Personal Dashboard - AI-Powered Personal Productivity Hub
+
+name: "Personal Dashboard"
+slug: "personal-dashboard"
+version: "1.0.0"
+summary: "AI-powered personal dashboard integrating email, calendar, tasks, GitHub, news, music, and weather with intelligent insights and automation."
+
+# Licensing
+license: "BSL-1.1->Apache-2.0"
+license_change_date: "2027-11-05"  # 24 months from November 5, 2025
+
+# Categories
+categories:
+  - productivity
+  - ai-tools
+  - dashboards
+  - personal-apps
+
+# Deployment targets (at least 2)
+targets:
+  - docker
+  - github-pages
+
+# Target configurations
+docker:
+  image: "buildly/personal-dashboard"
+  compose_file: "ops/docker-compose.yml"
+  
+github-pages:
+  template_repo: "buildly-marketplace/personal-dashboard"
+  actions_workflow: ".github/workflows/pages.yml"
+
+# Documentation
+docs: "devdocs/"
+
+# Support & Pricing
+support_tier: "community"  # community, standard, enterprise
+price_cents: 0  # Free for MVP, can be updated for paid version
+
+# Technical requirements
+requirements:
+  python: ">=3.10"
+  environment_vars:
+    - GOOGLE_CLIENT_ID
+    - GOOGLE_CLIENT_SECRET
+    - GITHUB_TOKEN
+    - TICKTICK_CLIENT_ID
+    - TICKTICK_CLIENT_SECRET
+    - OPENWEATHER_API_KEY
+    - NEWSAPI_KEY
+    - OLLAMA_HOST
+
+# Links
+repository: "https://github.com/buildly-marketplace/personal-dashboard"
+homepage: "https://buildly.io/marketplace/personal-dashboard"
+
+# Assets
+logo: "assets/logo-512.png"
+screenshots:
+  - "assets/screenshot-overview.png"
+  - "assets/screenshot-ai-assistant.png"
+  - "assets/screenshot-tasks.png"
+
+# Tags for searchability
+tags:
+  - dashboard
+  - ai
+  - productivity
+  - automation
+  - personal
+  - ollama
+  - gmail
+  - calendar
+  - tasks
+  - github
+  - news
+  - weather

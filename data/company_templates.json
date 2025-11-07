@@ -1,0 +1,476 @@
+{
+  "buildly": {
+    "template_name": "Buildly Template",
+    "source_companies": [
+      "Buildly"
+    ],
+    "industry_characteristics": {
+      "primary_industry": "Low-Code/No-Code Platform",
+      "focus_areas": [
+        "Platform Development",
+        "API Integration",
+        "Workflow Automation"
+      ],
+      "industry_specific_terms": [
+        "workflow"
+      ],
+      "market_segment": "B2B SaaS",
+      "technology_stack_preferences": []
+    },
+    "interaction_patterns": {
+      "email_frequency": {
+        "frequency": 16,
+        "pattern": "medium_frequency"
+      },
+      "task_patterns": {
+        "completion_rate": 0.0,
+        "total_tasks": 4,
+        "completed_tasks": 0,
+        "task_types": [
+          "email",
+          "email",
+          "email",
+          "email"
+        ]
+      },
+      "meeting_patterns": {
+        "total_meetings": 2,
+        "meeting_frequency": "occasional",
+        "meeting_types": {
+          "demo": 0,
+          "sync": 0,
+          "technical": 1,
+          "business": 1
+        }
+      },
+      "response_patterns": {
+        "estimated_response_time": "24-48 hours",
+        "response_consistency": "good",
+        "preferred_communication_hours": "business_hours"
+      },
+      "total_interactions": 16,
+      "total_tasks": 4,
+      "meeting_to_email_ratio": 0.125
+    },
+    "success_indicators": [
+      "sustained_communication",
+      "meeting_engagement",
+      "technical_alignment"
+    ],
+    "communication_style": {
+      "dominant_style": "casual",
+      "formality_scores": {
+        "formal": 0,
+        "casual": 7,
+        "business": 0
+      },
+      "technical_depth": 0.125,
+      "urgency_level": 0.0625,
+      "preferred_communication_channels": [
+        "email",
+        "video_call",
+        "phone"
+      ],
+      "response_time_expectations": "standard_business_response"
+    },
+    "project_types": [],
+    "typical_engagement_timeline": "Short-term (< 1 month)",
+    "decision_makers": {
+      "primary_contact_types": {
+        "C-Level": 0,
+        "VP/Director": 0,
+        "Manager": 1,
+        "Technical": 0,
+        "Business": 1
+      },
+      "decision_maker_accessibility": 0.1,
+      "typical_approval_chain": [
+        "Management Approval"
+      ],
+      "contact_diversity": 14
+    },
+    "technical_requirements": [],
+    "business_model_indicators": [
+      "Marketplace"
+    ],
+    "company_size_range": "Small Companies",
+    "geographic_preferences": [
+      "North America",
+      "Europe",
+      "English-speaking markets"
+    ],
+    "matching_score_weights": {
+      "industry_match": 0.25,
+      "size_compatibility": 0.15,
+      "technical_alignment": 0.2,
+      "communication_style_fit": 0.1,
+      "project_type_match": 0.15,
+      "timeline_compatibility": 0.1,
+      "decision_maker_accessibility": 0.05
+    }
+  },
+  "openbuild": {
+    "template_name": "Open Build Template",
+    "source_companies": [
+      "Open Build"
+    ],
+    "industry_characteristics": {
+      "primary_industry": "Developer Tools",
+      "focus_areas": [
+        "Open Source",
+        "Community Building",
+        "Developer Experience"
+      ],
+      "industry_specific_terms": [],
+      "market_segment": "Technology Solutions",
+      "technology_stack_preferences": []
+    },
+    "interaction_patterns": {
+      "email_frequency": {
+        "frequency": 0,
+        "pattern": "none"
+      },
+      "task_patterns": {
+        "completion_rate": 0,
+        "total_tasks": 0
+      },
+      "meeting_patterns": {
+        "total_meetings": 0,
+        "meeting_frequency": "occasional",
+        "meeting_types": {
+          "demo": 0,
+          "sync": 0,
+          "technical": 0,
+          "business": 0
+        }
+      },
+      "response_patterns": {
+        "estimated_response_time": "24-48 hours",
+        "response_consistency": "good",
+        "preferred_communication_hours": "business_hours"
+      },
+      "total_interactions": 0,
+      "total_tasks": 0,
+      "meeting_to_email_ratio": 0
+    },
+    "success_indicators": [],
+    "communication_style": {
+      "dominant_style": "business",
+      "formality_scores": {
+        "formal": 0,
+        "casual": 0,
+        "business": 0
+      },
+      "technical_depth": 0,
+      "urgency_level": 0,
+      "preferred_communication_channels": [
+        "email",
+        "video_call",
+        "phone"
+      ],
+      "response_time_expectations": "standard_business_response"
+    },
+    "project_types": [],
+    "typical_engagement_timeline": "Unknown",
+    "decision_makers": {
+      "primary_contact_types": {
+        "C-Level": 0,
+        "VP/Director": 0,
+        "Manager": 0,
+        "Technical": 0,
+        "Business": 0
+      },
+      "decision_maker_accessibility": 0.5,
+      "typical_approval_chain": [
+        "Standard Approval Process"
+      ],
+      "contact_diversity": 0
+    },
+    "technical_requirements": [],
+    "business_model_indicators": [],
+    "company_size_range": "Small to Large Companies",
+    "geographic_preferences": [
+      "North America",
+      "Europe",
+      "English-speaking markets"
+    ],
+    "matching_score_weights": {
+      "industry_match": 0.25,
+      "size_compatibility": 0.15,
+      "technical_alignment": 0.2,
+      "communication_style_fit": 0.1,
+      "project_type_match": 0.15,
+      "timeline_compatibility": 0.1,
+      "decision_maker_accessibility": 0.05
+    }
+  },
+  "oregon-software": {
+    "template_name": "Oregon Software Template",
+    "source_companies": [
+      "Oregon Software"
+    ],
+    "industry_characteristics": {
+      "primary_industry": "Custom Software Development",
+      "focus_areas": [
+        "Enterprise Solutions",
+        "Legacy Modernization",
+        "System Integration"
+      ],
+      "industry_specific_terms": [],
+      "market_segment": "Technology Solutions",
+      "technology_stack_preferences": []
+    },
+    "interaction_patterns": {
+      "email_frequency": {
+        "frequency": 0,
+        "pattern": "none"
+      },
+      "task_patterns": {
+        "completion_rate": 0,
+        "total_tasks": 0
+      },
+      "meeting_patterns": {
+        "total_meetings": 0,
+        "meeting_frequency": "occasional",
+        "meeting_types": {
+          "demo": 0,
+          "sync": 0,
+          "technical": 0,
+          "business": 0
+        }
+      },
+      "response_patterns": {
+        "estimated_response_time": "24-48 hours",
+        "response_consistency": "good",
+        "preferred_communication_hours": "business_hours"
+      },
+      "total_interactions": 0,
+      "total_tasks": 0,
+      "meeting_to_email_ratio": 0
+    },
+    "success_indicators": [],
+    "communication_style": {
+      "dominant_style": "business",
+      "formality_scores": {
+        "formal": 0,
+        "casual": 0,
+        "business": 0
+      },
+      "technical_depth": 0,
+      "urgency_level": 0,
+      "preferred_communication_channels": [
+        "email",
+        "video_call",
+        "phone"
+      ],
+      "response_time_expectations": "standard_business_response"
+    },
+    "project_types": [],
+    "typical_engagement_timeline": "Unknown",
+    "decision_makers": {
+      "primary_contact_types": {
+        "C-Level": 0,
+        "VP/Director": 0,
+        "Manager": 0,
+        "Technical": 0,
+        "Business": 0
+      },
+      "decision_maker_accessibility": 0.5,
+      "typical_approval_chain": [
+        "Standard Approval Process"
+      ],
+      "contact_diversity": 0
+    },
+    "technical_requirements": [],
+    "business_model_indicators": [],
+    "company_size_range": "Small to Large Companies",
+    "geographic_preferences": [
+      "North America",
+      "Europe",
+      "English-speaking markets"
+    ],
+    "matching_score_weights": {
+      "industry_match": 0.25,
+      "size_compatibility": 0.15,
+      "technical_alignment": 0.2,
+      "communication_style_fit": 0.1,
+      "project_type_match": 0.15,
+      "timeline_compatibility": 0.1,
+      "decision_maker_accessibility": 0.05
+    }
+  },
+  "platform_companies": {
+    "template_name": "Platform Companies Template",
+    "source_companies": [
+      "Buildly",
+      "Open Build"
+    ],
+    "industry_characteristics": {
+      "primary_industry": "Low-Code/No-Code Platform",
+      "focus_areas": [
+        "Platform Development",
+        "Community Building",
+        "Developer Experience",
+        "Open Source",
+        "API Integration",
+        "Workflow Automation"
+      ],
+      "market_segment": "B2B Technology Solutions"
+    },
+    "interaction_patterns": {
+      "average_interactions": 8.0,
+      "average_meetings": 0.0,
+      "engagement_level": "medium"
+    },
+    "success_indicators": [
+      "sustained_communication",
+      "technical_alignment",
+      "meeting_engagement"
+    ],
+    "communication_style": {
+      "dominant_style": "casual",
+      "technical_depth": 0.0625,
+      "response_time_expectations": "standard_business_response"
+    },
+    "project_types": [],
+    "typical_engagement_timeline": "Medium-term (3-6 months)",
+    "decision_makers": {
+      "typical_contact_level": "Management to Executive",
+      "decision_maker_accessibility": 0.7,
+      "approval_complexity": "medium"
+    },
+    "technical_requirements": [],
+    "business_model_indicators": [
+      "Marketplace"
+    ],
+    "company_size_range": "Small to Large Companies",
+    "geographic_preferences": [
+      "North America",
+      "Europe"
+    ],
+    "matching_score_weights": {
+      "industry_match": 0.25,
+      "size_compatibility": 0.15,
+      "technical_alignment": 0.2,
+      "communication_style_fit": 0.1,
+      "project_type_match": 0.15,
+      "timeline_compatibility": 0.1,
+      "decision_maker_accessibility": 0.05
+    }
+  },
+  "consulting_companies": {
+    "template_name": "Consulting Companies Template",
+    "source_companies": [
+      "Oregon Software"
+    ],
+    "industry_characteristics": {
+      "primary_industry": "Custom Software Development",
+      "focus_areas": [
+        "System Integration",
+        "Legacy Modernization",
+        "Enterprise Solutions"
+      ],
+      "market_segment": "B2B Technology Solutions"
+    },
+    "interaction_patterns": {
+      "average_interactions": 0.0,
+      "average_meetings": 0.0,
+      "engagement_level": "medium"
+    },
+    "success_indicators": [],
+    "communication_style": {
+      "dominant_style": "business",
+      "technical_depth": 0.0,
+      "response_time_expectations": "standard_business_response"
+    },
+    "project_types": [],
+    "typical_engagement_timeline": "Medium-term (3-6 months)",
+    "decision_makers": {
+      "typical_contact_level": "Management to Executive",
+      "decision_maker_accessibility": 0.7,
+      "approval_complexity": "medium"
+    },
+    "technical_requirements": [],
+    "business_model_indicators": [],
+    "company_size_range": "Small to Large Companies",
+    "geographic_preferences": [
+      "North America",
+      "Europe"
+    ],
+    "matching_score_weights": {
+      "industry_match": 0.25,
+      "size_compatibility": 0.15,
+      "technical_alignment": 0.2,
+      "communication_style_fit": 0.1,
+      "project_type_match": 0.15,
+      "timeline_compatibility": 0.1,
+      "decision_maker_accessibility": 0.05
+    }
+  },
+  "enterprise_clients": {
+    "template_name": "Enterprise Client Template",
+    "source_companies": [
+      "Buildly",
+      "Open Build",
+      "Oregon Software",
+      "Buildly",
+      "Open Build",
+      "Oregon Software"
+    ],
+    "industry_characteristics": {
+      "primary_industry": "Low-Code/No-Code Platform",
+      "focus_areas": [
+        "Platform Development",
+        "Community Building",
+        "Developer Experience",
+        "Enterprise Solutions",
+        "System Integration",
+        "Open Source",
+        "API Integration",
+        "Workflow Automation",
+        "Legacy Modernization"
+      ],
+      "market_segment": "B2B Technology Solutions"
+    },
+    "interaction_patterns": {
+      "average_interactions": 3.2,
+      "average_meetings": 0.0,
+      "engagement_level": "medium"
+    },
+    "success_indicators": [
+      "sustained_communication",
+      "technical_alignment",
+      "meeting_engagement"
+    ],
+    "communication_style": {
+      "dominant_style": "business",
+      "technical_depth": 0.0375,
+      "response_time_expectations": "standard_business_response"
+    },
+    "project_types": [],
+    "typical_engagement_timeline": "Medium-term (3-6 months)",
+    "decision_makers": {
+      "typical_contact_level": "Management to Executive",
+      "decision_maker_accessibility": 0.7,
+      "approval_complexity": "medium"
+    },
+    "technical_requirements": [],
+    "business_model_indicators": [
+      "Marketplace"
+    ],
+    "company_size_range": "Small to Large Companies",
+    "geographic_preferences": [
+      "North America",
+      "Europe"
+    ],
+    "matching_score_weights": {
+      "industry_match": 0.25,
+      "size_compatibility": 0.15,
+      "technical_alignment": 0.2,
+      "communication_style_fit": 0.1,
+      "project_type_match": 0.15,
+      "timeline_compatibility": 0.1,
+      "decision_maker_accessibility": 0.05
+    }
+  }
+}

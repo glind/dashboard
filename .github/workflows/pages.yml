@@ -1,0 +1,113 @@
+name: Deploy Documentation to GitHub Pages
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - 'devdocs/**'
+      - 'README.md'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
+      - name: Build documentation site
+        run: |
+          mkdir -p public
+          
+          # Copy all devdocs
+          cp -r devdocs/* public/
+          
+          # Copy README as index
+          cp README.md public/index.md
+          
+          # Create simple HTML wrapper
+          cat > public/index.html << 'EOF'
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+              <meta charset="UTF-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <title>Personal Dashboard - Documentation</title>
+              <script src="https://cdn.tailwindcss.com"></script>
+              <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+          </head>
+          <body class="bg-gray-900 text-gray-100">
+              <div class="container mx-auto px-4 py-8 max-w-4xl">
+                  <div id="content"></div>
+              </div>
+              <script>
+                  fetch('index.md')
+                      .then(response => response.text())
+                      .then(markdown => {
+                          document.getElementById('content').innerHTML = marked.parse(markdown);
+                      });
+              </script>
+          </body>
+          </html>
+          EOF
+          
+          # Create documentation index
+          cat > public/docs.html << 'EOF'
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+              <meta charset="UTF-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <title>Personal Dashboard - Docs</title>
+              <script src="https://cdn.tailwindcss.com"></script>
+          </head>
+          <body class="bg-gray-900 text-gray-100">
+              <div class="container mx-auto px-4 py-8">
+                  <h1 class="text-4xl font-bold mb-8">Personal Dashboard Documentation</h1>
+                  <div class="grid md:grid-cols-2 gap-4">
+                      <a href="SETUP.md" class="block p-6 bg-gray-800 rounded-lg hover:bg-gray-700">
+                          <h2 class="text-xl font-semibold mb-2">📦 Setup Guide</h2>
+                          <p class="text-gray-400">Installation and configuration</p>
+                      </a>
+                      <a href="OPERATIONS.md" class="block p-6 bg-gray-800 rounded-lg hover:bg-gray-700">
+                          <h2 class="text-xl font-semibold mb-2">🚀 Operations</h2>
+                          <p class="text-gray-400">Deployment and maintenance</p>
+                      </a>
+                      <a href="REFERENCE.md" class="block p-6 bg-gray-800 rounded-lg hover:bg-gray-700">
+                          <h2 class="text-xl font-semibold mb-2">📚 API Reference</h2>
+                          <p class="text-gray-400">Endpoints and usage</p>
+                      </a>
+                      <a href="CHANGELOG.md" class="block p-6 bg-gray-800 rounded-lg hover:bg-gray-700">
+                          <h2 class="text-xl font-semibold mb-2">📝 Changelog</h2>
+                          <p class="text-gray-400">Version history</p>
+                      </a>
+                  </div>
+              </div>
+          </body>
+          </html>
+          EOF
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: 'public'
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

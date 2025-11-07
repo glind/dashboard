@@ -240,7 +240,8 @@ class DashboardDataLoader {
     // TODOS
     async loadTodos() {
         try {
-            const response = await fetch('/api/tasks');
+            // By default, don't include completed tasks
+            const response = await fetch('/api/tasks?include_completed=false');
             if (response.ok) {
                 const data = await response.json();
                 this.todos = data.tasks || [];
@@ -292,31 +293,34 @@ class DashboardDataLoader {
         
         const html = this.todos.map(todo => {
             const feedback = this.feedbackData[`todo-${todo.id}`] || null;
-            const started = todo.started || false;
+            const isCompleted = todo.status === 'completed';
+            const isStarted = todo.status === 'in_progress';
+            const isDeleted = todo.status === 'deleted';
+            
             return `
             <div class="dashboard-card bg-gray-800 rounded-xl p-6 border border-gray-700 cursor-pointer todo-item" 
-                 data-status="${todo.completed ? 'completed' : (started ? 'started' : 'not-started')}"
+                 data-status="${todo.status || 'pending'}"
                  data-priority="${todo.priority || ''}"
                  data-source="${todo.source || ''}"
                  onclick="dataLoader.showTodoDetail('${this.escapeHtml(todo.id)}')">
                 <div class="flex items-start gap-3">
                     <div class="flex flex-col gap-1" onclick="event.stopPropagation()">
                         <label class="flex items-center gap-1 text-xs text-gray-400" title="Mark as started">
-                            <input type="checkbox" ${started ? 'checked' : ''} 
+                            <input type="checkbox" ${isStarted ? 'checked' : ''} 
                                    onclick="dataLoader.toggleTodoStarted('${this.escapeHtml(todo.id)}')"
                                    class="w-4 h-4 rounded">
                             <span>Started</span>
                         </label>
                         <label class="flex items-center gap-1 text-xs text-gray-400" title="Mark as done">
-                            <input type="checkbox" ${todo.completed ? 'checked' : ''} 
+                            <input type="checkbox" ${isCompleted ? 'checked' : ''} 
                                    onclick="dataLoader.toggleTodo('${this.escapeHtml(todo.id)}')"
                                    class="w-4 h-4 rounded">
                             <span>Done</span>
                         </label>
                     </div>
                     <div class="flex-1">
-                        <h3 class="font-semibold text-white mb-1 ${todo.completed ? 'line-through opacity-60' : ''}">
-                            ${started && !todo.completed ? '🚀 ' : ''}${this.escapeHtml(todo.title)}
+                        <h3 class="font-semibold text-white mb-1 ${isCompleted ? 'line-through opacity-60' : ''}">
+                            ${isStarted && !isCompleted ? '🚀 ' : ''}${this.escapeHtml(todo.title)}
                         </h3>
                         ${todo.description ? `<p class="text-sm text-gray-400 mb-2">${this.escapeHtml(todo.description)}</p>` : ''}
                         <div class="flex flex-wrap gap-2 text-xs mb-3">
@@ -347,7 +351,7 @@ class DashboardDataLoader {
         grid.innerHTML = filters + html;
     }
     
-    filterTodos(filter) {
+    async filterTodos(filter) {
         const items = document.querySelectorAll('.todo-item');
         const buttons = document.querySelectorAll('.todo-filter-btn');
         
@@ -359,15 +363,62 @@ class DashboardDataLoader {
         event.target.classList.remove('bg-gray-700');
         event.target.classList.add('bg-blue-600');
         
+        // If filtering by completed, reload tasks with include_completed=true
+        if (filter === 'completed') {
+            try {
+                const response = await fetch('/api/tasks?include_completed=true');
+                if (response.ok) {
+                    const data = await response.json();
+                    this.todos = data.tasks || [];
+                    this.renderTodos();
+                    // After re-rendering, re-apply the filter visually
+                    setTimeout(() => {
+                        document.querySelectorAll('.todo-item').forEach(item => {
+                            item.style.display = item.dataset.status === 'completed' ? 'block' : 'none';
+                        });
+                    }, 100);
+                    return;
+                }
+            } catch (error) {
+                console.error('Error loading completed tasks:', error);
+            }
+        } else if (filter === 'all' || filter === 'active') {
+            // Reload without completed tasks for all/active filters
+            try {
+                const response = await fetch('/api/tasks?include_completed=false');
+                if (response.ok) {
+                    const data = await response.json();
+                    this.todos = data.tasks || [];
+                    this.renderTodos();
+                    
+                    if (filter === 'active') {
+                        // After re-rendering, show only active tasks
+                        setTimeout(() => {
+                            document.querySelectorAll('.todo-item').forEach(item => {
+                                const status = item.dataset.status;
+                                item.style.display = (status === 'pending' || status === 'in_progress') ? 'block' : 'none';
+                            });
+                        }, 100);
+                    }
+                    return;
+                }
+            } catch (error) {
+                console.error('Error loading tasks:', error);
+            }
+        }
+        
+        // For other filters (priority, source), just filter visible items
         items.forEach(item => {
             let show = false;
+            const status = item.dataset.status;
             
             if (filter === 'all') {
                 show = true;
             } else if (filter === 'active') {
-                show = item.dataset.status === 'active';
+                // Active = pending or in_progress (not completed or deleted)
+                show = status === 'pending' || status === 'in_progress';
             } else if (filter === 'completed') {
-                show = item.dataset.status === 'completed';
+                show = status === 'completed';
             } else if (filter.startsWith('priority-')) {
                 const priority = filter.replace('priority-', '');
                 show = item.dataset.priority === priority;
@@ -407,7 +458,7 @@ class DashboardDataLoader {
         if (!container) return;
         
         const topTasks = this.todos
-            .filter(t => !t.completed)
+            .filter(t => t.status !== 'completed' && t.status !== 'deleted')
             .slice(0, 5);
         
         if (topTasks.length === 0) {
@@ -565,7 +616,12 @@ class DashboardDataLoader {
             const response = await fetch(url);
             if (response.ok) {
                 const data = await response.json();
+                // Just show all 100 most recent emails - no filtering
                 this.emails = data.emails || [];
+                
+                const unreadCount = this.emails.filter(e => !e.read).length;
+                const readCount = this.emails.filter(e => e.read).length;
+                console.log(`Loaded ${this.emails.length} emails (${unreadCount} unread, ${readCount} read)`);
                 this.renderEmails();
             }
         } catch (error) {
@@ -573,11 +629,138 @@ class DashboardDataLoader {
         }
     }
     
-    async refreshEmails() {
+        async refreshEmails() {
         this.showNotification('Refreshing emails...', 'info');
         await this.loadEmails(true); // Force refresh with cache busting
         this.updateAllCounts();
         this.showNotification('Emails refreshed!', 'success');
+    }
+    
+    showScanEmailsModal() {
+        const today = new Date();
+        const thirtyDaysAgo = new Date(today);
+        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+        
+        const content = `
+            <div class="space-y-4">
+                <p class="text-gray-300">Scan your emails for tasks and action items. This will analyze emails from a specific date range and create todos for any emails that require action.</p>
+                
+                <div class="bg-yellow-900/30 border border-yellow-600 rounded-lg p-4">
+                    <p class="text-yellow-200 text-sm">⚠️ <strong>Note:</strong> This uses AI to analyze emails and will only create tasks for emails with clear action items, not newsletters or spam.</p>
+                </div>
+                
+                <div class="space-y-3">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-300 mb-1">Start Date</label>
+                        <input type="date" id="scan-start-date" 
+                               value="${thirtyDaysAgo.toISOString().split('T')[0]}"
+                               max="${today.toISOString().split('T')[0]}"
+                               class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white">
+                    </div>
+                    
+                    <div>
+                        <label class="block text-sm font-medium text-gray-300 mb-1">End Date</label>
+                        <input type="date" id="scan-end-date" 
+                               value="${today.toISOString().split('T')[0]}"
+                               max="${today.toISOString().split('T')[0]}"
+                               class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white">
+                    </div>
+                    
+                    <div>
+                        <label class="block text-sm font-medium text-gray-300 mb-1">Max Emails to Scan</label>
+                        <select id="scan-max-emails" class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white">
+                            <option value="50">50 emails</option>
+                            <option value="100" selected>100 emails</option>
+                            <option value="200">200 emails</option>
+                            <option value="500">500 emails</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div class="flex gap-3 pt-4">
+                    <button onclick="dataLoader.startEmailScan()" 
+                            class="flex-1 bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded-lg font-semibold">
+                        🔍 Start Scan
+                    </button>
+                    <button onclick="closeModal()" 
+                            class="flex-1 bg-gray-600 hover:bg-gray-700 px-4 py-2 rounded-lg font-semibold">
+                        Cancel
+                    </button>
+                </div>
+                
+                <div id="scan-progress" class="hidden mt-4">
+                    <div class="bg-gray-700 rounded-lg p-4">
+                        <div class="flex items-center gap-3 mb-2">
+                            <div class="animate-spin rounded-full h-5 w-5 border-b-2 border-purple-400"></div>
+                            <span class="text-purple-400 font-semibold">Scanning emails...</span>
+                        </div>
+                        <p id="scan-status" class="text-sm text-gray-400">Initializing...</p>
+                        <div id="scan-results" class="mt-3 text-sm"></div>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        showModal('Scan Emails for Tasks', content);
+    }
+    
+    async startEmailScan() {
+        const startDate = document.getElementById('scan-start-date').value;
+        const endDate = document.getElementById('scan-end-date').value;
+        const maxEmails = document.getElementById('scan-max-emails').value;
+        
+        if (!startDate || !endDate) {
+            this.showNotification('Please select both start and end dates', 'error');
+            return;
+        }
+        
+        // Show progress section
+        const progressDiv = document.getElementById('scan-progress');
+        const statusDiv = document.getElementById('scan-status');
+        const resultsDiv = document.getElementById('scan-results');
+        progressDiv.classList.remove('hidden');
+        
+        statusDiv.textContent = `Scanning up to ${maxEmails} emails from ${startDate} to ${endDate}...`;
+        
+        try {
+            const response = await fetch('/api/email/scan-for-tasks', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    start_date: startDate,
+                    end_date: endDate,
+                    max_emails: parseInt(maxEmails)
+                })
+            });
+            
+            if (response.ok) {
+                const data = await response.json();
+                statusDiv.textContent = `✅ Scan complete!`;
+                resultsDiv.innerHTML = `
+                    <div class="space-y-2">
+                        <p class="text-green-400">✅ Scanned ${data.emails_scanned} emails</p>
+                        <p class="text-blue-400">📋 Created ${data.tasks_created} new tasks</p>
+                        <p class="text-gray-400">⏭️ Skipped ${data.emails_skipped} emails (spam/newsletters)</p>
+                        <p class="text-yellow-400">⚠️ ${data.tasks_skipped} duplicate tasks avoided</p>
+                    </div>
+                    <button onclick="closeModal(); dataLoader.loadTodos();" 
+                            class="mt-4 w-full bg-green-600 hover:bg-green-700 px-4 py-2 rounded-lg font-semibold">
+                        View Tasks
+                    </button>
+                `;
+                this.showNotification(`Created ${data.tasks_created} tasks from ${data.emails_scanned} emails`, 'success');
+            } else {
+                const error = await response.json();
+                statusDiv.textContent = `❌ Error: ${error.detail || 'Failed to scan emails'}`;
+                resultsDiv.innerHTML = '';
+            }
+        } catch (error) {
+            statusDiv.textContent = `❌ Error: ${error.message}`;
+            resultsDiv.innerHTML = '';
+            this.showNotification('Failed to scan emails', 'error');
+        }
     }
     
     renderEmails() {
@@ -618,6 +801,10 @@ class DashboardDataLoader {
                         class="email-filter-btn px-3 py-1 bg-gray-700 rounded text-sm hover:bg-gray-600">Has Tasks</button>
                 <button onclick="dataLoader.filterEmails('high-priority')" 
                         class="email-filter-btn px-3 py-1 bg-gray-700 rounded text-sm hover:bg-gray-600">High Priority</button>
+                <button onclick="dataLoader.filterEmails('high-risk')" 
+                        class="email-filter-btn px-3 py-1 bg-red-700 rounded text-sm hover:bg-red-600">⚠️ High Risk</button>
+                <button onclick="dataLoader.filterEmails('safe')" 
+                        class="email-filter-btn px-3 py-1 bg-green-700 rounded text-sm hover:bg-green-600">✓ Safe</button>
                 ${labels.map(label => 
                     `<button onclick="dataLoader.filterEmails('label-${this.escapeHtml(label)}')" 
                              class="email-filter-btn px-3 py-1 bg-gray-700 rounded text-sm hover:bg-gray-600">${this.escapeHtml(label)}</button>`
@@ -627,25 +814,88 @@ class DashboardDataLoader {
         
         const html = this.emails.map(email => {
             const feedback = this.feedbackData[`email-${email.id}`] || null;
-            const readClass = email.read ? 'opacity-70' : '';
-            const readIndicator = email.read ? '' : '<span class="w-2 h-2 bg-blue-500 rounded-full"></span>';
+            const readClass = email.read ? 'opacity-70 bg-gray-800' : 'bg-gray-750 border-blue-500/30';
+            const readIndicator = email.read ? 
+                '<span class="text-gray-500 text-xs">✓ Read</span>' : 
+                '<span class="flex items-center gap-1 text-blue-400 text-xs font-semibold"><span class="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></span>UNREAD</span>';
             const smartTag = this.getSmartTagForEmail(email);
             
+            // Format the date/time nicely
+            const emailDate = email.received_date || email.date;
+            const timeAgo = this.getTimeAgo(emailDate);
+            
+            // Risk score badge with detailed tooltip
+            const riskScore = email.risk_score || 0;
+            const riskLevel = email.risk_level || 'unknown';
+            const riskFlags = email.risk_flags || [];
+            let riskBadge = '';
+            
+            if (riskScore > 0 || email.is_whitelisted) {
+                let riskColor = 'bg-green-600';
+                let riskText = 'Safe';
+                let riskIcon = '✓';
+                
+                if (email.is_whitelisted) {
+                    riskColor = 'bg-green-600';
+                    riskText = 'Trusted';
+                    riskIcon = '✓';
+                } else if (riskScore >= 7) {
+                    riskColor = 'bg-red-600';
+                    riskText = 'High Risk';
+                    riskIcon = '⚠️';
+                } else if (riskScore >= 5) {
+                    riskColor = 'bg-orange-600';
+                    riskText = 'Medium Risk';
+                    riskIcon = '⚡';
+                } else if (riskScore >= 3) {
+                    riskColor = 'bg-yellow-600';
+                    riskText = 'Low Risk';
+                    riskIcon = '!';
+                }
+                
+                // Build detailed tooltip
+                let tooltip = `Risk Score: ${riskScore}/10\\nLevel: ${riskLevel}`;
+                if (email.is_whitelisted) {
+                    tooltip = 'Trusted Sender\\nYou marked this sender as safe';
+                } else if (riskFlags.length > 0) {
+                    tooltip += '\\n\\nRisk Factors:\\n• ' + riskFlags.join('\\n• ');
+                } else {
+                    tooltip += '\\n\\nNo significant risk factors detected';
+                }
+                
+                if (email.recommended_action && email.recommended_action !== 'none') {
+                    tooltip += `\\n\\nRecommended: ${email.recommended_action}`;
+                }
+                
+                riskBadge = `<span class="text-xs ${riskColor} px-2 py-1 rounded whitespace-nowrap cursor-help" title="${this.escapeHtml(tooltip)}">${riskIcon} ${riskText}</span>`;
+            }
+            
+            // Smart tag with tooltip
+            let smartTagHtml = '';
+            if (smartTag) {
+                const domain = email.sender.split('@')[1] || email.sender;
+                smartTagHtml = `<span class="text-xs bg-purple-600 px-2 py-1 rounded whitespace-nowrap cursor-help" title="Auto-tagged based on your feedback patterns from ${domain}">${smartTag}</span>`;
+            }
+            
             return `
-            <div class="bg-gray-800 rounded-lg p-4 border border-gray-700 cursor-pointer hover:border-gray-600 ${readClass}"
+            <div class="rounded-lg p-4 border border-gray-700 cursor-pointer hover:border-gray-600 ${readClass}"
                  onclick="dataLoader.showEmailDetail('${this.escapeHtml(email.id)}')">
                 <div class="flex justify-between items-start mb-2">
-                    <div class="flex gap-2 items-center">
+                    <div class="flex gap-2 items-center flex-1">
                         ${readIndicator}
                         <span class="font-semibold text-white">${this.escapeHtml(email.sender)}</span>
-                    </div>
-                    <div class="flex gap-2 items-center">
-                        ${smartTag ? `<span class="text-xs bg-purple-600 px-2 py-1 rounded">${smartTag}</span>` : ''}
-                        ${email.has_todos ? '<span class="text-xs bg-orange-600 px-2 py-1 rounded">📋 Has Tasks</span>' : ''}
-                        ${email.priority === 'high' ? '<span class="text-xs bg-red-600 px-2 py-1 rounded">High Priority</span>' : ''}
+                        <span class="text-xs text-gray-500 ml-auto">${timeAgo}</span>
                     </div>
                 </div>
-                <h4 class="font-medium text-gray-200 mb-1">${this.escapeHtml(email.subject)}</h4>
+                <div class="flex justify-between items-start mb-2">
+                    <h4 class="font-medium text-gray-200 flex-1">${this.escapeHtml(email.subject)}</h4>
+                    <div class="flex gap-2 items-center ml-2">
+                        ${riskBadge}
+                        ${smartTagHtml}
+                        ${email.has_todos ? '<span class="text-xs bg-orange-600 px-2 py-1 rounded whitespace-nowrap cursor-help" title="This email has associated tasks">📋 Tasks</span>' : ''}
+                        ${email.priority === 'high' ? '<span class="text-xs bg-red-600 px-2 py-1 rounded whitespace-nowrap cursor-help" title="High priority email">High</span>' : ''}
+                    </div>
+                </div>
                 ${email.snippet ? `<p class="text-sm text-gray-400 line-clamp-2 mb-2">${this.escapeHtml(email.snippet)}</p>` : ''}
                 ${email.labels && email.labels.length > 0 ? `
                     <div class="flex gap-2 mt-2 mb-2 flex-wrap">
@@ -655,6 +905,12 @@ class DashboardDataLoader {
                     </div>
                 ` : ''}
                 <div class="flex gap-1 pt-2 border-t border-gray-700" onclick="event.stopPropagation()">
+                    ${email.is_whitelisted ? 
+                        '<span class="px-2 py-1 text-xs bg-green-600 rounded">✓ Trusted Sender</span>' :
+                        `<button onclick="dataLoader.markEmailAsSafe('${this.escapeHtml(email.sender)}')" 
+                                class="px-2 py-1 rounded text-xs bg-gray-700 hover:bg-green-600" 
+                                title="Mark this sender as safe/trusted">✓ Mark Safe</button>`
+                    }
                     <button onclick="dataLoader.giveFeedback('email', '${this.escapeHtml(email.id)}', 'up')" 
                             class="feedback-btn px-2 py-1 rounded text-xs ${feedback === 'up' ? 'bg-green-600' : 'bg-gray-700 hover:bg-green-600'}" 
                             title="Important email">👍</button>
@@ -678,21 +934,33 @@ class DashboardDataLoader {
         
         // Update button states
         document.querySelectorAll('.email-filter-btn').forEach(btn => {
-            btn.classList.remove('bg-blue-600');
-            btn.classList.add('bg-gray-700');
+            btn.classList.remove('bg-blue-600', 'bg-red-700', 'bg-green-700');
+            if (btn.textContent.includes('High Risk')) {
+                btn.classList.add('bg-red-700');
+            } else if (btn.textContent.includes('Safe')) {
+                btn.classList.add('bg-green-700');
+            } else {
+                btn.classList.add('bg-gray-700');
+            }
         });
         
-        if (filter) {
-            event.target.classList.remove('bg-gray-700');
+        if (filter && event && event.target) {
+            event.target.classList.remove('bg-gray-700', 'bg-red-700', 'bg-green-700');
             event.target.classList.add('bg-blue-600');
         }
         
-        // Filter emails
-        document.querySelectorAll('#emails-grid .bg-gray-800').forEach((card, index) => {
-            if (index === 0) return; // Skip filter row
-            
-            const email = this.emails[index - 1];
-            if (!email) return;
+        // Get all email cards - they're divs with onclick="dataLoader.showEmailDetail"
+        const emailGrid = document.getElementById('emails-grid');
+        if (!emailGrid) return;
+        
+        const emailCards = emailGrid.querySelectorAll('[onclick*="showEmailDetail"]');
+        
+        emailCards.forEach((card, index) => {
+            const email = this.emails[index];
+            if (!email) {
+                card.style.display = 'none';
+                return;
+            }
             
             let visible = true;
             
@@ -705,6 +973,10 @@ class DashboardDataLoader {
                 visible = email.has_todos;
             } else if (filter === 'high-priority') {
                 visible = email.priority === 'high';
+            } else if (filter === 'high-risk') {
+                visible = (email.risk_score || 0) >= 7;
+            } else if (filter === 'safe') {
+                visible = (email.risk_score || 0) < 3;
             } else if (filter && filter.startsWith('label-')) {
                 const label = filter.substring(6);
                 visible = email.labels && email.labels.includes(label);
@@ -1091,22 +1363,15 @@ class DashboardDataLoader {
         const content = item.querySelector('.news-accordion-content');
         const chevron = item.querySelector('.news-chevron');
         
-        // Close all other open accordions
-        document.querySelectorAll('.news-accordion-content').forEach(c => {
-            if (c !== content && !c.classList.contains('hidden')) {
-                c.classList.add('hidden');
-                c.parentElement.querySelector('.news-chevron').classList.remove('rotate-180');
-            }
-        });
+        // Don't close other accordions - let user open multiple articles
+        // Removed the code that was closing all other accordions
         
         // Toggle this accordion
         content.classList.toggle('hidden');
         chevron.classList.toggle('rotate-180');
         
-        // Mark as read when opened
-        if (!content.classList.contains('hidden')) {
-            this.markArticleRead(articleId);
-        }
+        // Don't auto-mark as read when opening - only when clicking "Read Full Article"
+        // This way users can preview without marking as read
     }
     
     async markArticleRead(articleId) {
@@ -1137,13 +1402,9 @@ class DashboardDataLoader {
                     article.is_read = true;
                 }
                 
-                // If we're hiding read articles, remove this one
-                if (!this.showReadArticles) {
-                    setTimeout(() => {
-                        if (item) item.style.display = 'none';
-                        this.updateAllCounts();
-                    }, 500);
-                }
+                // Don't auto-hide - let the user continue reading and close manually
+                // Articles will be filtered on next news load/refresh
+                this.updateAllCounts();
             }
         } catch (error) {
             console.error('Error marking article as read:', error);
@@ -1399,10 +1660,132 @@ class DashboardDataLoader {
         `;
     }
     
+    async loadNotes() {
+        try {
+            const response = await fetch('/api/notes');
+            if (response.ok) {
+                const data = await response.json();
+                this.notes = data.notes || [];
+                this.notesStats = {
+                    obsidian_count: data.obsidian_count || 0,
+                    gdrive_count: data.gdrive_count || 0,
+                    total_todos_found: data.total_todos_found || 0,
+                    tasks_created: data.tasks_created || 0
+                };
+                this.renderNotes();
+            }
+        } catch (error) {
+            console.error('Error loading notes:', error);
+        }
+    }
+    
+    refreshNotes() {
+        this.loadNotes();
+    }
+    
+    renderNotes() {
+        const container = document.getElementById('notes-grid');
+        const statsContainer = document.getElementById('notes-stats');
+        
+        if (!container) return;
+        
+        // Render stats
+        if (statsContainer && this.notesStats) {
+            statsContainer.innerHTML = `
+                <div class="bg-gray-800 rounded-lg p-4">
+                    <div class="text-gray-400 text-sm">Obsidian Notes</div>
+                    <div class="text-2xl font-bold text-white">${this.notesStats.obsidian_count}</div>
+                </div>
+                <div class="bg-gray-800 rounded-lg p-4">
+                    <div class="text-gray-400 text-sm">Google Drive Notes</div>
+                    <div class="text-2xl font-bold text-white">${this.notesStats.gdrive_count}</div>
+                </div>
+                <div class="bg-gray-800 rounded-lg p-4">
+                    <div class="text-gray-400 text-sm">TODOs Found</div>
+                    <div class="text-2xl font-bold text-purple-400">${this.notesStats.total_todos_found}</div>
+                </div>
+                <div class="bg-gray-800 rounded-lg p-4">
+                    <div class="text-gray-400 text-sm">Tasks Created</div>
+                    <div class="text-2xl font-bold text-green-400">${this.notesStats.tasks_created}</div>
+                </div>
+            `;
+        }
+        
+        // Render notes grid
+        if (!this.notes || this.notes.length === 0) {
+            container.innerHTML = '<p class="text-gray-400 text-center py-12 col-span-3">No recent notes found</p>';
+            return;
+        }
+        
+        container.innerHTML = this.notes.map(note => {
+            const sourceIcon = note.source === 'obsidian' ? '📓' : '📄';
+            const sourceLabel = note.source === 'obsidian' ? 'Obsidian' : 'Google Drive';
+            const sourceColor = note.source === 'obsidian' ? 'purple' : 'blue';
+            
+            // Format link
+            let noteLink = '#';
+            if (note.source === 'obsidian' && note.path) {
+                // Use obsidian:// protocol for local notes
+                const vaultName = note.path.split('/').find(p => p && p !== '..' && p !== '.');
+                const relPath = note.path.split('/').slice(-2).join('/');
+                noteLink = `obsidian://open?vault=${encodeURIComponent(vaultName || 'MyVault')}&file=${encodeURIComponent(relPath)}`;
+            } else if (note.source === 'gdrive' && note.url) {
+                noteLink = note.url;
+            }
+            
+            return `
+                <div class="bg-gray-800 rounded-lg p-5 hover:bg-gray-750 transition-all duration-200">
+                    <div class="flex items-start justify-between mb-3">
+                        <div class="flex items-center gap-2">
+                            <span class="text-2xl">${sourceIcon}</span>
+                            <span class="px-2 py-1 rounded text-xs font-medium bg-${sourceColor}-500/20 text-${sourceColor}-400">
+                                ${sourceLabel}
+                            </span>
+                            ${note.todo_count ? `<span class="px-2 py-1 rounded text-xs font-medium bg-yellow-500/20 text-yellow-400">${note.todo_count} TODOs</span>` : ''}
+                        </div>
+                        <span class="text-xs text-gray-500">${note.modified || 'Recently updated'}</span>
+                    </div>
+                    
+                    <h3 class="text-lg font-semibold text-white mb-2 line-clamp-2">
+                        ${note.title || 'Untitled Note'}
+                    </h3>
+                    
+                    ${note.tags && note.tags.length > 0 ? `
+                        <div class="flex flex-wrap gap-1 mb-2">
+                            ${note.tags.slice(0, 3).map(tag => `
+                                <span class="px-2 py-0.5 rounded text-xs bg-gray-700 text-gray-300">#${tag}</span>
+                            `).join('')}
+                            ${note.tags.length > 3 ? `<span class="text-xs text-gray-500">+${note.tags.length - 3} more</span>` : ''}
+                        </div>
+                    ` : ''}
+                    
+                    <p class="text-gray-400 text-sm mb-3 line-clamp-3">
+                        ${note.preview || 'No preview available'}
+                    </p>
+                    
+                    ${note.word_count ? `<div class="text-xs text-gray-500 mb-3">${note.word_count} words</div>` : ''}
+                    
+                    <div class="flex gap-2">
+                        <a href="${noteLink}" target="_blank" 
+                           class="flex-1 px-3 py-2 bg-${sourceColor}-600 hover:bg-${sourceColor}-700 rounded text-sm font-medium text-center transition-all duration-200">
+                            Open Note
+                        </a>
+                        ${note.todo_count ? `
+                            <button onclick="dataLoader.loadTodos(); showSection('todos');" 
+                                    class="px-3 py-2 bg-yellow-600 hover:bg-yellow-700 rounded text-sm font-medium transition-all duration-200">
+                                View Tasks
+                            </button>
+                        ` : ''}
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+    
     // UPDATE COUNTS
     updateAllCounts() {
-        // Todos
-        const todosCount = this.todos.filter(t => !t.completed).length;
+        // Todos - count active (pending or in_progress)
+        const todosCount = this.todos.filter(t => t.status !== 'completed' && t.status !== 'deleted').length;
         this.updateBadge('todos-count', todosCount);
         this.updateStat('stat-tasks', todosCount);
         
@@ -1447,6 +1830,24 @@ class DashboardDataLoader {
         
         if (date.toDateString() === today.toDateString()) return 'Today';
         if (date.toDateString() === tomorrow.toDateString()) return 'Tomorrow';
+        
+        return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    }
+    
+    getTimeAgo(dateString) {
+        if (!dateString) return '';
+        const date = new Date(dateString);
+        const now = new Date();
+        const diffMs = now - date;
+        const diffMins = Math.floor(diffMs / 60000);
+        const diffHours = Math.floor(diffMs / 3600000);
+        const diffDays = Math.floor(diffMs / 86400000);
+        
+        if (diffMins < 1) return 'Just now';
+        if (diffMins < 60) return `${diffMins}m ago`;
+        if (diffHours < 24) return `${diffHours}h ago`;
+        if (diffDays === 1) return 'Yesterday';
+        if (diffDays < 7) return `${diffDays}d ago`;
         
         return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
     }
@@ -2002,24 +2403,63 @@ Then ask me: "What would you like to do with this email?"`,
         const todo = this.todos.find(t => t.id === id);
         if (!todo) return;
         
-        todo.completed = !todo.completed;
-        if (todo.completed) {
-            todo.started = false; // Reset started when marked done
-        }
-        this.renderTodos();
-        this.updateAllCounts();
+        // Toggle between completed and pending
+        const newStatus = todo.status === 'completed' ? 'pending' : 'completed';
         
-        // TODO: Send update to backend
+        try {
+            const response = await fetch(`/api/tasks/${encodeURIComponent(id)}/status`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ status: newStatus })
+            });
+            
+            if (response.ok) {
+                // Update local state
+                todo.status = newStatus;
+                this.renderTodos();
+                this.updateAllCounts();
+            } else {
+                console.error('Failed to update task status');
+                alert('Failed to update task. Please try again.');
+            }
+        } catch (error) {
+            console.error('Error updating task status:', error);
+            alert('Failed to update task. Please try again.');
+        }
     }
     
     async toggleTodoStarted(id) {
         const todo = this.todos.find(t => t.id === id);
         if (!todo) return;
         
-        todo.started = !todo.started;
-        this.renderTodos();
+        // Toggle between in_progress and pending (unless completed)
+        if (todo.status === 'completed') return; // Don't toggle if already completed
         
-        // TODO: Send update to backend
+        const newStatus = todo.status === 'in_progress' ? 'pending' : 'in_progress';
+        
+        try {
+            const response = await fetch(`/api/tasks/${encodeURIComponent(id)}/status`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ status: newStatus })
+            });
+            
+            if (response.ok) {
+                // Update local state
+                todo.status = newStatus;
+                this.renderTodos();
+            } else {
+                console.error('Failed to update task status');
+                alert('Failed to update task. Please try again.');
+            }
+        } catch (error) {
+            console.error('Error updating task status:', error);
+            alert('Failed to update task. Please try again.');
+        }
     }
     
     // AI ASSISTANT
@@ -2240,13 +2680,13 @@ Then ask me: "What would you like to do with this email?"`,
                 current_time: new Date().toLocaleString(),
                 todos: {
                     count: this.todos.length,
-                    active_count: this.todos.filter(t => !t.completed).length,
+                    active_count: this.todos.filter(t => t.status !== 'completed' && t.status !== 'deleted').length,
                     items: this.todos.slice(0, 10).map(t => ({
                         title: t.title,
                         priority: t.priority,
                         due_date: t.due_date,
                         source: t.source,
-                        completed: t.completed,
+                        status: t.status,
                         description: t.description ? t.description.substring(0, 100) : null
                     }))
                 },
@@ -2342,14 +2782,25 @@ Then ask me: "What would you like to do with this email?"`,
         utterance.pitch = 1.0;
         utterance.volume = 0.8;
         
-        // Get available voices
+        // Get available voices (they may have loaded since init)
         const voices = this.speechSynthesis.getVoices();
+        
+        // If voices just loaded, update our list
+        if (voices.length > this.availableVoices.length) {
+            this.availableVoices = voices;
+            console.log('🔄 Voices updated, now have', voices.length, 'voices');
+        }
         
         // If we have a selected voice, use it
         if (this.selectedVoice) {
             const voice = voices.find(v => v.name === this.selectedVoice);
             if (voice) {
                 utterance.voice = voice;
+                console.log('🎤 Using voice:', voice.name);
+            } else {
+                console.warn('⚠️ Selected voice not found:', this.selectedVoice);
+                // Try to set a new default
+                this.setDefaultVoice();
             }
         } else if (voices.length > 0) {
             // No voice selected yet, set default
@@ -2358,6 +2809,7 @@ Then ask me: "What would you like to do with this email?"`,
                 const voice = voices.find(v => v.name === this.selectedVoice);
                 if (voice) {
                     utterance.voice = voice;
+                    console.log('🎤 Using default voice:', voice.name);
                 }
             }
         }
@@ -2372,7 +2824,8 @@ Then ask me: "What would you like to do with this email?"`,
             this.stopStopCommandListener();
         };
         
-        utterance.onerror = () => {
+        utterance.onerror = (error) => {
+            console.error('Speech error:', error);
             this.hideStopSpeechButton();
             this.stopStopCommandListener();
         };
@@ -3504,33 +3957,60 @@ Then ask me: "What would you like to do with this email?"`,
             return;
         }
         
-        // Try to find Google UK English Male voice
-        const preferredVoice = this.availableVoices.find(v => 
-            v.name.includes('Google UK English Male') || 
-            (v.lang === 'en-GB' && v.name.toLowerCase().includes('male'))
-        );
+        console.log('Available voices:', this.availableVoices.map(v => `${v.name} (${v.lang})`));
         
-        if (preferredVoice) {
-            this.selectedVoice = preferredVoice.name;
-            localStorage.setItem('selectedVoice', this.selectedVoice);
-            console.log('Default voice set to:', this.selectedVoice);
-        } else {
-            // Fallback to any English male voice
-            const fallbackVoice = this.availableVoices.find(v => 
-                v.lang.startsWith('en') && v.name.toLowerCase().includes('male')
-            );
-            if (fallbackVoice) {
-                this.selectedVoice = fallbackVoice.name;
+        // Priority order for voice selection
+        const voicePriorities = [
+            // Google voices (work best in Safari)
+            v => v.name.includes('Google') && v.name.includes('US') && v.name.includes('Male'),
+            v => v.name.includes('Google') && v.name.includes('UK') && v.name.includes('Male'),
+            v => v.name.includes('Google') && v.name.includes('Male'),
+            v => v.name.includes('Google') && v.lang.startsWith('en'),
+            // Other quality English male voices
+            v => v.name.toLowerCase().includes('alex'),  // macOS Alex voice
+            v => v.lang === 'en-US' && v.name.toLowerCase().includes('male'),
+            v => v.lang === 'en-GB' && v.name.toLowerCase().includes('male'),
+            // Any English male voice
+            v => v.lang.startsWith('en') && v.name.toLowerCase().includes('male'),
+            // Any English voice
+            v => v.lang.startsWith('en')
+        ];
+        
+        // Try each priority until we find a voice
+        for (const priorityFn of voicePriorities) {
+            const voice = this.availableVoices.find(priorityFn);
+            if (voice) {
+                this.selectedVoice = voice.name;
                 localStorage.setItem('selectedVoice', this.selectedVoice);
-                console.log('Fallback voice set to:', this.selectedVoice);
+                console.log('✅ Default voice set to:', this.selectedVoice, `(${voice.lang})`);
+                return;
             }
+        }
+        
+        // Last resort: just use the first available voice
+        if (this.availableVoices.length > 0) {
+            this.selectedVoice = this.availableVoices[0].name;
+            localStorage.setItem('selectedVoice', this.selectedVoice);
+            console.log('⚠️ Fallback to first available voice:', this.selectedVoice);
         }
     }
     
     loadAvailableVoices() {
         if (this.speechSynthesis) {
             this.availableVoices = this.speechSynthesis.getVoices();
-            console.log(`Loaded ${this.availableVoices.length} voices`);
+            
+            // Filter to show only high-quality voices (prioritize Google voices)
+            const googleVoices = this.availableVoices.filter(v => v.name.includes('Google'));
+            const otherQualityVoices = this.availableVoices.filter(v => 
+                !v.name.includes('Google') && 
+                (v.name.toLowerCase().includes('alex') || 
+                 v.lang.startsWith('en'))
+            );
+            
+            console.log(`Loaded ${this.availableVoices.length} total voices (${googleVoices.length} Google voices)`);
+            if (googleVoices.length > 0) {
+                console.log('🎤 Google voices available:', googleVoices.map(v => v.name));
+            }
             
             // Set default voice on first load if none selected
             if (!this.selectedVoice && this.availableVoices.length > 0) {
@@ -3652,7 +4132,7 @@ Then ask me: "What would you like to do with this email?"`,
     
     async generateOverviewPrompt() {
         // Generate an AI prompt for the overview based on current data
-        const activeTodos = this.todos.filter(t => !t.completed);
+        const activeTodos = this.todos.filter(t => t.status !== 'completed' && t.status !== 'deleted');
         const upcomingEvents = this.calendar.filter(e => new Date(e.start) > new Date()).slice(0, 3);
         const highPriorityEmails = this.emails.filter(e => e.priority === 'high');
         
@@ -3672,9 +4152,9 @@ Then ask me: "What would you like to do with this email?"`,
     
     async generateOverviewSummary() {
         // Generate a 5-minute overview summary for the AI Assistant page
-        const activeTodos = this.todos.filter(t => !t.completed);
+        const activeTodos = this.todos.filter(t => t.status !== 'completed' && t.status !== 'deleted');
         const highPriorityTodos = activeTodos.filter(t => t.priority === 'high');
-        const startedTodos = activeTodos.filter(t => t.started);
+        const startedTodos = activeTodos.filter(t => t.status === 'in_progress');
         const upcomingEvents = this.calendar.filter(e => new Date(e.start) > new Date());
         const todayEvents = upcomingEvents.filter(e => {
             const start = new Date(e.start);
@@ -3815,7 +4295,7 @@ Then ask me: "What would you like to do with this email?"`,
         
         // Activity-based suggestions
         const completedToday = this.todos.filter(t => {
-            if (!t.completed || !t.completed_at) return false;
+            if (t.status !== 'completed' || !t.completed_at) return false;
             const completed = new Date(t.completed_at);
             return completed.toDateString() === now.toDateString();
         });
@@ -3828,7 +4308,7 @@ Then ask me: "What would you like to do with this email?"`,
             });
         }
         
-        const highPriorityTodos = this.todos.filter(t => !t.completed && t.priority === 'high');
+        const highPriorityTodos = this.todos.filter(t => t.status !== 'completed' && t.status !== 'deleted' && t.priority === 'high');
         if (highPriorityTodos.length > 5) {
             suggestions.push({
                 title: '🎯 Focus Strategy',
@@ -3907,72 +4387,9 @@ Then ask me: "What would you like to do with this email?"`,
         
         const image = this.backgroundImages[this.currentBackgroundIndex];
         
-        if (this.fullPageBackground) {
-            // Apply full-page background
-            section.style.backgroundImage = `linear-gradient(rgba(0,0,0,0.7), rgba(0,0,0,0.85)), url(${image.url}?w=1920&q=85)`;
-            section.style.backgroundSize = 'cover';
-            section.style.backgroundPosition = 'center';
-            section.style.backgroundAttachment = 'fixed';
-            
-            // Make all cards semi-transparent
-            const cards = section.querySelectorAll('.bg-gray-800, .bg-gray-700');
-            cards.forEach(card => {
-                card.style.backgroundColor = 'rgba(31, 41, 55, 0.85)';
-                card.style.webkitBackdropFilter = 'blur(10px)'; // Safari support
-                card.style.backdropFilter = 'blur(10px)';
-            });
-            
-            // Create floating controls
-            let controls = document.getElementById('background-controls');
-            if (!controls) {
-                controls = document.createElement('div');
-                controls.id = 'background-controls';
-                controls.className = 'fixed top-20 right-4 bg-gray-800/90 backdrop-blur-sm rounded-lg p-3 z-40 shadow-lg';
-                controls.innerHTML = `
-                    <div class="flex flex-col gap-2">
-                        <span class="text-xs text-gray-400">${image.name}</span>
-                        <div class="flex gap-2">
-                            <button onclick="dataLoader.giveBackgroundFeedback('up')" 
-                                    class="bg-gray-700 hover:bg-green-600 px-2 py-1 rounded text-sm">👍</button>
-                            <button onclick="dataLoader.giveBackgroundFeedback('neutral')" 
-                                    class="bg-gray-700 hover:bg-yellow-600 px-2 py-1 rounded text-sm">👌</button>
-                            <button onclick="dataLoader.giveBackgroundFeedback('down')" 
-                                    class="bg-gray-700 hover:bg-red-600 px-2 py-1 rounded text-sm">👎</button>
-                        </div>
-                        <div class="flex gap-2">
-                            <button onclick="dataLoader.nextBackground()" 
-                                    class="bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded text-xs">🔄 Change</button>
-                            <button onclick="dataLoader.openBackgroundSettings()" 
-                                    class="bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded text-xs">⚙️ Settings</button>
-                        </div>
-                    </div>
-                `;
-                document.body.appendChild(controls);
-            } else {
-                // Update controls text
-                const nameSpan = controls.querySelector('.text-gray-400');
-                if (nameSpan) nameSpan.textContent = image.name;
-            }
-        } else {
-            // Apply header-only background
-            section.style.backgroundImage = '';
-            section.style.backgroundColor = '';
-            
-            // Reset card transparency
-            const cards = section.querySelectorAll('.bg-gray-800, .bg-gray-700');
-            cards.forEach(card => {
-                card.style.backgroundColor = '';
-                card.style.webkitBackdropFilter = ''; // Safari support
-                card.style.backdropFilter = '';
-            });
-            
-            // Remove floating controls
-            const controls = document.getElementById('background-controls');
-            if (controls) controls.remove();
-            
-            const header = section.querySelector('.max-w-7xl');
-            if (!header) return;
-            
+        // ALWAYS apply header image first
+        const header = section.querySelector('.max-w-7xl');
+        if (header) {
             // Create header image container if it doesn't exist
             let headerImage = document.getElementById('overview-header-image');
             if (!headerImage) {
@@ -3982,7 +4399,7 @@ Then ask me: "What would you like to do with this email?"`,
                 header.insertBefore(headerImage, header.firstChild);
             }
             
-            // Apply background image with gradient overlay
+            // Apply background image with gradient overlay to header
             headerImage.style.backgroundImage = `linear-gradient(rgba(0,0,0,0.5), rgba(0,0,0,0.7)), url(${image.url}?w=1200&q=80)`;
             headerImage.style.backgroundSize = 'cover';
             headerImage.style.backgroundPosition = 'center';
@@ -4018,6 +4435,71 @@ Then ask me: "What would you like to do with this email?"`,
                     </div>
                 </div>
             `;
+        }
+        
+        // THEN apply full-page background if enabled
+        if (this.fullPageBackground) {
+            // Apply full-page background
+            section.style.backgroundImage = `linear-gradient(rgba(0,0,0,0.7), rgba(0,0,0,0.85)), url(${image.url}?w=1920&q=85)`;
+            section.style.backgroundSize = 'cover';
+            section.style.backgroundPosition = 'center';
+            section.style.backgroundAttachment = 'fixed';
+            
+            // Make all cards semi-transparent
+            const cards = section.querySelectorAll('.bg-gray-800, .bg-gray-700');
+            cards.forEach(card => {
+                card.style.backgroundColor = 'rgba(31, 41, 55, 0.85)';
+                card.style.webkitBackdropFilter = 'blur(10px)'; // Safari support
+                card.style.backdropFilter = 'blur(10px)';
+            });
+            
+            // Create floating controls
+            let controls = document.getElementById('background-controls');
+            if (!controls) {
+                controls = document.createElement('div');
+                controls.id = 'background-controls';
+                controls.className = 'fixed top-20 right-4 bg-gray-800/90 backdrop-blur-sm rounded-lg p-3 z-40 shadow-lg';
+                controls.innerHTML = `
+                    <div class="flex flex-col gap-2">
+                        <span class="text-xs text-gray-400">${image.name}</span>
+                        <div class="flex gap-2">
+                            <button onclick="dataLoader.giveBackgroundFeedback('up')" 
+                                    class="bg-gray-700 hover:bg-green-600 px-2 py-1 rounded text-sm">👍</button>
+                            <button onclick="dataLoader.giveBackgroundFeedback('neutral')" 
+                                    class="bg-gray-700 hover:bg-yellow-600 px-2 py-1 rounded text-sm">👌</button>
+                            <button onclick="dataLoader.giveBackgroundFeedback('down')" 
+                                    class="bg-gray-700 hover:bg-red-600 px-2 py-1 rounded text-sm">👎</button>
+                        </div>
+                        <div class="flex gap-2">
+                            <button onclick="dataLoader.nextBackground()" 
+                                    class="bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded text-xs">� Change</button>
+                            <button onclick="dataLoader.openBackgroundSettings()" 
+                                    class="bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded text-xs">⚙️ Settings</button>
+                        </div>
+                    </div>
+                `;
+                document.body.appendChild(controls);
+            } else {
+                // Update controls text
+                const nameSpan = controls.querySelector('.text-gray-400');
+                if (nameSpan) nameSpan.textContent = image.name;
+            }
+        } else {
+            // No full-page background - clear section background
+            section.style.backgroundImage = '';
+            section.style.backgroundColor = '';
+            
+            // Reset card transparency
+            const cards = section.querySelectorAll('.bg-gray-800, .bg-gray-700');
+            cards.forEach(card => {
+                card.style.backgroundColor = '';
+                card.style.webkitBackdropFilter = ''; // Safari support
+                card.style.backdropFilter = '';
+            });
+            
+            // Remove floating controls
+            const controls = document.getElementById('background-controls');
+            if (controls) controls.remove();
         }
         
         // Apply theme adjustment based on image
@@ -4617,6 +5099,33 @@ Then ask me: "What would you like to do with this email?"`,
         }
     }
     
+    async markEmailAsSafe(senderEmail) {
+        try {
+            const response = await fetch('/api/email/mark-safe', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    sender_email: senderEmail,
+                    reason: 'User marked as safe from dashboard'
+                })
+            });
+            
+            if (response.ok) {
+                console.log(`Marked ${senderEmail} as safe`);
+                // Reload emails to update UI
+                await this.loadEmails(true);
+                
+                // Show success message
+                alert(`✓ ${senderEmail} has been added to your safe senders list. Future emails from this sender will be trusted.`);
+            } else {
+                throw new Error('Failed to mark sender as safe');
+            }
+        } catch (error) {
+            console.error('Error marking email as safe:', error);
+            alert('Failed to mark sender as safe. Please try again.');
+        }
+    }
+    
     // Smart Email Tagging based on feedback patterns
     analyzeEmailTags() {
         const emailFeedback = {};
@@ -4677,4 +5186,217 @@ Then ask me: "What would you like to do with this email?"`,
 
 // Global instance
 const dataLoader = new DashboardDataLoader();
+
+// Dashboard Management Functions
+function showAddDashboardModal(dashboardData = null) {
+    const modal = document.getElementById('add-dashboard-modal');
+    const titleText = document.getElementById('modal-title-text');
+    const saveBtnText = document.getElementById('save-btn-text');
+    const form = document.getElementById('add-dashboard-form');
+    
+    if (dashboardData) {
+        // Edit mode
+        titleText.textContent = 'Edit Dashboard Configuration';
+        saveBtnText.textContent = 'Save Changes';
+        
+        // Populate form with existing data
+        document.getElementById('dashboard-id').value = dashboardData.id || '';
+        document.getElementById('dashboard-name').value = dashboardData.name || '';
+        document.getElementById('dashboard-path').value = dashboardData.path || '';
+        document.getElementById('dashboard-type').value = dashboardData.type || 'forgeweb';
+        document.getElementById('dashboard-port').value = dashboardData.port || '';
+        document.getElementById('dashboard-command').value = dashboardData.start_command || '';
+        document.getElementById('dashboard-production-url').value = dashboardData.production_url || '';
+        document.getElementById('dashboard-api-url').value = dashboardData.api_url || '';
+        document.getElementById('dashboard-active').checked = dashboardData.active !== false;
+    } else {
+        // Add mode
+        titleText.textContent = 'Add Marketing Dashboard / Website';
+        saveBtnText.textContent = 'Add Dashboard';
+        form.reset();
+        document.getElementById('dashboard-active').checked = true;
+        
+        // Set default type to forgeweb
+        document.getElementById('dashboard-type').value = 'forgeweb';
+        updateProjectTypeDefaults();
+    }
+    
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+}
+
+function closeAddDashboardModal() {
+    const modal = document.getElementById('add-dashboard-modal');
+    modal.classList.add('hidden');
+    modal.classList.remove('flex');
+    // Reset form
+    document.getElementById('add-dashboard-form').reset();
+    document.getElementById('dashboard-id').value = '';
+}
+
+function updateProjectTypeDefaults() {
+    const type = document.getElementById('dashboard-type').value;
+    const portInput = document.getElementById('dashboard-port');
+    const commandInput = document.getElementById('dashboard-command');
+    const pathInput = document.getElementById('dashboard-path').value || '';
+    
+    // Default ports and commands for each type
+    const defaults = {
+        'forgeweb': {
+            port: 8000,
+            command: `python3 -m http.server 8000`
+        },
+        'forgemarket': {
+            port: 8001,
+            command: `python3 -m http.server 8001`
+        },
+        'flask': {
+            port: 5000,
+            command: `python app.py`
+        },
+        'fastapi': {
+            port: 8000,
+            command: `uvicorn main:app --reload --port 8000`
+        },
+        'react': {
+            port: 3000,
+            command: `npm start`
+        },
+        'vue': {
+            port: 8080,
+            command: `npm run serve`
+        },
+        'static': {
+            port: 8000,
+            command: `python3 -m http.server 8000`
+        },
+        'streamlit': {
+            port: 8501,
+            command: `streamlit run streamlit_app.py --server.port 8501`
+        }
+    };
+    
+    const config = defaults[type] || { port: 8000, command: '' };
+    
+    // Only update if fields are empty
+    if (!portInput.value) {
+        portInput.value = config.port;
+    }
+    if (!commandInput.value) {
+        // Add path to command if available
+        if (pathInput && config.command) {
+            commandInput.value = `cd ${pathInput} && ${config.command}`;
+        } else {
+            commandInput.value = config.command;
+        }
+    }
+}
+
+function browseDirectory() {
+    // Provide helpful path suggestions
+    const pathInput = document.getElementById('dashboard-path');
+    const homeDir = '/Users/greglind';
+    const suggestions = [
+        `${homeDir}/Projects/me/marketing/websites/`,
+        `${homeDir}/Projects/me/marketing/`,
+        `${homeDir}/Projects/`,
+        `${homeDir}/`
+    ];
+    
+    const suggestion = prompt(
+        'Enter the full path to your project directory:\n\n' +
+        'Common locations:\n' +
+        suggestions.join('\n') +
+        '\n\nOr paste your custom path below:',
+        pathInput.value || suggestions[0]
+    );
+    
+    if (suggestion) {
+        pathInput.value = suggestion.trim();
+        updateProjectTypeDefaults();
+    }
+}
+
+async function saveDashboard() {
+    const dashboardId = document.getElementById('dashboard-id').value;
+    const path = document.getElementById('dashboard-path').value.trim();
+    const name = document.getElementById('dashboard-name').value.trim();
+    
+    if (!path) {
+        alert('Please enter a project directory path');
+        return;
+    }
+    
+    if (!name) {
+        alert('Please enter a project name');
+        return;
+    }
+    
+    const data = {
+        id: dashboardId || null,
+        name: name,
+        path: path,
+        type: document.getElementById('dashboard-type').value,
+        port: document.getElementById('dashboard-port').value ? parseInt(document.getElementById('dashboard-port').value) : null,
+        start_command: document.getElementById('dashboard-command').value.trim() || null,
+        production_url: document.getElementById('dashboard-production-url').value.trim() || null,
+        api_url: document.getElementById('dashboard-api-url').value.trim() || null,
+        active: document.getElementById('dashboard-active').checked
+    };
+    
+    try {
+        const endpoint = dashboardId ? '/api/dashboards/save' : '/api/dashboards/add';
+        const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(data)
+        });
+        
+        const result = await response.json();
+        
+        if (result.success || response.ok) {
+            showNotification(
+                dashboardId ? 'Dashboard updated successfully!' : 'Dashboard added successfully!',
+                'success'
+            );
+            closeAddDashboardModal();
+            
+            // Reload dashboards section
+            if (window.dataLoader) {
+                await dataLoader.loadDashboards();
+            }
+        } else {
+            showNotification(result.message || result.detail || 'Failed to save dashboard', 'error');
+        }
+    } catch (error) {
+        console.error('Error saving dashboard:', error);
+        showNotification('Error saving dashboard: ' + error.message, 'error');
+    }
+}
+
+function showNotification(message, type = 'info') {
+    // Create notification element
+    const notification = document.createElement('div');
+    notification.className = `fixed top-4 right-4 z-50 px-6 py-4 rounded-lg shadow-lg transform transition-all duration-300 ${
+        type === 'success' ? 'bg-green-600' :
+        type === 'error' ? 'bg-red-600' :
+        'bg-blue-600'
+    } text-white`;
+    notification.textContent = message;
+    
+    document.body.appendChild(notification);
+    
+    // Animate in
+    setTimeout(() => {
+        notification.style.transform = 'translateX(0)';
+    }, 10);
+    
+    // Remove after 3 seconds
+    setTimeout(() => {
+        notification.style.transform = 'translateX(400px)';
+        setTimeout(() => notification.remove(), 300);
+    }, 3000);
+}
 

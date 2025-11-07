@@ -42,6 +42,7 @@ openai==1.3.0
 
 # Task scheduling and monitoring
 schedule==1.2.0
+psutil==5.9.6
 
 # Development and testing dependencies
 pytest==7.4.3

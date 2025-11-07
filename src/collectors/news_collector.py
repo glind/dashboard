@@ -128,12 +128,13 @@ class NewsCollector:
             'techcrunch', 'cnn', 'bbc-news', 'associated-press'
         ]
         
-        # Reddit sources for additional news
+        # Reddit sources for additional news (limited to reduce noise)
+        # Commented out most to prioritize actual news sources over Reddit
         self.reddit_subreddits = {
-            'oregon_state': ['OregonStateUniv', 'CFB', 'CollegeBasketball', 'Corvallis'],
-            'portland_timbers': ['timbers', 'MLS', 'soccer', 'PTFC'],
-            'star_wars': ['StarWars', 'starwarsspeculation', 'TheMandalorianTV', 'PrequelMemes'],
-            'star_trek': ['startrek', 'DeepSpaceNine', 'nextgeneration', 'voyager', 'discovery']
+            # 'oregon_state': ['OregonStateUniv'],  # Reduced from 4 to 1, now disabled
+            # 'portland_timbers': ['timbers'],  # Reduced from 4 to 1, now disabled
+            # 'star_wars': ['StarWars'],  # Reduced from 4 to 1, now disabled
+            # 'star_trek': ['startrek']  # Reduced from 4 to 1, now disabled
         }
         
         # Additional general news sources

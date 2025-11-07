@@ -22,10 +22,13 @@ from bs4 import BeautifulSoup
 import threading
 import asyncio
 import time
+import secrets
 from typing import Dict, Any, Optional
 
-# Add the project root to the path so we can import our collectors
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+# Add the src directory to path for imports
+src_dir = Path(__file__).parent
+project_root = src_dir.parent  # One level up from src/
+sys.path.insert(0, str(src_dir))
 
 # Import database manager
 from database import db
@@ -52,7 +55,7 @@ try:
     from collectors.investments_collector import InvestmentsCollector
     from collectors.local_services_collector import LocalServicesCollector
     from processors.task_manager import TaskManager
-    from config.settings import Settings
+    from config.settings import Settings, settings
     COLLECTORS_AVAILABLE = True
     TASK_MANAGER_AVAILABLE = True
 except ImportError as e:
@@ -73,6 +76,18 @@ except ImportError as e:
 logging.basicConfig(level=logging.INFO)
 
 app = FastAPI(title="Simple Personal Dashboard")
+
+
+# Health check endpoint for monitoring
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for Docker, K8s, and monitoring."""
+    return {
+        "status": "healthy",
+        "version": "1.0.0",
+        "timestamp": datetime.now().isoformat(),
+        "service": "personal-dashboard"
+    }
 
 
 class BackgroundDataManager:
@@ -380,7 +395,7 @@ background_manager = BackgroundDataManager()
 
 
 # Load configuration if it exists
-config_path = Path("config/config.yaml")
+config_path = project_root / "config" / "config.yaml"
 config = {}
 if config_path.exists():
     with open(config_path, 'r') as f:
@@ -390,9 +405,10 @@ print("🚀 Simple Dashboard Starting...")
 print("Config loaded:", bool(config))
 
 # Mount static files
-static_dir = Path("static")
+src_dir = Path(__file__).parent
+static_dir = src_dir / "static"
 if static_dir.exists():
-    app.mount("/static", StaticFiles(directory="static"), name="static")
+    app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(code: str = None, state: str = None, error: str = None):
@@ -408,7 +424,9 @@ async def dashboard(code: str = None, state: str = None, error: str = None):
     
     # Serve the modern template
     try:
-        template_path = Path("templates/dashboard_modern.html")
+        # Get the src directory path
+        src_dir = Path(__file__).parent
+        template_path = src_dir / "templates" / "dashboard_modern.html"
         if template_path.exists():
             with open(template_path, 'r') as f:
                 return HTMLResponse(content=f.read())
@@ -1318,7 +1336,6 @@ async def dashboard(code: str = None, state: str = None, error: str = None):
                 <div class="flex-1 overflow-y-auto overflow-x-hidden">
                     <div id="dashboard-overview"></div>
                     <div id="dashboard-projects" class="grid grid-cols-1 gap-3 mb-4"></div>
-                    <div id="brand-websites"></div>
                 </div>
             </div>
         </div>
@@ -4215,8 +4232,150 @@ async def dashboard(code: str = None, state: str = None, error: str = None):
         </div>
     </div>
 
-    <script src="/static/tasks.js"></script>
-    <script src="/static/dashboards.js"></script>
+    <!-- Add/Edit Dashboard Modal -->
+    <div id="add-dashboard-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 items-center justify-center">
+        <div class="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+            <div class="p-6 border-b border-gray-200">
+                <div class="flex justify-between items-center">
+                    <h2 class="text-2xl font-bold text-gray-800">
+                        <span id="modal-title-text">Add Marketing Dashboard / Website</span>
+                    </h2>
+                    <button onclick="closeAddDashboardModal()" class="text-gray-400 hover:text-gray-600">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                        </svg>
+                    </button>
+                </div>
+                <p class="text-sm text-gray-600 mt-2">
+                    Monitor ForgeWeb or ForgeMarket sites from 
+                    <a href="https://collab.buildly.io/marketplace/app/forgeweb/" target="_blank" class="text-blue-600 hover:underline">
+                        Buildly Forge Marketplace →
+                    </a>
+                </p>
+            </div>
+            
+            <form id="add-dashboard-form" class="p-6 space-y-4">
+                <input type="hidden" id="dashboard-id" value="">
+                
+                <!-- Project Name -->
+                <div>
+                    <label for="dashboard-name" class="block text-sm font-medium text-gray-700 mb-1">
+                        Project/Brand Name *
+                    </label>
+                    <input type="text" id="dashboard-name" required
+                           class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
+                           placeholder="e.g., My Awesome Brand">
+                    <p class="text-xs text-gray-500 mt-1">The name of your website or marketing project</p>
+                </div>
+                
+                <!-- Project Path -->
+                <div>
+                    <label for="dashboard-path" class="block text-sm font-medium text-gray-700 mb-1">
+                        Project Directory Path *
+                    </label>
+                    <div class="flex gap-2">
+                        <input type="text" id="dashboard-path" required
+                               class="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
+                               placeholder="/Users/greglind/Projects/me/marketing/websites/brand-name">
+                        <button type="button" onclick="browseDirectory()" 
+                                class="px-4 py-2 bg-gray-100 hover:bg-gray-200 border border-gray-300 rounded-md text-sm">
+                            Browse...
+                        </button>
+                    </div>
+                    <p class="text-xs text-gray-500 mt-1">
+                        For ForgeWeb sites, point to your website directory (e.g., ~/marketing/websites/mybrand)
+                    </p>
+                </div>
+                
+                <!-- Project Type -->
+                <div>
+                    <label for="dashboard-type" class="block text-sm font-medium text-gray-700 mb-1">
+                        Project Type
+                    </label>
+                    <select id="dashboard-type" onchange="updateProjectTypeDefaults()"
+                            class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500">
+                        <option value="forgeweb">ForgeWeb Site (Static HTML/CSS/JS)</option>
+                        <option value="forgemarket">ForgeMarket Site (E-commerce)</option>
+                        <option value="flask">Flask Application</option>
+                        <option value="fastapi">FastAPI Application</option>
+                        <option value="react">React Application</option>
+                        <option value="vue">Vue.js Application</option>
+                        <option value="static">Static Website (HTML)</option>
+                        <option value="streamlit">Streamlit App</option>
+                        <option value="custom">Custom Configuration</option>
+                    </select>
+                </div>
+                
+                <!-- Local Port -->
+                <div>
+                    <label for="dashboard-port" class="block text-sm font-medium text-gray-700 mb-1">
+                        Local Development Port
+                    </label>
+                    <input type="number" id="dashboard-port" 
+                           class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
+                           placeholder="8000">
+                    <p class="text-xs text-gray-500 mt-1">Port for local development server</p>
+                </div>
+                
+                <!-- Startup Command -->
+                <div>
+                    <label for="dashboard-command" class="block text-sm font-medium text-gray-700 mb-1">
+                        Startup Command
+                    </label>
+                    <textarea id="dashboard-command" rows="2"
+                              class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500 font-mono text-sm"
+                              placeholder="python -m http.server 8000"></textarea>
+                    <p class="text-xs text-gray-500 mt-1">Command to start the local development server</p>
+                </div>
+                
+                <!-- Production URL -->
+                <div>
+                    <label for="dashboard-production-url" class="block text-sm font-medium text-gray-700 mb-1">
+                        Production/Live URL
+                    </label>
+                    <input type="url" id="dashboard-production-url"
+                           class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
+                           placeholder="https://mybrand.com">
+                    <p class="text-xs text-gray-500 mt-1">Your live website URL (if deployed)</p>
+                </div>
+                
+                <!-- Dashboard API URL -->
+                <div>
+                    <label for="dashboard-api-url" class="block text-sm font-medium text-gray-700 mb-1">
+                        Dashboard API URL (Optional)
+                    </label>
+                    <input type="url" id="dashboard-api-url"
+                           class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
+                           placeholder="https://api.mybrand.com/dashboard/stats">
+                    <p class="text-xs text-gray-500 mt-1">API endpoint for monitoring analytics, metrics, or dashboard data</p>
+                </div>
+                
+                <!-- Active Toggle -->
+                <div class="flex items-center">
+                    <input type="checkbox" id="dashboard-active" checked
+                           class="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500">
+                    <label for="dashboard-active" class="ml-2 text-sm text-gray-700">
+                        Monitor this dashboard (active)
+                    </label>
+                </div>
+                
+                <!-- Form Actions -->
+                <div class="flex justify-end gap-3 pt-4 border-t border-gray-200">
+                    <button type="button" onclick="closeAddDashboardModal()"
+                            class="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50">
+                        Cancel
+                    </button>
+                    <button type="button" onclick="saveDashboard()"
+                            class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">
+                        <span id="save-btn-text">Add Dashboard</span>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="/static/tasks.js?v=2"></script>
+    <script src="/static/dashboards.js?v=2"></script>
 </body>
 </html>
     """
@@ -4303,77 +4462,112 @@ async def get_calendar():
     except Exception as e:
         return {"error": str(e)}
 
+
+@app.get("/api/notes")
+async def get_notes():
+    """Get recent notes from Obsidian and Google Drive."""
+    try:
+        from collectors.notes_collector import collect_all_notes
+        from database import get_credentials
+        
+        # Get configuration
+        notes_config = get_credentials('notes') or {}
+        obsidian_path = notes_config.get('obsidian_vault_path')
+        gdrive_folder_id = notes_config.get('google_drive_folder_id')
+        limit = notes_config.get('notes_limit', 10)
+        auto_create = notes_config.get('auto_create_tasks', True)
+        
+        logger.info(f"Collecting notes - Obsidian: {obsidian_path}, GDrive: {gdrive_folder_id}")
+        
+        # Collect notes from all sources
+        result = collect_all_notes(
+            obsidian_path=obsidian_path,
+            gdrive_folder_id=gdrive_folder_id,
+            limit=limit
+        )
+        
+        # Auto-create tasks from TODOs if enabled
+        if auto_create and result['todos_to_create']:
+            from database import DatabaseManager
+            db = DatabaseManager()
+            created_count = 0
+            
+            for todo_item in result['todos_to_create']:
+                try:
+                    # Check if task already exists (avoid duplicates)
+                    existing_tasks = db.get_todos()
+                    todo_text = todo_item['text']
+                    
+                    # Skip if similar task exists
+                    if any(task.get('title', '').lower() == todo_text.lower() for task in existing_tasks):
+                        continue
+                    
+                    # Create task
+                    task_data = {
+                        'title': todo_text,
+                        'description': f"From {todo_item['source']}: {todo_item['source_title']}\n\n{todo_item.get('context', '')}",
+                        'source': f"notes_{todo_item['source']}",
+                        'source_url': todo_item.get('source_url') or todo_item.get('source_path'),
+                        'priority': 'medium',
+                        'status': 'pending'
+                    }
+                    
+                    db.add_todo(task_data)
+                    created_count += 1
+                    logger.info(f"Auto-created task from note: {todo_text[:50]}...")
+                    
+                except Exception as e:
+                    logger.error(f"Error auto-creating task: {e}")
+                    continue
+            
+            result['tasks_created'] = created_count
+        
+        return {
+            "success": True,
+            "notes": result['notes'],
+            "obsidian_count": result['obsidian_count'],
+            "gdrive_count": result['gdrive_count'],
+            "total_todos_found": result['total_todos_found'],
+            "tasks_created": result.get('tasks_created', 0)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error collecting notes: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "notes": [],
+            "obsidian_count": 0,
+            "gdrive_count": 0,
+            "total_todos_found": 0,
+            "tasks_created": 0
+        }
+
+
 @app.get("/api/email") 
 async def get_email():
-    """Get email summary from Gmail"""
+    """Get email summary from Gmail - always fetch fresh data"""
     try:
-        # Try to get cached data first
-        cached_data = background_manager.get_cached_data('email')
-        if cached_data:
-            logger.info("Returning cached email data")
-            # Convert cached data format to expected format
-            if 'high_priority' in cached_data or 'medium_priority' in cached_data or 'low_priority' in cached_data:
-                # This is the new format from GmailCollector.collect_data()
-                all_emails = []
-                all_emails.extend(cached_data.get('high_priority', []))
-                all_emails.extend(cached_data.get('medium_priority', []))
-                all_emails.extend(cached_data.get('low_priority', []))
-                
-                # Sort by timestamp if available
-                all_emails.sort(key=lambda x: x.get('timestamp', x.get('received_date', '')), reverse=True)
-                
-                return {
-                    "emails": all_emails[:50],  # Return top 50 emails
-                    "unread": sum(1 for email in all_emails if not email.get('read', True)),
-                    "total": len(all_emails),
-                    "analysis_stats": cached_data.get('analysis_stats', {}),
-                    "total_todos": cached_data.get('total_todos', [])
-                }
-            else:
-                # Old format, return as-is
-                return cached_data
-        
-        # Fallback to real-time collection if no cache available
-        logger.info("No cached email data, collecting in real-time")
+        # ALWAYS fetch fresh data - no caching for emails
+        logger.info("Fetching fresh email data from Gmail")
         if COLLECTORS_AVAILABLE:
             try:
                 settings = Settings()
                 gmail_collector = GmailCollector(settings)
-                start_date = datetime.now() - timedelta(days=1)
-                end_date = datetime.now()
-                emails_data = await gmail_collector.collect_emails(start_date, end_date)
+                data = await gmail_collector.collect_data()
                 
-                if emails_data:
-                    unread_count = sum(1 for email in emails_data if not email.get('read', True))
-                    recent_emails = []
-                    for email in emails_data[:5]:
-                        # Extract email content and metadata
-                        email_body = email.get('body', email.get('snippet', 'No content available'))
-                        thread_id = email.get('thread_id', '')
-                        message_id = email.get('message_id', '')
-                        
-                        recent_emails.append({
-                            "subject": email.get('subject', 'No Subject'),
-                            "sender": email.get('sender', 'Unknown Sender'),
-                            "from": email.get('from', email.get('sender', 'Unknown Sender')),
-                            "date": email.get('date', email.get('timestamp', 'Unknown date')),
-                            "timestamp": email.get('timestamp', email.get('date', 'Unknown date')),
-                            "body": email_body,
-                            "snippet": email.get('snippet', ''),
-                            "read": email.get('read', True),
-                            "thread_id": thread_id,
-                            "message_id": message_id,
-                            "gmail_url": f"https://mail.google.com/mail/u/0/#inbox/{thread_id}" if thread_id else "https://mail.google.com/mail/u/0/#inbox",
-                            "labels": email.get('labels', []),
-                            "attachments": email.get('attachments', [])
-                        })
-                    return {"emails": recent_emails, "unread": unread_count, "total": len(emails_data)}
-            except:
-                pass
-        
-        return {"emails": [], "unread": 0, "total": 0}
+                logger.info(f"Retrieved {data.get('total_count', 0)} emails, {data.get('unread_count', 0)} unread")
+                return data
+                
+            except Exception as e:
+                logger.error(f"Error collecting email data: {e}")
+                raise HTTPException(status_code=500, detail=f"Error collecting emails: {str(e)}")
+        else:
+            raise HTTPException(status_code=500, detail="Email collector not available")
+            
     except Exception as e:
-        return {"error": str(e)}
+        logger.error(f"Error in email API: {e}")
+        return {"error": str(e), "emails": [], "total_count": 0, "unread_count": 0}
 
 @app.get("/api/github")
 async def get_github():
@@ -4590,6 +4784,177 @@ async def sync_email_todos_to_ticktick():
         logger.error(f"Email TickTick sync error: {e}")
         return {"error": str(e), "success": False}
 
+@app.post("/api/email/scan-for-tasks")
+async def scan_emails_for_tasks(request: Request):
+    """Scan historical emails for tasks using strict AI filtering."""
+    try:
+        if not COLLECTORS_AVAILABLE:
+            raise HTTPException(status_code=503, detail="Email collectors not available")
+        
+        # Get request parameters
+        body = await request.json()
+        start_date_str = body.get('start_date')
+        end_date_str = body.get('end_date')
+        max_emails = body.get('max_emails', 100)
+        
+        # Parse dates
+        start_date = datetime.fromisoformat(start_date_str) if start_date_str else datetime.now() - timedelta(days=30)
+        end_date = datetime.fromisoformat(end_date_str) if end_date_str else datetime.now()
+        end_date = end_date.replace(hour=23, minute=59, second=59)  # End of day
+        
+        logger.info(f"Scanning emails from {start_date} to {end_date}, max {max_emails} emails")
+        
+        # Initialize collectors
+        settings = Settings()
+        gmail_collector = GmailCollector(settings)
+        task_manager = TaskManager(settings)
+        
+        # Import email analyzer
+        from processors.email_analyzer import EmailAnalyzer
+        email_analyzer = EmailAnalyzer()
+        
+        # Collect emails in date range
+        emails = await gmail_collector.collect_emails(start_date, end_date)
+        emails = emails[:max_emails]  # Limit to max_emails
+        
+        logger.info(f"Collected {len(emails)} emails to scan")
+        
+        tasks_created = 0
+        tasks_skipped = 0
+        emails_skipped = 0
+        
+        # Analyze each email for tasks
+        for email in emails:
+            try:
+                subject = email.get('subject', '')
+                body = email.get('body', '')
+                sender = email.get('sender', '')
+                email_id = email.get('id', '')
+                received_date = email.get('received_date', '')
+                risk_score = email.get('risk_score', 0)  # Get risk score from email data
+                
+                # Use AI analyzer with strict filtering and risk scoring
+                todos = await email_analyzer.analyze_email_for_todos(subject, body, sender, risk_score)
+                
+                if not todos:
+                    emails_skipped += 1
+                    continue
+                
+                # Create tasks for each todo found
+                for todo in todos:
+                    # Check if task already exists (avoid duplicates)
+                    existing_tasks = task_manager.get_tasks_by_source('email', email_id)
+                    if existing_tasks:
+                        logger.info(f"Task already exists for email: {subject[:50]}")
+                        tasks_skipped += 1
+                        continue
+                    
+                    # Create task
+                    task_data = {
+                        'title': todo.get('task'),
+                        'description': f"From: {sender}\nSubject: {subject}\n\nReason: {todo.get('reason', 'N/A')}",
+                        'due_date': todo.get('deadline'),
+                        'priority': todo.get('priority', 'medium'),
+                        'category': todo.get('category', 'email'),
+                        'source': 'email',
+                        'source_id': email_id,
+                        'status': 'pending',
+                        'requires_response': todo.get('requires_response', False)
+                    }
+                    
+                    task_manager.create_task(task_data)
+                    tasks_created += 1
+                    logger.info(f"Created task from email: {subject[:50]}")
+                    
+            except Exception as e:
+                logger.error(f"Error processing email {email.get('id', 'unknown')}: {e}")
+                continue
+        
+        return {
+            "success": True,
+            "emails_scanned": len(emails),
+            "tasks_created": tasks_created,
+            "tasks_skipped": tasks_skipped,
+            "emails_skipped": emails_skipped,
+            "date_range": {
+                "start": start_date.isoformat(),
+                "end": end_date.isoformat()
+            },
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Email scan error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/email/mark-safe")
+async def mark_email_as_safe(request: Request):
+    """Mark an email sender as safe/trusted."""
+    try:
+        data = await request.json()
+        sender_email = data.get('sender_email')
+        reason = data.get('reason', 'User marked as safe')
+        
+        if not sender_email:
+            raise HTTPException(status_code=400, detail="sender_email required")
+        
+        success = db.add_safe_sender(sender_email, reason)
+        
+        if success:
+            logger.info(f"Marked sender as safe: {sender_email}")
+            return {
+                "success": True,
+                "message": f"Added {sender_email} to safe senders list",
+                "sender_email": sender_email
+            }
+        else:
+            raise HTTPException(status_code=500, detail="Failed to add safe sender")
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error marking email as safe: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/email/safe-senders")
+async def get_safe_senders():
+    """Get list of all safe/trusted senders."""
+    try:
+        safe_senders = db.get_safe_senders()
+        return {
+            "success": True,
+            "safe_senders": safe_senders,
+            "total": len(safe_senders)
+        }
+    except Exception as e:
+        logger.error(f"Error getting safe senders: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/email/safe-senders/{sender_email}")
+async def remove_safe_sender(sender_email: str):
+    """Remove a sender from the safe senders list."""
+    try:
+        # URL decode the email
+        from urllib.parse import unquote
+        sender_email = unquote(sender_email)
+        
+        success = db.remove_safe_sender(sender_email)
+        
+        if success:
+            logger.info(f"Removed safe sender: {sender_email}")
+            return {
+                "success": True,
+                "message": f"Removed {sender_email} from safe senders list"
+            }
+        else:
+            raise HTTPException(status_code=404, detail="Safe sender not found")
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error removing safe sender: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 # Task Management API Endpoints
 @app.get("/api/tasks")
 async def get_tasks(include_completed: bool = False, priority: str = None, status: str = None, category: str = None):
@@ -4747,21 +5112,32 @@ async def sync_tasks_with_ticktick(request: Request):
         return {"error": str(e), "success": False}
 
 @app.get("/api/news")
-async def get_news(filter: str = "all"):
+async def get_news(filter: str = "all", include_read: bool = False):
     """Get filtered news headlines from database"""
     try:
         # Get news articles from database
         with db.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('''
-                SELECT title, url, snippet, source, published_date, topics, relevance_score
-                FROM news_articles 
-                ORDER BY published_date DESC 
-                LIMIT 50
-            ''')
+            
+            # Build query based on whether we want to include read articles
+            if include_read:
+                cursor.execute('''
+                    SELECT id, title, url, snippet, source, published_date, topics, relevance_score, is_read
+                    FROM news_articles 
+                    ORDER BY is_read ASC, published_date DESC 
+                    LIMIT 50
+                ''')
+            else:
+                cursor.execute('''
+                    SELECT id, title, url, snippet, source, published_date, topics, relevance_score, is_read
+                    FROM news_articles 
+                    WHERE is_read = 0
+                    ORDER BY published_date DESC 
+                    LIMIT 50
+                ''')
             db_articles = cursor.fetchall()
             
-        logger.info(f"Found {len(db_articles)} articles in database")
+        logger.info(f"Found {len(db_articles)} articles in database (include_read={include_read})")
         
         # Get previously rated news items to filter them out
         rated_item_ids = db.get_rated_item_ids('news')
@@ -4769,8 +5145,8 @@ async def get_news(filter: str = "all"):
         # Process articles from database
         articles = []
         for article in db_articles:
-            # Create a unique ID for this article
-            article_id = f"news_{hash(article['title'] + str(article['url'] if article['url'] else ''))}"
+            # Use the database ID
+            article_id = article['id'] if 'id' in article.keys() else f"news_{hash(article['title'] + str(article['url'] if article['url'] else ''))}"
             
             # Skip if already rated
             if article_id in rated_item_ids:
@@ -4792,7 +5168,8 @@ async def get_news(filter: str = "all"):
                 "description": article['snippet'] or "No description available",
                 "published_at": article['published_date'],
                 "category": ', '.join(topics),
-                "relevance_score": article['relevance_score'] or 0.0
+                "relevance_score": article['relevance_score'] or 0.0,
+                "is_read": bool(article['is_read']) if 'is_read' in article.keys() else False
             }
             
             # Filter based on category
@@ -5461,6 +5838,336 @@ async def save_feedback(request: Request):
         logger.error(f"Error saving feedback: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
+@app.post("/api/news/{article_id}/read")
+async def mark_article_read(article_id: str):
+    """Mark a news article as read"""
+    try:
+        success = db.mark_article_read(article_id)
+        
+        if success:
+            return {
+                "status": "success",
+                "message": "Article marked as read",
+                "article_id": article_id
+            }
+        else:
+            raise HTTPException(status_code=500, detail="Failed to mark article as read")
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error marking article as read: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/music/services")
+async def get_music_services():
+    """Get available music streaming services"""
+    try:
+        if COLLECTORS_AVAILABLE:
+            from collectors.universal_music_collector import UniversalMusicCollector
+            collector = UniversalMusicCollector()
+            services = await collector.get_available_services()
+            
+            return {
+                "services": services,
+                "configured": len(services) > 0
+            }
+        else:
+            return {"services": [], "configured": False}
+    except Exception as e:
+        logger.error(f"Error getting music services: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/music/unified-library")
+async def get_unified_library():
+    """Get aggregated tracks from all services"""
+    try:
+        if COLLECTORS_AVAILABLE:
+            from collectors.universal_music_collector import UniversalMusicCollector
+            collector = UniversalMusicCollector()
+            tracks = await collector.aggregate_liked_tracks()
+            
+            return {
+                "tracks": [
+                    {
+                        "id": t.id,
+                        "title": t.title,
+                        "artist": t.artist,
+                        "album": t.album,
+                        "service": t.service,
+                        "service_id": t.service_id,
+                        "artwork_url": t.artwork_url,
+                        "preview_url": t.preview_url,
+                        "duration_ms": t.duration_ms,
+                        "genre": t.genre,
+                        "mood": t.mood,
+                        "is_liked": t.is_liked,
+                        "popularity": t.popularity
+                    }
+                    for t in tracks
+                ],
+                "total_tracks": len(tracks),
+                "services_used": list(set(t.service for t in tracks))
+            }
+        else:
+            return {"tracks": [], "total_tracks": 0, "services_used": []}
+    except Exception as e:
+        logger.error(f"Error getting unified library: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/music/create-mood-playlist")
+async def create_mood_playlist(request: Request):
+    """Create a playlist based on mood"""
+    try:
+        data = await request.json()
+        mood = data.get('mood', 'happy')
+        max_tracks = data.get('max_tracks', 30)
+        use_ai = data.get('use_ai', True)
+        
+        if COLLECTORS_AVAILABLE:
+            from collectors.universal_music_collector import UniversalMusicCollector
+            collector = UniversalMusicCollector()
+            playlist = await collector.create_mood_playlist(mood, max_tracks, use_ai)
+            
+            return {
+                "playlist": {
+                    "id": playlist.id,
+                    "name": playlist.name,
+                    "description": playlist.description,
+                    "mood": playlist.mood,
+                    "created_by": playlist.created_by,
+                    "total_duration_ms": playlist.total_duration_ms,
+                    "services_used": playlist.services_used,
+                    "track_count": len(playlist.tracks),
+                    "tracks": [
+                        {
+                            "id": t.id,
+                            "title": t.title,
+                            "artist": t.artist,
+                            "album": t.album,
+                            "service": t.service,
+                            "artwork_url": t.artwork_url,
+                            "preview_url": t.preview_url,
+                            "duration_ms": t.duration_ms
+                        }
+                        for t in playlist.tracks
+                    ]
+                }
+            }
+        else:
+            raise HTTPException(status_code=503, detail="Music collectors not available")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating mood playlist: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/music/create-custom-playlist")
+async def create_custom_playlist(request: Request):
+    """Create a custom playlist with specific criteria"""
+    try:
+        data = await request.json()
+        name = data.get('name', 'My Playlist')
+        criteria = data.get('criteria', {})
+        max_tracks = data.get('max_tracks', 50)
+        
+        if COLLECTORS_AVAILABLE:
+            from collectors.universal_music_collector import UniversalMusicCollector
+            collector = UniversalMusicCollector()
+            playlist = await collector.create_custom_playlist(name, criteria, max_tracks)
+            
+            return {
+                "playlist": {
+                    "id": playlist.id,
+                    "name": playlist.name,
+                    "description": playlist.description,
+                    "total_duration_ms": playlist.total_duration_ms,
+                    "services_used": playlist.services_used,
+                    "track_count": len(playlist.tracks),
+                    "tracks": [
+                        {
+                            "id": t.id,
+                            "title": t.title,
+                            "artist": t.artist,
+                            "album": t.album,
+                            "service": t.service,
+                            "artwork_url": t.artwork_url,
+                            "preview_url": t.preview_url,
+                            "duration_ms": t.duration_ms
+                        }
+                        for t in playlist.tracks
+                    ]
+                }
+            }
+        else:
+            raise HTTPException(status_code=503, detail="Music collectors not available")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating custom playlist: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/music/playlists")
+async def get_saved_playlists():
+    """Get all saved playlists"""
+    try:
+        if COLLECTORS_AVAILABLE:
+            from collectors.universal_music_collector import UniversalMusicCollector
+            collector = UniversalMusicCollector()
+            playlists = await collector.get_saved_playlists()
+            
+            return {
+                "playlists": [
+                    {
+                        "id": p.id,
+                        "name": p.name,
+                        "description": p.description,
+                        "mood": p.mood,
+                        "created_by": p.created_by,
+                        "created_at": p.created_at.isoformat(),
+                        "track_count": len(p.tracks),
+                        "total_duration_ms": p.total_duration_ms,
+                        "services_used": p.services_used
+                    }
+                    for p in playlists
+                ]
+            }
+        else:
+            return {"playlists": []}
+    except Exception as e:
+        logger.error(f"Error getting playlists: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# OAuth endpoints for music services
+@app.get("/api/music/oauth/spotify/login")
+async def spotify_oauth_login():
+    """Initiate Spotify OAuth flow"""
+    try:
+        client_id = settings.SPOTIFY_CLIENT_ID
+        redirect_uri = settings.SPOTIFY_REDIRECT_URI or "http://localhost:8008/api/music/oauth/spotify/callback"
+        scope = "user-read-private user-read-email user-library-read user-top-read playlist-read-private streaming"
+        
+        # Generate state for CSRF protection
+        state = secrets.token_urlsafe(32)
+        
+        # Store state in session/database for verification
+        db.save_oauth_state("spotify", state)
+        
+        auth_url = (
+            "https://accounts.spotify.com/authorize?"
+            f"response_type=code&"
+            f"client_id={client_id}&"
+            f"scope={scope}&"
+            f"redirect_uri={redirect_uri}&"
+            f"state={state}"
+        )
+        
+        return RedirectResponse(url=auth_url)
+    except Exception as e:
+        logger.error(f"Error initiating Spotify OAuth: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/music/oauth/spotify/callback")
+async def spotify_oauth_callback(code: str = None, state: str = None, error: str = None):
+    """Handle Spotify OAuth callback"""
+    try:
+        if error:
+            raise HTTPException(status_code=400, detail=f"OAuth error: {error}")
+        
+        if not code or not state:
+            raise HTTPException(status_code=400, detail="Missing code or state")
+        
+        # Verify state
+        if not db.verify_oauth_state("spotify", state):
+            raise HTTPException(status_code=400, detail="Invalid state parameter")
+        
+        # Exchange code for access token
+        client_id = settings.SPOTIFY_CLIENT_ID
+        client_secret = settings.SPOTIFY_CLIENT_SECRET
+        redirect_uri = settings.SPOTIFY_REDIRECT_URI or "http://localhost:8008/api/music/oauth/spotify/callback"
+        
+        token_url = "https://accounts.spotify.com/api/token"
+        token_data = {
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": redirect_uri,
+            "client_id": client_id,
+            "client_secret": client_secret
+        }
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.post(token_url, data=token_data)
+            response.raise_for_status()
+            token_info = response.json()
+        
+        # Save tokens to database
+        db.save_auth_token(
+            service_name="spotify",
+            access_token=token_info["access_token"],
+            refresh_token=token_info.get("refresh_token"),
+            expires_in=token_info.get("expires_in", 3600)
+        )
+        
+        # Redirect back to dashboard
+        return RedirectResponse(url="/?spotify=connected")
+    except Exception as e:
+        logger.error(f"Error in Spotify OAuth callback: {e}")
+        return RedirectResponse(url="/?spotify=error")
+
+@app.get("/api/music/oauth/apple/login")
+async def apple_music_oauth_login():
+    """Initiate Apple Music OAuth flow"""
+    try:
+        # Apple Music uses MusicKit JS for web authentication
+        # This endpoint provides the configuration needed for the frontend
+        developer_token = settings.APPLE_MUSIC_DEVELOPER_TOKEN
+        
+        if not developer_token:
+            raise HTTPException(status_code=500, detail="Apple Music developer token not configured")
+        
+        return {
+            "developer_token": developer_token,
+            "music_kit_config": {
+                "developerToken": developer_token,
+                "app": {
+                    "name": "Personal Dashboard",
+                    "build": "1.0.0"
+                }
+            }
+        }
+    except Exception as e:
+        logger.error(f"Error getting Apple Music config: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/music/oauth/apple/callback")
+async def apple_music_oauth_callback(request: Request):
+    """Handle Apple Music user token"""
+    try:
+        data = await request.json()
+        user_token = data.get("user_token")
+        
+        if not user_token:
+            raise HTTPException(status_code=400, detail="Missing user token")
+        
+        # Save Apple Music user token
+        db.save_auth_token(
+            service_name="apple_music",
+            access_token=user_token,
+            refresh_token=None,
+            expires_in=None  # Apple Music tokens don't expire in the same way
+        )
+        
+        return {"success": True, "message": "Apple Music connected"}
+    except Exception as e:
+        logger.error(f"Error saving Apple Music token: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/api/feedback/summary")
 async def get_feedback_summary():
     """Get user preferences summary for AI analysis"""
@@ -5604,14 +6311,14 @@ async def google_calendar_auth():
         import os
         
         # Check if credentials file exists
-        creds_file = "config/google_oauth_config.json"
-        if not os.path.exists(creds_file):
+        creds_file = project_root / "config" / "google_oauth_config.json"
+        if not creds_file.exists():
             raise HTTPException(status_code=404, detail=f"Google OAuth config file not found at {creds_file}. Please set up Google Cloud Console credentials.")
         
         # Create OAuth flow with comprehensive scopes
         # Include all scopes that Google typically returns to avoid scope mismatch
         flow = Flow.from_client_secrets_file(
-            creds_file,
+            str(creds_file),
             scopes=[
                 'https://www.googleapis.com/auth/calendar.readonly',
                 'https://www.googleapis.com/auth/gmail.readonly',
@@ -5653,14 +6360,14 @@ async def google_oauth_callback(code: str = None, state: str = None, error: str 
         from google_auth_oauthlib.flow import Flow
         import os
         
-        creds_file = "config/google_oauth_config.json"
-        if not os.path.exists(creds_file):
+        creds_file = project_root / "config" / "google_oauth_config.json"
+        if not creds_file.exists():
             raise HTTPException(status_code=404, detail="Google OAuth config file not found")
         
         # Create OAuth flow with comprehensive scopes
         # Google automatically adds profile/email/openid scopes, so we include them
         flow = Flow.from_client_secrets_file(
-            creds_file,
+            str(creds_file),
             scopes=[
                 'https://www.googleapis.com/auth/calendar.readonly',
                 'https://www.googleapis.com/auth/gmail.readonly',
@@ -5678,10 +6385,11 @@ async def google_oauth_callback(code: str = None, state: str = None, error: str 
         credentials = flow.credentials
         
         # Ensure tokens directory exists
-        os.makedirs('tokens', exist_ok=True)
+        tokens_dir = project_root / "tokens"
+        tokens_dir.mkdir(exist_ok=True)
         
         # Save credentials to tokens file
-        tokens_file = 'tokens/google_credentials.json'
+        tokens_file = tokens_dir / "google_credentials.json"
         with open(tokens_file, 'w') as f:
             f.write(credentials.to_json())
         
@@ -5715,9 +6423,9 @@ async def google_disconnect():
     """Disconnect Google authentication."""
     try:
         import os
-        tokens_file = 'tokens/google_credentials.json'
-        if os.path.exists(tokens_file):
-            os.remove(tokens_file)
+        tokens_file = project_root / "tokens" / "google_credentials.json"
+        if tokens_file.exists():
+            tokens_file.unlink()
             logger.info("Google credentials removed")
         return {"success": True, "message": "Google authentication disconnected"}
     except Exception as e:
@@ -6685,7 +7393,8 @@ async def get_leads():
         
         # Try to load existing leads from file
         try:
-            with open('data/generated_leads.json', 'r') as f:
+            leads_file = project_root / "data" / "generated_leads.json"
+            with open(leads_file, 'r') as f:
                 leads_data = json.load(f)
                 leads_list = leads_data if isinstance(leads_data, list) else []
                 
@@ -6866,8 +7575,10 @@ async def analyze_lead_patterns():
         
         # Save analysis results
         try:
-            os.makedirs('data', exist_ok=True)
-            with open('data/lead_pattern_analysis.json', 'w') as f:
+            data_dir = project_root / "data"
+            data_dir.mkdir(exist_ok=True)
+            analysis_file = data_dir / "lead_pattern_analysis.json"
+            with open(analysis_file, 'w') as f:
                 json.dump(analysis_results, f, indent=2, default=str)
         except Exception as e:
             logger.warning(f"Could not save analysis results: {e}")
@@ -6938,21 +7649,125 @@ async def get_company_analysis():
 # Dashboard Management Endpoints
 @app.get("/api/dashboards")
 async def get_dashboards():
-    """Get overview of all discovered marketing dashboards and websites."""
+    """Get all saved dashboard projects from database."""
     try:
-        from processors.dashboard_manager import discover_dashboards
+        from database import DatabaseManager
         
-        logger.info("Discovering all marketing dashboards and websites...")
-        overview = await discover_dashboards()
+        db = DatabaseManager()
+        projects = db.get_dashboard_projects(active_only=False)
+        
+        logger.info(f"Loaded {len(projects)} dashboard projects from database")
         
         return {
             "success": True,
-            "data": overview,
-            "message": f"Found {overview['projects']['total']} projects and {overview['websites']['total']} websites"
+            "projects": projects,
+            "message": f"Found {len(projects)} dashboard projects"
         }
         
     except Exception as e:
-        logger.error(f"Error discovering dashboards: {e}")
+        logger.error(f"Error loading dashboards: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/dashboards/add")
+async def add_dashboard(request: Request):
+    """Add a new dashboard to monitor."""
+    try:
+        data = await request.json()
+        path = data.get('path')
+        
+        if not path:
+            raise HTTPException(status_code=400, detail="Path is required")
+        
+        from pathlib import Path
+        import os
+        
+        # Validate path exists
+        dashboard_path = Path(path).resolve()
+        if not dashboard_path.exists():
+            raise HTTPException(status_code=400, detail=f"Path does not exist: {path}")
+        
+        if not dashboard_path.is_dir():
+            raise HTTPException(status_code=400, detail=f"Path is not a directory: {path}")
+        
+        # Auto-detect project type if not specified
+        project_type = data.get('type')
+        if not project_type:
+            # Check for project indicators
+            files = os.listdir(dashboard_path)
+            if 'app.py' in files or 'wsgi.py' in files:
+                project_type = 'flask'
+            elif 'main.py' in files and 'fastapi' in open(dashboard_path / 'main.py').read():
+                project_type = 'fastapi'
+            elif 'package.json' in files:
+                # Check if React or Vue
+                pkg_json = json.loads(open(dashboard_path / 'package.json').read())
+                if 'react' in str(pkg_json.get('dependencies', {})):
+                    project_type = 'react'
+                elif 'vue' in str(pkg_json.get('dependencies', {})):
+                    project_type = 'vue'
+                else:
+                    project_type = 'static'
+            elif 'index.html' in files:
+                project_type = 'static'
+            elif 'streamlit_app.py' in files:
+                project_type = 'streamlit'
+            else:
+                project_type = 'unknown'
+        
+        # Get or generate name
+        name = data.get('name') or dashboard_path.name
+        
+        # Get or generate port
+        port = data.get('port')
+        if not port:
+            port_map = {'flask': 5000, 'fastapi': 8000, 'react': 3000, 'vue': 8080, 'static': 8000, 'streamlit': 8501}
+            port = port_map.get(project_type, 8000)
+        
+        # Get or generate start command
+        start_command = data.get('start_command')
+        if not start_command:
+            command_map = {
+                'flask': f'cd {dashboard_path} && python app.py',
+                'fastapi': f'cd {dashboard_path} && uvicorn main:app --reload --port {port}',
+                'react': f'cd {dashboard_path} && npm start',
+                'vue': f'cd {dashboard_path} && npm run serve',
+                'static': f'cd {dashboard_path} && python -m http.server {port}',
+                'streamlit': f'cd {dashboard_path} && streamlit run streamlit_app.py --server.port {port}'
+            }
+            start_command = command_map.get(project_type, f'cd {dashboard_path}')
+        
+        # Save to database
+        from database import DatabaseManager
+        db = DatabaseManager()
+        db.save_dashboard_project({
+            'name': name,
+            'path': str(dashboard_path),
+            'type': project_type,
+            'port': port,
+            'start_command': start_command,
+            'url': f'http://localhost:{port}',
+            'active': True
+        })
+        
+        logger.info(f"Added dashboard: {name} ({project_type}) at {dashboard_path}")
+        
+        return {
+            "success": True,
+            "message": f"Dashboard '{name}' added successfully",
+            "dashboard": {
+                "name": name,
+                "path": str(dashboard_path),
+                "type": project_type,
+                "port": port,
+                "start_command": start_command
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error adding dashboard: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -7045,28 +7860,23 @@ async def delete_dashboard_project(project_name: str):
 async def get_dashboard_status():
     """Get quick status overview of all dashboards."""
     try:
-        from processors.dashboard_manager import discover_dashboards
+        from database import DatabaseManager
         
-        overview = await discover_dashboards()
+        db = DatabaseManager()
+        projects = db.get_dashboard_projects(active_only=False)
         
-        # Extract key metrics
-        projects = overview['projects']
-        websites = overview['websites']
+        # Calculate metrics from database
+        total = len(projects)
+        active = len([p for p in projects if p.get('is_active')])
         
         return {
             "success": True,
             "summary": {
-                "projects_running": projects['running'],
-                "projects_total": projects['total'],
-                "websites_online": websites['online'],
-                "websites_total": websites['total'],
-                "last_updated": overview['last_updated']
-            },
-            "quick_actions": [
-                {"action": "start_all_stopped", "count": projects['stopped']},
-                {"action": "restart_errors", "count": projects['error']},
-                {"action": "health_check_websites", "count": websites['offline']}
-            ]
+                "projects_total": total,
+                "projects_active": active,
+                "projects_inactive": total - active,
+                "last_updated": datetime.now().isoformat()
+            }
         }
         
     except Exception as e:
@@ -7077,11 +7887,13 @@ async def get_dashboard_status():
 @app.put("/api/dashboards/{project_name}")
 async def update_dashboard_config(
     project_name: str,
-    updates: dict
+    request: Request
 ):
     """Update dashboard project configuration."""
     try:
         from database import DatabaseManager
+        
+        updates = await request.json()
         
         db = DatabaseManager()
         success = db.update_dashboard_project(project_name, updates)
@@ -7101,10 +7913,15 @@ async def update_dashboard_config(
 
 
 @app.post("/api/dashboards/save")
-async def save_dashboard_config(project_data: dict):
+async def save_dashboard_config(request: Request):
     """Save or update a dashboard project configuration."""
     try:
         from database import DatabaseManager
+        
+        project_data = await request.json()
+        
+        # Debug logging
+        logger.info(f"Received dashboard save request: {project_data}")
         
         db = DatabaseManager()
         project_id = db.save_dashboard_project(project_data)
@@ -7149,8 +7966,11 @@ async def get_dashboard_config(project_name: str):
 async def leads_page():
     """Serve the leads dashboard page."""
     try:
+        # Get the src directory path
+        src_dir = Path(__file__).parent
+        template_path = src_dir / "templates" / "leads.html"
         # Read the leads HTML template
-        with open("templates/leads.html", "r") as f:
+        with open(template_path, "r") as f:
             html_content = f.read()
         return HTMLResponse(content=html_content)
     except FileNotFoundError:

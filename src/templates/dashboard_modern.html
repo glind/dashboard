@@ -1,0 +1,1065 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Personal Dashboard</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📊</text></svg>">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom scrollbar */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: rgba(255,255,255,0.05); }
+        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.3); }
+        
+        /* Smooth transitions */
+        * { transition: background-color 0.2s ease; }
+        
+        /* Modal backdrop */
+        .modal-backdrop {
+            -webkit-backdrop-filter: blur(4px); /* Safari support */
+            backdrop-filter: blur(4px);
+            animation: fadeIn 0.2s ease;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        
+        /* Bounce animation - 3 times then stop */
+        @keyframes bounceThrice {
+            0%, 20%, 40%, 60% {
+                transform: translateY(0);
+            }
+            10% {
+                transform: translateY(-20px);
+            }
+            30% {
+                transform: translateY(-15px);
+            }
+            50% {
+                transform: translateY(-10px);
+            }
+            70%, 100% {
+                transform: translateY(0);
+            }
+        }
+        
+        .bounce-thrice {
+            animation: bounceThrice 1.5s ease-out;
+        }
+        
+        @keyframes slideUp {
+            from { transform: translateY(20px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+        
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        
+        .modal-content {
+            animation: slideUp 0.3s ease;
+        }
+        
+        .animate-slide-in {
+            animation: slideIn 0.3s ease;
+        }
+        
+        /* Card hover effects */
+        .dashboard-card {
+            transition: all 0.2s ease;
+        }
+        
+        .dashboard-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 16px rgba(0,0,0,0.3);
+        }
+        
+        /* News accordion styles */
+        .news-accordion-header {
+            transition: background-color 0.2s ease;
+        }
+        
+        .news-accordion-content {
+            transition: max-height 0.3s ease, opacity 0.3s ease;
+        }
+        
+        .news-chevron {
+            transition: transform 0.2s ease;
+        }
+        
+        .bg-gray-750 {
+            background-color: #2d3748;
+        }
+        
+        .bg-gray-850 {
+            background-color: #1a202c;
+        }
+        
+        .news-unread {
+            border-left: 3px solid #10b981;
+        }
+        
+        .news-read {
+            opacity: 0.7;
+        }
+        
+        /* Music Player Styles */
+        .service-card {
+            transition: all 0.2s ease;
+        }
+        
+        .service-card:hover {
+            border-color: #6366f1;
+            transform: translateY(-1px);
+        }
+        
+        .service-badge {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            font-weight: 600;
+        }
+        
+        #progress-bar {
+            transition: width 0.3s ease;
+        }
+        
+        #volume-control::-webkit-slider-thumb {
+            appearance: none;
+            width: 16px;
+            height: 16px;
+            background: #3b82f6;
+            border-radius: 50%;
+            cursor: pointer;
+        }
+        
+        #volume-control::-webkit-slider-thumb:hover {
+            background: #2563eb;
+        }
+        
+        /* Prose styling for HTML email content */
+        .prose-invert {
+            color: #e5e7eb;
+        }
+        
+        .prose-invert p {
+            margin-bottom: 1em;
+        }
+        
+        .prose-invert h1, .prose-invert h2, .prose-invert h3 {
+            color: #fff;
+            font-weight: 600;
+            margin-top: 1.5em;
+            margin-bottom: 0.5em;
+        }
+        
+        .prose-invert ul, .prose-invert ol {
+            margin-left: 1.5em;
+            margin-bottom: 1em;
+        }
+        
+        .prose-invert table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 1em;
+        }
+        
+        .prose-invert th, .prose-invert td {
+            border: 1px solid #374151;
+            padding: 0.5em;
+        }
+        
+        .prose-invert blockquote {
+            border-left: 4px solid #6366f1;
+            padding-left: 1em;
+            margin: 1em 0;
+            font-style: italic;
+        }
+    </style>
+</head>
+<body class="h-full bg-gray-900 text-gray-100">
+    
+    <!-- Main Container with Sidebar -->
+    <div class="flex h-full">
+        
+        <!-- Sidebar -->
+        <aside class="w-64 bg-gray-800 border-r border-gray-700 flex flex-col">
+            <!-- Header -->
+            <div class="p-6 border-b border-gray-700">
+                <h1 class="text-2xl font-bold text-white">📊 Dashboard</h1>
+                <p class="text-sm text-gray-400 mt-1">Personal Hub</p>
+            </div>
+            
+            <!-- Navigation -->
+            <nav class="flex-1 p-4 space-y-1 overflow-y-auto">
+                <a href="#" onclick="showSection('overview'); return false;" 
+                   class="nav-link flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-gray-700 text-gray-300 hover:text-white active">
+                    <span>🏠</span>
+                    <span>Overview</span>
+                </a>
+                
+                <a href="#" onclick="showSection('leads'); return false;" 
+                   class="nav-link flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-gray-700 text-gray-300 hover:text-white">
+                    <span>🎯</span>
+                    <span>Leads</span>
+                    <span class="ml-auto bg-purple-600 text-white text-xs px-2 py-1 rounded" id="leads-count">0</span>
+                </a>
+                
+                <a href="#" onclick="showSection('dashboards'); return false;" 
+                   class="nav-link flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-gray-700 text-gray-300 hover:text-white">
+                    <span>🚀</span>
+                    <span>Dashboards</span>
+                    <span class="ml-auto bg-green-600 text-white text-xs px-2 py-1 rounded" id="running-count">0</span>
+                </a>
+                
+                <a href="#" onclick="showSection('todos'); return false;" 
+                   class="nav-link flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-gray-700 text-gray-300 hover:text-white">
+                    <span>✅</span>
+                    <span>Tasks</span>
+                    <span class="ml-auto bg-orange-600 text-white text-xs px-2 py-1 rounded" id="todos-count">0</span>
+                </a>
+                
+                <a href="#" onclick="showSection('calendar'); return false;" 
+                   class="nav-link flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-gray-700 text-gray-300 hover:text-white">
+                    <span>📅</span>
+                    <span>Calendar</span>
+                </a>
+                
+                <a href="#" onclick="showSection('emails'); return false;" 
+                   class="nav-link flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-gray-700 text-gray-300 hover:text-white">
+                    <span>📧</span>
+                    <span>Emails</span>
+                    <span class="ml-auto bg-red-600 text-white text-xs px-2 py-1 rounded" id="emails-count">0</span>
+                </a>
+                
+                <a href="#" onclick="showSection('github'); return false;" 
+                   class="nav-link flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-gray-700 text-gray-300 hover:text-white">
+                    <span>💻</span>
+                    <span>GitHub</span>
+                </a>
+                
+                <a href="#" onclick="showSection('news'); return false;" 
+                   class="nav-link flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-gray-700 text-gray-300 hover:text-white">
+                    <span>📰</span>
+                    <span>News</span>
+                </a>
+                
+                <a href="#" onclick="showSection('weather'); return false;" 
+                   class="nav-link flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-gray-700 text-gray-300 hover:text-white">
+                    <span>🌤️</span>
+                    <span>Weather</span>
+                </a>
+                
+                <a href="#" onclick="showSection('notes'); return false;" 
+                   class="nav-link flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-gray-700 text-gray-300 hover:text-white">
+                    <span>📝</span>
+                    <span>Notes</span>
+                </a>
+                
+                <a href="#" onclick="showSection('vanity'); return false;" 
+                   class="nav-link flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-gray-700 text-gray-300 hover:text-white">
+                    <span>🔔</span>
+                    <span>Vanity Alerts</span>
+                </a>
+                
+                <a href="#" onclick="showSection('liked'); return false;" 
+                   class="nav-link flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-gray-700 text-gray-300 hover:text-white">
+                    <span>❤️</span>
+                    <span>Liked Items</span>
+                </a>
+                
+                <a href="#" onclick="showSection('music'); return false;" 
+                   class="nav-link flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-gray-700 text-gray-300 hover:text-white">
+                    <span>🎵</span>
+                    <span>Music News</span>
+                </a>
+                
+                <a href="#" onclick="showSection('ai'); return false;" 
+                   class="nav-link flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-gray-700 text-gray-300 hover:text-white">
+                    <span>🤖</span>
+                    <span>AI Assistant</span>
+                </a>
+            </nav>
+            
+            <!-- Footer -->
+            <div class="p-4 border-t border-gray-700">
+                <button onclick="dataLoader.toggleEditMode()" id="edit-mode-btn"
+                        class="w-full bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded-lg text-sm flex items-center justify-center gap-2 mb-2">
+                    <span>⚙️</span>
+                    <span>Edit Dashboard</span>
+                </button>
+                <button onclick="window.location.reload()" 
+                        class="w-full bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded-lg text-sm flex items-center justify-center gap-2">
+                    <span>🔄</span>
+                    <span>Refresh All</span>
+                </button>
+            </div>
+        </aside>
+        
+        <!-- Main Content -->
+        <main class="flex-1 overflow-y-auto">
+            
+            <!-- Overview Section -->
+            <section id="section-overview" class="section-content p-8">
+                <div class="max-w-7xl mx-auto">
+                    <!-- Header image will be inserted here by JavaScript -->
+                    
+                    <!-- Stats Grid -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+                        <div class="bg-gray-800 p-6 rounded-xl border border-gray-700">
+                            <div class="text-gray-400 text-sm mb-1">Active Leads</div>
+                            <div class="text-3xl font-bold text-purple-400" id="stat-leads">0</div>
+                        </div>
+                        <div class="bg-gray-800 p-6 rounded-xl border border-gray-700">
+                            <div class="text-gray-400 text-sm mb-1">Running Projects</div>
+                            <div class="text-3xl font-bold text-green-400" id="stat-projects">0</div>
+                        </div>
+                        <div class="bg-gray-800 p-6 rounded-xl border border-gray-700">
+                            <div class="text-gray-400 text-sm mb-1">Pending Tasks</div>
+                            <div class="text-3xl font-bold text-orange-400" id="stat-tasks">0</div>
+                        </div>
+                        <div class="bg-gray-800 p-6 rounded-xl border border-gray-700">
+                            <div class="text-gray-400 text-sm mb-1">Unread Emails</div>
+                            <div class="text-3xl font-bold text-red-400" id="stat-emails">0</div>
+                        </div>
+                    </div>
+                    
+                    <!-- Auto-Refresh Status -->
+                    <div id="auto-refresh-status" class="bg-gray-800 rounded-xl border border-gray-700 p-4 mb-8 text-sm text-gray-400">
+                        <span>📡</span>
+                        <span id="refresh-status-text">Auto-refresh: Loading...</span>
+                    </div>
+                    
+                    <!-- Daily Joke -->
+                    <div class="bg-gray-800 rounded-xl border border-gray-700 p-6 mb-8">
+                        <div class="flex justify-between items-center mb-3">
+                            <h3 class="text-xl font-semibold">😄 Daily Joke</h3>
+                            <div class="flex gap-2">
+                                <button onclick="dataLoader.loadNewJoke()" 
+                                        class="bg-purple-600 hover:bg-purple-700 px-3 py-1 rounded text-sm">
+                                    🔄 New Joke
+                                </button>
+                                <button onclick="dataLoader.readJokeAloud()" 
+                                        class="bg-blue-600 hover:bg-blue-700 px-3 py-1 rounded text-sm">
+                                    🔊 Read Joke
+                                </button>
+                                <button id="speech-stop-btn" 
+                                        onclick="dataLoader.stopSpeech()" 
+                                        class="bg-red-600 hover:bg-red-700 px-3 py-1 rounded text-sm hidden"
+                                        style="animation: pulse 1s infinite;">
+                                    🛑 Stop Speaking
+                                </button>
+                            </div>
+                        </div>
+                        <p id="joke-content" class="text-gray-300 italic mb-4">Loading...</p>
+                        <div class="flex items-center gap-3 pt-3 border-t border-gray-700">
+                            <span class="text-sm text-gray-400">Rate this joke:</span>
+                            <button onclick="dataLoader.giveJokeFeedback('up')" 
+                                    class="bg-gray-700 hover:bg-green-600 px-4 py-2 rounded text-2xl">
+                                👍
+                            </button>
+                            <button onclick="dataLoader.giveJokeFeedback('neutral')" 
+                                    class="bg-gray-700 hover:bg-yellow-600 px-4 py-2 rounded text-2xl">
+                                👌
+                            </button>
+                            <button onclick="dataLoader.giveJokeFeedback('down')" 
+                                    class="bg-gray-700 hover:bg-red-600 px-4 py-2 rounded text-2xl">
+                                👎
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- Quick Actions -->
+                    <div class="bg-gray-800 rounded-xl border border-gray-700 p-6 mb-8">
+                        <h3 class="text-xl font-semibold mb-4">Quick Actions</h3>
+                        <div class="flex flex-wrap gap-3">
+                            <button onclick="generateLeads()" 
+                                    class="bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded-lg flex items-center gap-2">
+                                <span>🎯</span>
+                                <span>Generate Leads</span>
+                            </button>
+                            <button onclick="showSection('dashboards')" 
+                                    class="bg-green-600 hover:bg-green-700 px-4 py-2 rounded-lg flex items-center gap-2">
+                                <span>🚀</span>
+                                <span>Manage Dashboards</span>
+                            </button>
+                            <button onclick="refreshAllData()" 
+                                    class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg flex items-center gap-2">
+                                <span>🔄</span>
+                                <span>Refresh Data</span>
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- Recent Activity Grid -->
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <div class="bg-gray-800 rounded-xl border border-gray-700 p-6">
+                            <h3 class="text-xl font-semibold mb-4">📅 Today's Events</h3>
+                            <div id="overview-calendar" class="space-y-2"></div>
+                        </div>
+                        
+                        <div class="bg-gray-800 rounded-xl border border-gray-700 p-6">
+                            <h3 class="text-xl font-semibold mb-4">✅ Top Tasks</h3>
+                            <div id="overview-tasks" class="space-y-2"></div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+            
+            <!-- Leads Section -->
+            <section id="section-leads" class="section-content hidden p-8">
+                <div class="max-w-7xl mx-auto">
+                    <div class="flex justify-between items-center mb-6">
+                        <h2 class="text-3xl font-bold">Lead Generation</h2>
+                        <button onclick="generateLeads()" 
+                                class="bg-purple-600 hover:bg-purple-700 px-6 py-3 rounded-lg font-semibold flex items-center gap-2">
+                            <span>✨</span>
+                            <span>Generate New Leads</span>
+                        </button>
+                    </div>
+                    
+                    <div id="leads-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+                </div>
+            </section>
+            
+            <!-- Dashboards Section -->
+            <section id="section-dashboards" class="section-content hidden p-8">
+                <div class="max-w-7xl mx-auto">
+                    <div class="flex justify-between items-center mb-6">
+                        <h2 class="text-3xl font-bold">Marketing Dashboards</h2>
+                        <button onclick="showAddDashboardModal()" 
+                                class="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-all duration-200 flex items-center gap-2">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                            </svg>
+                            Add Dashboard
+                        </button>
+                    </div>
+                    <div id="dashboards-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+                </div>
+            </section>
+            
+            <!-- Other sections (collapsed for brevity) -->
+            <section id="section-todos" class="section-content hidden p-8">
+                <div class="max-w-7xl mx-auto">
+                    <h2 class="text-3xl font-bold mb-6">Tasks</h2>
+                    <div id="todos-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+                </div>
+            </section>
+            
+            <section id="section-calendar" class="section-content hidden p-8">
+                <div class="max-w-7xl mx-auto">
+                    <h2 class="text-3xl font-bold mb-6">Calendar</h2>
+                    <div id="calendar-content"></div>
+                </div>
+            </section>
+            
+            <section id="section-emails" class="section-content hidden p-8">
+                <div class="max-w-7xl mx-auto">
+                    <div class="flex justify-between items-center mb-6">
+                        <h2 class="text-3xl font-bold">Emails</h2>
+                        <div class="flex gap-2">
+                            <button onclick="dataLoader.showScanEmailsModal()" 
+                                    class="bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded-lg font-semibold flex items-center gap-2">
+                                <span>🔍</span>
+                                <span>Scan for Tasks</span>
+                            </button>
+                            <button onclick="dataLoader.refreshEmails()" 
+                                    class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg font-semibold flex items-center gap-2">
+                                <span>🔄</span>
+                                <span>Refresh</span>
+                            </button>
+                        </div>
+                    </div>
+                    <div id="emails-grid" class="grid grid-cols-1 gap-3"></div>
+                </div>
+            </section>
+            
+            <section id="section-github" class="section-content hidden p-8">
+                <div class="max-w-7xl mx-auto">
+                    <h2 class="text-3xl font-bold mb-6">GitHub Activity</h2>
+                    <div id="github-content"></div>
+                </div>
+            </section>
+            
+            <section id="section-news" class="section-content hidden p-8">
+                <div class="max-w-7xl mx-auto">
+                    <div class="flex items-center justify-between mb-6">
+                        <h2 class="text-3xl font-bold">News</h2>
+                        <button onclick="dataLoader.showNewsSourcesModal()" 
+                                class="bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded-lg text-sm">
+                            ⚙️ Manage Sources
+                        </button>
+                    </div>
+                    <div id="news-grid" class="space-y-0"></div>
+                </div>
+            </section>
+            
+            <section id="section-weather" class="section-content hidden p-8">
+                <div class="max-w-7xl mx-auto">
+                    <h2 class="text-3xl font-bold mb-6">Weather</h2>
+                    <div id="weather-content"></div>
+                </div>
+            </section>
+            
+            <section id="section-notes" class="section-content hidden p-8">
+                <div class="max-w-7xl mx-auto">
+                    <div class="flex justify-between items-center mb-6">
+                        <div>
+                            <h2 class="text-3xl font-bold">📝 Notes</h2>
+                            <p class="text-gray-400 mt-1">Recent notes from Obsidian and Google Drive</p>
+                        </div>
+                        <button onclick="dataLoader.refreshNotes()" 
+                                class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg font-semibold flex items-center gap-2">
+                            <span>🔄</span>
+                            <span>Refresh</span>
+                        </button>
+                    </div>
+                    <div id="notes-stats" class="grid grid-cols-4 gap-4 mb-6"></div>
+                    <div id="notes-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+                </div>
+            </section>
+            
+            <section id="section-vanity" class="section-content hidden p-8">
+                <div class="max-w-7xl mx-auto">
+                    <h2 class="text-3xl font-bold mb-6">🔔 Vanity Alerts</h2>
+                    <p class="text-gray-400 mb-6">Brand mentions, social media alerts, and web tracking</p>
+                    <div id="vanity-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+                </div>
+            </section>
+            
+            <section id="section-liked" class="section-content hidden p-8">
+                <div class="max-w-7xl mx-auto">
+                    <h2 class="text-3xl font-bold mb-6">❤️ Liked Items</h2>
+                    <p class="text-gray-400 mb-6">All items you've marked with 👍</p>
+                    <div id="liked-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+                </div>
+            </section>
+            
+            <section id="section-music" class="section-content hidden p-8">
+                <div class="max-w-7xl mx-auto">
+                    <h2 class="text-3xl font-bold mb-6">🎵 Universal Music Player</h2>
+                    
+                    <!-- Service Configuration -->
+                    <div class="bg-gray-800 rounded-xl border border-gray-700 p-6 mb-6">
+                        <h3 class="text-xl font-semibold mb-4">🔗 Connected Services</h3>
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div id="spotify-service" class="service-card bg-gray-750 p-4 rounded-lg border border-gray-600">
+                                <div class="flex items-center justify-between mb-3">
+                                    <div class="flex items-center gap-2">
+                                        <span class="text-2xl">🟢</span>
+                                        <span class="font-semibold">Spotify</span>
+                                    </div>
+                                    <button onclick="dataLoader.connectService('spotify')" 
+                                            class="bg-green-600 hover:bg-green-700 px-3 py-1 rounded text-sm">
+                                        Connect
+                                    </button>
+                                </div>
+                                <div class="text-xs text-gray-400">Status: <span class="spotify-status">Not Connected</span></div>
+                            </div>
+                            
+                            <div id="apple-service" class="service-card bg-gray-750 p-4 rounded-lg border border-gray-600">
+                                <div class="flex items-center justify-between mb-3">
+                                    <div class="flex items-center gap-2">
+                                        <span class="text-2xl">🍎</span>
+                                        <span class="font-semibold">Apple Music</span>
+                                    </div>
+                                    <button onclick="dataLoader.connectService('apple')" 
+                                            class="bg-red-600 hover:bg-red-700 px-3 py-1 rounded text-sm">
+                                        Connect
+                                    </button>
+                                </div>
+                                <div class="text-xs text-gray-400">Status: <span class="apple-status">Not Connected</span></div>
+                            </div>
+                            
+                            <div id="amazon-service" class="service-card bg-gray-750 p-4 rounded-lg border border-gray-600">
+                                <div class="flex items-center justify-between mb-3">
+                                    <div class="flex items-center gap-2">
+                                        <span class="text-2xl">🔷</span>
+                                        <span class="font-semibold">Amazon Music</span>
+                                    </div>
+                                    <button onclick="dataLoader.connectService('amazon')" 
+                                            class="bg-blue-600 hover:bg-blue-700 px-3 py-1 rounded text-sm">
+                                        Connect
+                                    </button>
+                                </div>
+                                <div class="text-xs text-gray-400">Status: <span class="amazon-status">Not Connected</span></div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Music Player -->
+                    <div class="bg-gray-800 rounded-xl border border-gray-700 p-6 mb-6">
+                        <div class="flex items-center justify-between mb-4">
+                            <div>
+                                <h3 class="text-xl font-semibold" id="now-playing-title">No Track Playing</h3>
+                                <p class="text-gray-400 text-sm" id="now-playing-artist"></p>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <span class="service-badge hidden" id="playing-service"></span>
+                            </div>
+                        </div>
+                        
+                        <!-- Player Controls -->
+                        <div class="flex items-center justify-center gap-4 mb-4">
+                            <button onclick="dataLoader.previousTrack()" 
+                                    class="p-3 bg-gray-700 hover:bg-gray-600 rounded-full transition">
+                                ⏮️
+                            </button>
+                            <button onclick="dataLoader.togglePlay()" id="play-pause-btn"
+                                    class="p-4 bg-blue-600 hover:bg-blue-700 rounded-full text-2xl transition">
+                                ▶️
+                            </button>
+                            <button onclick="dataLoader.nextTrack()" 
+                                    class="p-3 bg-gray-700 hover:bg-gray-600 rounded-full transition">
+                                ⏭️
+                            </button>
+                        </div>
+                        
+                        <!-- Progress Bar -->
+                        <div class="mb-4">
+                            <div class="bg-gray-700 h-2 rounded-full overflow-hidden">
+                                <div id="progress-bar" class="bg-blue-600 h-full w-0 transition-all"></div>
+                            </div>
+                            <div class="flex justify-between text-xs text-gray-400 mt-1">
+                                <span id="current-time">0:00</span>
+                                <span id="total-time">0:00</span>
+                            </div>
+                        </div>
+                        
+                        <!-- Volume Control -->
+                        <div class="flex items-center gap-3">
+                            <span class="text-xl">🔊</span>
+                            <input type="range" id="volume-control" min="0" max="100" value="70" 
+                                   onchange="dataLoader.setVolume(this.value)"
+                                   class="flex-1 h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer">
+                            <span id="volume-display" class="text-sm text-gray-400 w-10">70%</span>
+                        </div>
+                    </div>
+                    
+                    <!-- Playlist Creator -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                        <!-- Mood-Based Playlists -->
+                        <div class="bg-gray-800 rounded-xl border border-gray-700 p-6">
+                            <h3 class="text-xl font-semibold mb-4">🎭 Create Mood Playlist</h3>
+                            <div class="space-y-4">
+                                <div>
+                                    <label class="block text-sm font-medium mb-2">Select Mood</label>
+                                    <select id="mood-selector" 
+                                            class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 text-white">
+                                        <option value="energetic">⚡ Energetic</option>
+                                        <option value="calm">😌 Calm</option>
+                                        <option value="happy">😊 Happy</option>
+                                        <option value="sad">😢 Sad</option>
+                                        <option value="focused">🎯 Focused</option>
+                                        <option value="party">🎉 Party</option>
+                                        <option value="workout">💪 Workout</option>
+                                        <option value="sleep">😴 Sleep</option>
+                                        <option value="romantic">💕 Romantic</option>
+                                        <option value="study">📚 Study</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium mb-2">Max Tracks</label>
+                                    <input type="number" id="mood-max-tracks" value="30" min="10" max="100"
+                                           class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 text-white">
+                                </div>
+                                <div class="flex items-center gap-2">
+                                    <input type="checkbox" id="use-ai-mood" class="w-4 h-4">
+                                    <label for="use-ai-mood" class="text-sm">Use AI recommendations</label>
+                                </div>
+                                <button onclick="dataLoader.createMoodPlaylist()" 
+                                        class="w-full bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded-lg transition">
+                                    Create Playlist
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <!-- Custom Playlists -->
+                        <div class="bg-gray-800 rounded-xl border border-gray-700 p-6">
+                            <h3 class="text-xl font-semibold mb-4">🎨 Create Custom Playlist</h3>
+                            <div class="space-y-4">
+                                <div>
+                                    <label class="block text-sm font-medium mb-2">Genres (comma separated)</label>
+                                    <input type="text" id="custom-genres" placeholder="rock, pop, jazz"
+                                           class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 text-white">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium mb-2">Artists (comma separated)</label>
+                                    <input type="text" id="custom-artists" placeholder="Artist 1, Artist 2"
+                                           class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 text-white">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium mb-2">Popularity (0-100)</label>
+                                    <div class="flex items-center gap-4">
+                                        <span class="text-xs text-gray-400">Min</span>
+                                        <input type="range" id="custom-min-pop" min="0" max="100" value="0"
+                                               class="flex-1 h-2 bg-gray-700 rounded-lg">
+                                        <span class="text-xs text-gray-400">Max</span>
+                                        <input type="range" id="custom-max-pop" min="0" max="100" value="100"
+                                               class="flex-1 h-2 bg-gray-700 rounded-lg">
+                                    </div>
+                                </div>
+                                <button onclick="dataLoader.createCustomPlaylist()" 
+                                        class="w-full bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg transition">
+                                    Create Playlist
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Unified Library & Music News -->
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+                        <!-- Unified Library -->
+                        <div class="bg-gray-800 rounded-xl border border-gray-700 p-6">
+                            <div class="flex items-center justify-between mb-4">
+                                <h3 class="text-xl font-semibold">📚 Your Music Library</h3>
+                                <button onclick="dataLoader.loadUnifiedLibrary()" 
+                                        class="bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded text-sm">
+                                    Refresh
+                                </button>
+                            </div>
+                            <div id="unified-library" class="space-y-2 max-h-96 overflow-y-auto"></div>
+                        </div>
+                        
+                        <!-- Music News -->
+                        <div class="bg-gray-800 rounded-xl border border-gray-700 p-6">
+                            <h3 class="text-xl font-semibold mb-4">📰 Music News</h3>
+                            <div id="music-grid" class="space-y-2 max-h-96 overflow-y-auto"></div>
+                        </div>
+                    </div>
+                    
+                    <!-- Your Playlists -->
+                    <div class="bg-gray-800 rounded-xl border border-gray-700 p-6">
+                        <div class="flex items-center justify-between mb-4">
+                            <h3 class="text-xl font-semibold">🎵 Your Playlists</h3>
+                            <button onclick="dataLoader.loadPlaylists()" 
+                                    class="bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded text-sm">
+                                Refresh
+                            </button>
+                        </div>
+                        <div id="playlists-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+                    </div>
+                </div>
+            </section>
+            
+            <section id="section-ai" class="section-content hidden p-8">
+                <div class="max-w-7xl mx-auto">
+                    <h2 class="text-3xl font-bold mb-6">AI Assistant</h2>
+                    
+                    <!-- AI Chat -->
+                    <div class="bg-gray-800 rounded-xl border border-gray-700 p-6 mb-8">
+                        <h3 class="text-xl font-semibold mb-4">💬 Chat with AI</h3>
+                        <div class="flex gap-2 mb-4">
+                            <button onclick="dataLoader.toggleAIVoice()" id="ai-voice-toggle"
+                                    class="bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded-lg text-sm">
+                                🔊 Voice On
+                            </button>
+                            <button onclick="dataLoader.startVoicePrompt()" id="ai-voice-prompt"
+                                    class="bg-green-600 hover:bg-green-700 px-4 py-2 rounded-lg text-sm">
+                                🎤 Voice Prompt
+                            </button>
+                        </div>
+                        <div id="ai-chat-messages" class="space-y-4 mb-4 max-h-96 overflow-y-auto"></div>
+                        <div class="flex gap-2">
+                            <input type="text" id="ai-chat-input" 
+                                   placeholder="Ask me anything..."
+                                   class="flex-1 bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 text-white"
+                                   onkeypress="if(event.key==='Enter') dataLoader.sendAIMessage()">
+                            <button onclick="dataLoader.sendAIMessage()" 
+                                    class="bg-blue-600 hover:bg-blue-700 px-6 py-2 rounded-lg">
+                                Send
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- AI Suggestions -->
+                    <div>
+                        <h3 class="text-xl font-semibold mb-4">📋 Task Suggestions</h3>
+                        <div id="ai-suggestions" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+                    </div>
+                </div>
+            </section>
+            
+        </main>
+    </div>
+    
+    <!-- Add Dashboard Modal -->
+    <div id="add-dashboard-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50 p-4">
+        <div class="bg-gray-800 rounded-xl max-w-2xl w-full border border-gray-700 shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div class="p-6 border-b border-gray-700 flex justify-between items-center">
+                <h3 class="text-2xl font-bold">
+                    <span id="modal-title-text">Add Marketing Dashboard / Website</span>
+                </h3>
+                <button onclick="closeAddDashboardModal()" class="text-gray-400 hover:text-white">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                </button>
+            </div>
+            <div class="p-6">
+                <p class="text-sm text-gray-400 mb-4">
+                    Monitor ForgeWeb or ForgeMarket sites from <a href="https://collab.buildly.io/marketplace/app/forgeweb/" target="_blank" class="text-purple-400 hover:underline">The Forge</a>
+                </p>
+                
+                <form id="add-dashboard-form" class="space-y-4">
+                    <input type="hidden" id="dashboard-id" value="">
+                    
+                    <div>
+                        <label class="block text-sm font-medium mb-2">Project Name *</label>
+                        <input type="text" id="dashboard-name" required
+                               placeholder="e.g., openbuild-website"
+                               class="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent">
+                    </div>
+                    
+                    <div>
+                        <label class="block text-sm font-medium mb-2">Project Path *</label>
+                        <div class="flex gap-2">
+                            <input type="text" id="dashboard-path" required
+                                   placeholder="/Users/greglind/marketing/websites/openbuild"
+                                   class="flex-1 px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent">
+                            <button type="button" onclick="browseDirectory()" 
+                                    class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg border border-gray-600">
+                                📁
+                            </button>
+                        </div>
+                        <p class="text-sm text-gray-400 mt-1">Full path to the project directory</p>
+                    </div>
+                    
+                    <div>
+                        <label class="block text-sm font-medium mb-2">Project Type</label>
+                        <select id="dashboard-type" onchange="updateProjectTypeDefaults()"
+                                class="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent">
+                            <option value="forgeweb">ForgeWeb (Static HTML)</option>
+                            <option value="static">Static HTML</option>
+                            <option value="react">React</option>
+                            <option value="vue">Vue.js</option>
+                            <option value="flask">Flask (Python)</option>
+                            <option value="fastapi">FastAPI (Python)</option>
+                            <option value="streamlit">Streamlit</option>
+                            <option value="github_pages">GitHub Pages</option>
+                        </select>
+                    </div>
+                    
+                    <div>
+                        <label class="block text-sm font-medium mb-2">Local Port</label>
+                        <input type="number" id="dashboard-port" 
+                               placeholder="8000"
+                               class="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent">
+                        <p class="text-sm text-gray-400 mt-1">Port for local development (if applicable)</p>
+                    </div>
+                    
+                    <div>
+                        <label class="block text-sm font-medium mb-2">Start Command</label>
+                        <input type="text" id="dashboard-command" 
+                               placeholder="npm start or python -m http.server 8000"
+                               class="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent">
+                        <p class="text-sm text-gray-400 mt-1">Command to start the project locally</p>
+                    </div>
+                    
+                    <div>
+                        <label class="block text-sm font-medium mb-2">Production URL</label>
+                        <input type="url" id="dashboard-production-url" 
+                               placeholder="https://openbuild.buildly.io"
+                               class="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent">
+                        <p class="text-sm text-gray-400 mt-1">Live production website URL</p>
+                    </div>
+                    
+                    <div>
+                        <label class="block text-sm font-medium mb-2">API URL</label>
+                        <input type="url" id="dashboard-api-url" 
+                               placeholder="https://api.openbuild.buildly.io"
+                               class="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent">
+                        <p class="text-sm text-gray-400 mt-1">API endpoint for monitoring</p>
+                    </div>
+                    
+                    <div class="flex items-center gap-2">
+                        <input type="checkbox" id="dashboard-active" checked
+                               class="w-4 h-4 bg-gray-700 border-gray-600 rounded">
+                        <label for="dashboard-active" class="text-sm font-medium">Active (monitor this project)</label>
+                    </div>
+                    
+                    <div class="flex gap-3 pt-4">
+                        <button type="button" onclick="saveDashboard()" 
+                                class="flex-1 px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-all duration-200 font-medium">
+                            <span id="save-btn-text">Add Dashboard</span>
+                        </button>
+                        <button type="button" onclick="closeAddDashboardModal()" 
+                                class="px-6 py-3 bg-gray-700 text-white rounded-lg hover:bg-gray-600 transition-all duration-200">
+                            Cancel
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Modal Container -->
+    <div id="modal-container"></div>
+    
+    <!-- Scripts -->
+    <script src="/static/dashboard.js?v=3"></script>
+    <script src="/static/leads_modern.js?v=3"></script>
+    <script src="/static/dashboards_modern.js?v=3"></script>
+    
+    <script>
+        // Navigation
+        function showSection(sectionName) {
+            // Hide all sections
+            document.querySelectorAll('.section-content').forEach(section => {
+                section.classList.add('hidden');
+            });
+            
+            // Remove active class from all nav links
+            document.querySelectorAll('.nav-link').forEach(link => {
+                link.classList.remove('bg-gray-700', 'text-white');
+                link.classList.add('text-gray-300');
+            });
+            
+            // Show selected section
+            const section = document.getElementById(`section-${sectionName}`);
+            if (section) {
+                section.classList.remove('hidden');
+            }
+            
+            // Highlight active nav link
+            event.target.closest('.nav-link').classList.add('bg-gray-700', 'text-white');
+            event.target.closest('.nav-link').classList.remove('text-gray-300');
+            
+            // Load section data if needed
+            loadSectionData(sectionName);
+        }
+        
+        function loadSectionData(sectionName) {
+            switch(sectionName) {
+                case 'leads':
+                    if (typeof leadManager !== 'undefined') {
+                        leadManager.loadLeads();
+                    }
+                    break;
+                case 'dashboards':
+                    if (typeof dashboardManager !== 'undefined') {
+                        dashboardManager.loadDashboards();
+                    }
+                    break;
+                case 'emails':
+                    dataLoader.loadEmails();
+                    break;
+                case 'todos':
+                    dataLoader.loadTodos();
+                    break;
+                case 'calendar':
+                    dataLoader.loadCalendar();
+                    break;
+                case 'github':
+                    dataLoader.loadGithub();
+                    break;
+                case 'news':
+                    dataLoader.loadNews();
+                    break;
+                case 'weather':
+                    dataLoader.loadWeather();
+                    break;
+                case 'notes':
+                    dataLoader.loadNotes();
+                    break;
+                case 'ai':
+                    dataLoader.loadAISuggestions();
+                    dataLoader.renderAIChat();
+                    break;
+                case 'vanity':
+                    dataLoader.loadVanityAlerts();
+                    break;
+                case 'liked':
+                    dataLoader.loadLikedItems();
+                    break;
+                case 'music':
+                    dataLoader.loadMusicNews();
+                    break;
+                // Add other section loaders
+            }
+        }
+        
+        function generateLeads() {
+            showSection('leads');
+            // Trigger lead generation
+            if (typeof leadManager !== 'undefined') {
+                leadManager.generateLeads();
+            }
+        }
+        
+        function refreshAllData() {
+            window.location.reload();
+        }
+        
+        // Modal Helper
+        function showModal(title, content, actions = []) {
+            const modal = document.createElement('div');
+            modal.className = 'modal-backdrop fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4';
+            
+            const actionsHTML = actions.map(action => 
+                `<button onclick="${action.onclick}" 
+                         class="${action.class || 'bg-blue-600 hover:bg-blue-700'} px-6 py-2 rounded-lg font-semibold">
+                    ${action.label}
+                </button>`
+            ).join('');
+            
+            modal.innerHTML = `
+                <div class="modal-content bg-gray-800 rounded-xl max-w-4xl w-full max-h-[90vh] overflow-hidden border border-gray-700 shadow-2xl">
+                    <div class="flex justify-between items-center p-6 border-b border-gray-700">
+                        <h3 class="text-2xl font-bold">${title}</h3>
+                        <button onclick="this.closest('.modal-backdrop').remove()" 
+                                class="text-gray-400 hover:text-white text-3xl leading-none">
+                            &times;
+                        </button>
+                    </div>
+                    <div class="p-6 overflow-y-auto max-h-[calc(90vh-180px)]">
+                        ${content}
+                    </div>
+                    ${actionsHTML ? `<div class="flex gap-3 justify-end p-6 border-t border-gray-700">${actionsHTML}</div>` : ''}
+                </div>
+            `;
+            
+            document.getElementById('modal-container').appendChild(modal);
+            
+            // Close on backdrop click
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) {
+                    modal.remove();
+                }
+            });
+        }
+        
+        function closeModal() {
+            const modal = document.querySelector('.modal-backdrop');
+            if (modal) {
+                modal.remove();
+            }
+        }
+        
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            // Set first nav link as active
+            document.querySelector('.nav-link').classList.add('bg-gray-700', 'text-white');
+            
+            // Load overview data
+            loadSectionData('overview');
+            
+            // Initialize managers
+            if (typeof dataLoader !== 'undefined') {
+                dataLoader.init();
+            }
+            if (typeof leadManager !== 'undefined') {
+                leadManager.init();
+            }
+            if (typeof dashboardManager !== 'undefined') {
+                dashboardManager.init();
+            }
+        });
+    </script>
+</body>
+</html>

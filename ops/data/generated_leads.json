@@ -1,0 +1,35 @@
+[
+  {
+    "company_name": "Airmash",
+    "domain": "airma.sh",
+    "industry": "Technology",
+    "estimated_size": "Early Stage",
+    "contact_info": {},
+    "match_score": 1.0,
+    "match_reasons": [
+      "Matches search term: ai",
+      "Uses AI technology",
+      "Uses ML technology"
+    ],
+    "template_matches": [
+      "startup",
+      "early-stage"
+    ],
+    "recommended_approach": "Reach out via website",
+    "priority_level": "high",
+    "technical_fit_score": 0.8,
+    "business_potential_score": 1.0,
+    "contact_accessibility_score": 0.3,
+    "next_steps": [
+      "Research company background and recent updates",
+      "Identify decision makers",
+      "Prepare personalized outreach message",
+      "Follow up within 1 week"
+    ],
+    "data_sources": [
+      "Hacker News"
+    ],
+    "confidence_level": 1.0,
+    "last_updated": "2025-11-05T11:34:59.964298"
+  }
+]

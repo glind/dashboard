@@ -266,6 +266,12 @@
                     <span>Vanity Alerts</span>
                 </a>
                 
+                <a href="#" onclick="showSection('settings'); return false;" 
+                   class="nav-link flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-gray-700 text-gray-300 hover:text-white">
+                    <span>⚙️</span>
+                    <span>Settings</span>
+                </a>
+                
                 <a href="#" onclick="showSection('liked'); return false;" 
                    class="nav-link flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-gray-700 text-gray-300 hover:text-white">
                     <span>❤️</span>
@@ -529,6 +535,80 @@
                     <h2 class="text-3xl font-bold mb-6">🔔 Vanity Alerts</h2>
                     <p class="text-gray-400 mb-6">Brand mentions, social media alerts, and web tracking</p>
                     <div id="vanity-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+                </div>
+            </section>
+            
+            <section id="section-settings" class="section-content hidden p-8">
+                <div class="max-w-4xl mx-auto">
+                    <h2 class="text-3xl font-bold mb-6">⚙️ Settings</h2>
+                    
+                    <!-- Notes Settings -->
+                    <div class="bg-gray-800 rounded-xl border border-gray-700 p-6 mb-6">
+                        <h3 class="text-xl font-semibold mb-4">📝 Notes Configuration</h3>
+                        <p class="text-gray-400 text-sm mb-6">Configure Obsidian vault and Google Drive integration</p>
+                        
+                        <div class="space-y-4">
+                            <div>
+                                <label class="block text-sm font-medium mb-2">Obsidian Vault Path</label>
+                                <input type="text" id="setting-obsidian-path" 
+                                       placeholder="/Users/yourname/Documents/Obsidian/MyVault"
+                                       class="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent">
+                                <p class="text-xs text-gray-500 mt-1">Full path to your Obsidian vault directory</p>
+                            </div>
+                            
+                            <div>
+                                <label class="block text-sm font-medium mb-2">Google Drive Folder ID</label>
+                                <input type="text" id="setting-gdrive-folder" 
+                                       placeholder="13tTVGHSMLlavbbLIGtk86Ynv-iCWlbAe"
+                                       class="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent">
+                                <p class="text-xs text-gray-500 mt-1">Folder ID from Google Drive URL (after /folders/)</p>
+                            </div>
+                            
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-sm font-medium mb-2">Notes Limit</label>
+                                    <input type="number" id="setting-notes-limit" min="1" max="50" value="10"
+                                           class="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent">
+                                    <p class="text-xs text-gray-500 mt-1">Number of recent notes to display</p>
+                                </div>
+                                
+                                <div>
+                                    <label class="block text-sm font-medium mb-2">Auto-Create Tasks</label>
+                                    <div class="flex items-center gap-2 h-10">
+                                        <input type="checkbox" id="setting-auto-create" checked
+                                               class="w-4 h-4 bg-gray-700 border-gray-600 rounded">
+                                        <label for="setting-auto-create" class="text-sm">Automatically create tasks from TODOs</label>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="flex gap-3 pt-4">
+                                <button onclick="saveNotesSettings()" 
+                                        class="px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-all duration-200 font-medium">
+                                    Save Settings
+                                </button>
+                                <button onclick="loadNotesSettings()" 
+                                        class="px-6 py-3 bg-gray-700 text-white rounded-lg hover:bg-gray-600 transition-all duration-200">
+                                    Reset to Current
+                                </button>
+                            </div>
+                            
+                            <div id="settings-message" class="hidden mt-4 p-3 rounded-lg"></div>
+                        </div>
+                    </div>
+                    
+                    <!-- Environment Variables Info -->
+                    <div class="bg-blue-900/20 border border-blue-700 rounded-xl p-6">
+                        <h4 class="text-lg font-semibold mb-3">💡 Environment Variables</h4>
+                        <p class="text-gray-300 text-sm mb-3">You can also set these using environment variables (highest priority):</p>
+                        <ul class="text-sm text-gray-400 space-y-1 font-mono">
+                            <li>• OBSIDIAN_VAULT_PATH</li>
+                            <li>• GOOGLE_DRIVE_NOTES_FOLDER_ID</li>
+                            <li>• NOTES_LIMIT</li>
+                            <li>• AUTO_CREATE_TASKS</li>
+                        </ul>
+                        <p class="text-xs text-gray-500 mt-3">Priority: Environment Variables > Database Settings > credentials.yaml</p>
+                    </div>
                 </div>
             </section>
             
@@ -974,6 +1054,9 @@
                 case 'vanity':
                     dataLoader.loadVanityAlerts();
                     break;
+                case 'settings':
+                    loadNotesSettings();
+                    break;
                 case 'liked':
                     dataLoader.loadLikedItems();
                     break;
@@ -982,6 +1065,72 @@
                     break;
                 // Add other section loaders
             }
+        }
+        
+        // Settings management functions
+        async function loadNotesSettings() {
+            try {
+                const response = await fetch('/api/settings/notes');
+                const data = await response.json();
+                
+                if (data.success) {
+                    const settings = data.settings;
+                    
+                    document.getElementById('setting-obsidian-path').value = settings.obsidian_vault_path.value || '';
+                    document.getElementById('setting-gdrive-folder').value = settings.google_drive_notes_folder_id.value || '';
+                    document.getElementById('setting-notes-limit').value = settings.notes_limit.value || 10;
+                    document.getElementById('setting-auto-create').checked = settings.auto_create_tasks.value || false;
+                    
+                    console.log('Loaded notes settings:', settings);
+                }
+            } catch (error) {
+                console.error('Error loading settings:', error);
+            }
+        }
+        
+        async function saveNotesSettings() {
+            const messageEl = document.getElementById('settings-message');
+            
+            try {
+                const settings = {
+                    obsidian_vault_path: document.getElementById('setting-obsidian-path').value.trim(),
+                    google_drive_notes_folder_id: document.getElementById('setting-gdrive-folder').value.trim(),
+                    notes_limit: parseInt(document.getElementById('setting-notes-limit').value) || 10,
+                    auto_create_tasks: document.getElementById('setting-auto-create').checked
+                };
+                
+                const response = await fetch('/api/settings/notes', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(settings)
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    messageEl.className = 'mt-4 p-3 rounded-lg bg-green-900/20 border border-green-700 text-green-400';
+                    messageEl.textContent = `✓ Settings saved successfully! Updated: ${data.updated.join(', ')}`;
+                    messageEl.classList.remove('hidden');
+                    
+                    // Refresh notes if notes section is active
+                    if (document.getElementById('section-notes').classList.contains('hidden') === false) {
+                        setTimeout(() => dataLoader.refreshNotes(), 1000);
+                    }
+                } else {
+                    throw new Error(data.error || 'Failed to save settings');
+                }
+            } catch (error) {
+                messageEl.className = 'mt-4 p-3 rounded-lg bg-red-900/20 border border-red-700 text-red-400';
+                messageEl.textContent = `✗ Error: ${error.message}`;
+                messageEl.classList.remove('hidden');
+            }
+            
+            // Hide message after 5 seconds
+            setTimeout(() => {
+                messageEl.classList.add('hidden');
+            }, 5000);
         }
         
         function generateLeads() {

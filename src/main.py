@@ -4468,14 +4468,30 @@ async def get_notes():
     """Get recent notes from Obsidian and Google Drive."""
     try:
         from collectors.notes_collector import collect_all_notes
-        from database import get_credentials
+        from database import get_credentials, DatabaseManager
         
-        # Get configuration
+        db = DatabaseManager()
+        
+        # Get configuration with priority: Environment Variables > Database > credentials.yaml
         notes_config = get_credentials('notes') or {}
-        obsidian_path = notes_config.get('obsidian_vault_path')
-        gdrive_folder_id = notes_config.get('google_drive_folder_id')
-        limit = notes_config.get('notes_limit', 10)
-        auto_create = notes_config.get('auto_create_tasks', True)
+        
+        # Obsidian vault path
+        obsidian_path = (
+            os.getenv('OBSIDIAN_VAULT_PATH') or  # Environment variable (highest priority)
+            db.get_setting('obsidian_vault_path') or  # Database setting
+            notes_config.get('obsidian_vault_path')  # credentials.yaml (fallback)
+        )
+        
+        # Google Drive folder ID
+        gdrive_folder_id = (
+            os.getenv('GOOGLE_DRIVE_NOTES_FOLDER_ID') or  # Environment variable
+            db.get_setting('google_drive_notes_folder_id') or  # Database setting
+            notes_config.get('google_drive_folder_id')  # credentials.yaml
+        )
+        
+        # Other settings
+        limit = int(os.getenv('NOTES_LIMIT', db.get_setting('notes_limit', notes_config.get('notes_limit', 10))))
+        auto_create = os.getenv('AUTO_CREATE_TASKS', str(db.get_setting('auto_create_tasks', notes_config.get('auto_create_tasks', True)))).lower() in ('true', '1', 'yes')
         
         logger.info(f"Collecting notes - Obsidian: {obsidian_path}, GDrive: {gdrive_folder_id}")
         
@@ -4542,6 +4558,99 @@ async def get_notes():
             "total_todos_found": 0,
             "tasks_created": 0
         }
+
+
+@app.get("/api/settings/notes")
+async def get_notes_settings():
+    """Get notes configuration settings."""
+    try:
+        from database import DatabaseManager, get_credentials
+        db = DatabaseManager()
+        
+        # Get all settings with priority chain
+        notes_config = get_credentials('notes') or {}
+        
+        settings = {
+            'obsidian_vault_path': {
+                'value': (
+                    os.getenv('OBSIDIAN_VAULT_PATH') or
+                    db.get_setting('obsidian_vault_path') or
+                    notes_config.get('obsidian_vault_path') or
+                    ''
+                ),
+                'source': 'env' if os.getenv('OBSIDIAN_VAULT_PATH') else 
+                         'database' if db.get_setting('obsidian_vault_path') else
+                         'config' if notes_config.get('obsidian_vault_path') else 'default'
+            },
+            'google_drive_notes_folder_id': {
+                'value': (
+                    os.getenv('GOOGLE_DRIVE_NOTES_FOLDER_ID') or
+                    db.get_setting('google_drive_notes_folder_id') or
+                    notes_config.get('google_drive_folder_id') or
+                    ''
+                ),
+                'source': 'env' if os.getenv('GOOGLE_DRIVE_NOTES_FOLDER_ID') else
+                         'database' if db.get_setting('google_drive_notes_folder_id') else
+                         'config' if notes_config.get('google_drive_folder_id') else 'default'
+            },
+            'notes_limit': {
+                'value': int(os.getenv('NOTES_LIMIT', db.get_setting('notes_limit', notes_config.get('notes_limit', 10)))),
+                'source': 'env' if os.getenv('NOTES_LIMIT') else
+                         'database' if db.get_setting('notes_limit') else
+                         'config' if notes_config.get('notes_limit') else 'default'
+            },
+            'auto_create_tasks': {
+                'value': os.getenv('AUTO_CREATE_TASKS', str(db.get_setting('auto_create_tasks', notes_config.get('auto_create_tasks', True)))).lower() in ('true', '1', 'yes'),
+                'source': 'env' if os.getenv('AUTO_CREATE_TASKS') else
+                         'database' if db.get_setting('auto_create_tasks') is not None else
+                         'config' if notes_config.get('auto_create_tasks') is not None else 'default'
+            }
+        }
+        
+        return {"success": True, "settings": settings}
+        
+    except Exception as e:
+        logger.error(f"Error getting notes settings: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/settings/notes")
+async def update_notes_settings(settings: Dict[str, Any]):
+    """Update notes configuration settings."""
+    try:
+        from database import DatabaseManager
+        db = DatabaseManager()
+        
+        updated = []
+        
+        # Update each setting in the database
+        if 'obsidian_vault_path' in settings:
+            db.save_setting('obsidian_vault_path', settings['obsidian_vault_path'])
+            updated.append('obsidian_vault_path')
+        
+        if 'google_drive_notes_folder_id' in settings:
+            db.save_setting('google_drive_notes_folder_id', settings['google_drive_notes_folder_id'])
+            updated.append('google_drive_notes_folder_id')
+        
+        if 'notes_limit' in settings:
+            db.save_setting('notes_limit', int(settings['notes_limit']))
+            updated.append('notes_limit')
+        
+        if 'auto_create_tasks' in settings:
+            db.save_setting('auto_create_tasks', bool(settings['auto_create_tasks']))
+            updated.append('auto_create_tasks')
+        
+        logger.info(f"Updated notes settings: {updated}")
+        
+        return {
+            "success": True,
+            "message": f"Updated {len(updated)} settings",
+            "updated": updated
+        }
+        
+    except Exception as e:
+        logger.error(f"Error updating notes settings: {e}")
+        return {"success": False, "error": str(e)}
 
 
 @app.get("/api/email") 

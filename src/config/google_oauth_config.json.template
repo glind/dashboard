@@ -1,0 +1,19 @@
+{
+  "web": {
+    "client_id": "YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com",
+    "project_id": "your-project-id",
+    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+    "token_uri": "https://oauth2.googleapis.com/token",
+    "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+    "client_secret": "YOUR_GOOGLE_CLIENT_SECRET",
+    "redirect_uris": [
+      "http://localhost:8008/auth/google/callback"
+    ]
+  }
+}
+
+# Instructions:
+# 1. Copy this file to google_oauth_config.json
+# 2. Go to https://console.cloud.google.com/apis/credentials
+# 3. Create OAuth 2.0 Client IDs and replace the placeholder values
+# 4. Never commit the actual google_oauth_config.json file

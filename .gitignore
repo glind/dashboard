@@ -49,6 +49,9 @@ logs/
 config/config.yaml
 config/credentials.yaml
 config/google_oauth_config.json
+src/config/config.yaml
+src/config/credentials.yaml
+src/config/google_oauth_config.json
 tokens/
 .env
 .env.local

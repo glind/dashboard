@@ -25,6 +25,17 @@ google:
 apple:
   reminders_export_path: "data/apple_reminders.csv"
 
+# Notes settings
+notes:
+  obsidian:
+    enabled: true
+    vault_path: "/Users/yourusername/Documents/ObsidianVault"  # Update with your Obsidian vault path
+    recent_days: 7  # Only check notes modified in last N days
+  google_drive:
+    enabled: true
+    meeting_notes_folder_id: ""  # Google Drive folder ID for meeting notes
+    credentials_file: "config/google_credentials.json"
+
 # Dashboard settings
 dashboard:
   output_dir: "output"

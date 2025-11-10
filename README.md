@@ -2,268 +2,347 @@
 
 
 
-> **AI-Powered Personal Productivity Hub**A clean, simple personal dashboard that aggregates data from your connected services.
+> **AI-Powered Personal Productivity Hub**> **AI-Powered Personal Productivity Hub**
 
 
 
-A comprehensive dashboard that integrates email, calendar, tasks, GitHub, news, music, and weather with intelligent AI assistance—all in one beautiful interface.## 🚀 Quick Start
-
-```bash
-
-[![License: BSL 1.1](https://img.shields.io/badge/License-BSL%201.1-blue.svg)](LICENSE.md)./startup.sh
-
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)```
-
-[![Docker](https://img.shields.io/badge/docker-ready-brightgreen.svg)](https://www.docker.com/)**Always use the startup script - never start manually!**
+A comprehensive dashboard that integrates email, calendar, tasks, GitHub, news, music, and weather with intelligent AI assistance—all in one beautiful interface.A comprehensive dashboard that integrates email, calendar, tasks, GitHub, news, music, and weather with intelligent AI assistance—all in one beautiful interface.
 
 
 
----The script will:
+## 🚀 Quick Start[![License: BSL 1.1](https://img.shields.io/badge/License-BSL%201.1-blue.svg)](LICENSE.md)
 
-- ✅ Set up and activate virtual environment
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 
-## ✨ Features- ✅ Install/update all dependencies  
+```bash[![Docker](https://img.shields.io/badge/docker-ready-brightgreen.svg)](https://www.docker.com/)
 
-- ✅ Configure initial settings
+# Clone repository
 
-- **📧 Email Intelligence** - Gmail integration with AI-powered analysis and task extraction- ✅ Start server detached on port 8008
+git clone https://github.com/buildly-marketplace/personal-dashboard.git---
 
-- **📅 Calendar Sync** - Google Calendar with event tracking and reminders- ✅ Verify everything is working
+cd personal-dashboard
 
-- **✅ Smart Tasks** - TickTick sync, email-to-task conversion, priority management
+## 🚀 Quick Start
 
-- **🤖 AI Assistant** - Chat, suggestions, and personalized recommendationsOpen http://localhost:8008
+# Start dashboard (handles everything automatically)
 
-- **💻 GitHub Activity** - Repo monitoring, PR tracking, issue notifications
+./ops/startup.sh```bash
 
-- **📰 News Aggregator** - Customizable RSS feeds from 15+ sources### Other Commands
+# Clone repository
 
-- **🎵 Music News** - Spotify, Bandcamp, Apple Music updates- `./startup.sh stop` - Stop the dashboard
+# Open browsergit clone https://github.com/buildly-marketplace/personal-dashboard.git
 
-- **🌤️ Weather** - Current conditions and 5-day forecast- `./startup.sh restart` - Restart the dashboard  
+open http://localhost:8008cd personal-dashboard
 
-- **🎨 Customization** - Dark theme, custom backgrounds, section controls- `./startup.sh status` - Check if running
-
-- `./startup.sh logs` - View live logs
-
----
-
-## 📖 Documentation
-
-## 🚀 Quick Start- **Developer Docs**: `devdocs/` - Setup, API, and implementation guides
-
-- **AI Instructions**: `.github/prompts/` - AI assistant memory and rules
-
-```bash
-
-# Clone repository### Key Documents
-
-git clone https://github.com/buildly-marketplace/personal-dashboard.git- **Setup**: `devdocs/setup/startup.md` - How to start the dashboard
-
-cd personal-dashboard- **APIs**: `devdocs/api/endpoints.md` - Available endpoints
-
-- **Integration**: `devdocs/collectors/overview.md` - Adding data sources
-
-# Run startup script (handles everything)
-
-./ops/startup.sh## 🎯 Current Features
-
-- **📅 Google Calendar** - Your events and schedule
-
-# Open browser- **📧 Gmail** - Email summary and unread count
-
-open http://localhost:8008- **🐙 GitHub** - Assigned issues and PR reviews
-
-```- **📰 News** - Filtered by your interests (Tech, Oregon State, etc.)
-
-- **😄 Jokes** - Single-line humor widget
-
-### Requirements- **🌤️ Weather** - Local weather display
-
-- **✅ TickTick** - Task management (OAuth ready)
-
-- Python 3.10+ (3.11 recommended)- **🎵 Music** - Trends and recommendations
-
-- Google OAuth credentials (Gmail & Calendar)
-
-- GitHub personal access token## 🔧 Architecture
-
-- Optional: TickTick, OpenWeather, NewsAPI, AI provider (Ollama/OpenAI/Gemini)- **Backend**: Python FastAPI server (`main.py`)
-
-- **Frontend**: Single HTML page with embedded CSS/JS
-
-**Detailed setup:** See [`devdocs/SETUP.md`](devdocs/SETUP.md)- **Data**: Real-time collection from authenticated APIs
-
-- **Persistence**: SQLite database for user preferences
-
----
-
-Built with simplicity in mind - everything in one file, real data, clean UI.
-
-## 📦 Deployment
-
-## 🛠️ Development
-
-### Docker (Recommended)For implementation details, API documentation, and setup guides, see the `devdocs/` folder. AI assistants automatically use the instructions in `.github/prompts/` for consistent behavior.
-
-
-```bash
-docker-compose -f ops/docker-compose.yml up -d
 ```
 
-### Kubernetes
+# Start dashboard (handles everything automatically)
 
-```bash
-helm install dashboard buildly/personal-dashboard
+### Dashboard Management./ops/startup.sh
+
+
+
+```bash# Open browser
+
+# Start dashboard (default action)open http://localhost:8008
+
+./ops/startup.sh start```
+
+
+
+# Check status and health### Dashboard Management
+
+./ops/startup.sh status
+
+The startup script provides comprehensive dashboard management:
+
+# View logs (last 50 lines)
+
+./ops/startup.sh logs```bash
+
+# Start dashboard (default action)
+
+# Follow logs in real-time  ./ops/startup.sh start
+
+./ops/startup.sh logs follow
+
+# Check status and health
+
+# Stop dashboard./ops/startup.sh status
+
+./ops/startup.sh stop
+
+# View logs (last 50 lines)
+
+# Restart dashboard./ops/startup.sh logs
+
+./ops/startup.sh restart
+
+# Follow logs in real-time  
+
+# Repair corrupted database./ops/startup.sh logs follow
+
+./ops/startup.sh repair
+
+```# Stop dashboard
+
+./ops/startup.sh stop
+
+### System Requirements
+
+# Restart dashboard
+
+- **Python**: 3.10+ (3.11 recommended)./ops/startup.sh restart
+
+- **APIs**: Google OAuth credentials (Gmail & Calendar), GitHub personal access token
+
+- **Optional**: TickTick, OpenWeather, NewsAPI, AI provider (Ollama/OpenAI/Gemini)# Repair corrupted database
+
+./ops/startup.sh repair
+
+**🚨 CRITICAL**: Always use `./ops/startup.sh` - never run `python3 main.py` directly!
+
+# Show help
+
+---./ops/startup.sh help
+
 ```
 
-### Local
+## 🎯 Current Features
 
+### System Requirements
+
+### Data Collection
+
+- **📅 Google Calendar** - Events, meetings, and schedule management- **Python**: 3.10+ (3.11 recommended)
+
+- **📧 Gmail** - Email summary, unread count, and intelligent filtering- **APIs**: Google OAuth credentials (Gmail & Calendar), GitHub personal access token
+
+- **🐙 GitHub** - Assigned issues, PR reviews, and repository activity- **Optional**: TickTick, OpenWeather, NewsAPI, AI provider (Ollama/OpenAI/Gemini)
+
+- **📰 News** - Personalized feeds filtered by interests (Tech, AI, etc.)
+
+- **🌤️ Weather** - Local weather conditions and forecasts**🚨 CRITICAL**: Always use `./ops/startup.sh` - never run `python3 main.py` directly!
+
+- **✅ TickTick** - Task management with OAuth integration
+
+- **🎵 Music** - Listening trends and recommendations---
+
+
+
+### AI-Powered Features## 📖 Documentation
+
+- **🤖 Insight Generation** - Intelligent analysis of your data patterns
+
+- **📊 KPI Tracking** - Automated productivity metrics### Quick Links
+
+- **🎯 Task Prioritization** - Smart recommendations for daily focus- **Setup Guide**: [`devdocs/setup/startup.md`](devdocs/setup/startup.md) - Complete setup instructions
+
+- **📈 Trend Analysis** - Weekly/monthly productivity insights- **API Reference**: [`devdocs/api/endpoints.md`](devdocs/api/endpoints.md) - Available endpoints  
+
+- **Integration Guide**: [`devdocs/collectors/overview.md`](devdocs/collectors/overview.md) - Adding data sources
+
+### Interface- **AI Instructions**: [`.github/prompts/`](.github/prompts/) - AI assistant memory and guidelines
+
+- **🎨 Modern UI** - Clean, responsive design with Tailwind CSS
+
+- **🌌 Dynamic Backgrounds** - Beautiful space/sci-fi themes with image controls### Key Documents
+
+- **📱 Mobile Friendly** - Optimized for all screen sizes- **Developer Docs**: [`devdocs/`](devdocs/) - Setup, API, and implementation guides
+
+- **⚡ Real-time Updates** - Live data synchronization- **Project Status**: [`.github/prompts/project-status.md`](.github/prompts/project-status.md) - Current features and roadmap
+
+
+
+### Dashboard Management---
+
+- **📊 Status Indicators** - Real-time widget status with color coding
+
+- **🔄 Refresh Controls** - Individual widget refresh buttons## 🎯 Current Features
+
+- **▶️ Start/Stop Controls** - Dashboard process management from web interface
+
+- **📝 Log Viewer** - Built-in log viewing with modal interface### Data Collection
+
+- **📅 Google Calendar** - Events, meetings, and schedule management
+
+---- **📧 Gmail** - Email summary, unread count, and intelligent filtering
+
+- **🐙 GitHub** - Assigned issues, PR reviews, and repository activity
+
+## 🔐 Security & Privacy- **📰 News** - Personalized feeds filtered by interests (Tech, AI, etc.)
+
+- **🌤️ Weather** - Local weather conditions and forecasts
+
+- **Local Storage**: All data stored locally in SQLite database- **✅ TickTick** - Task management with OAuth integration
+
+- **API Security**: OAuth 2.0 for Google services, token-based for GitHub- **🎵 Music** - Listening trends and recommendations
+
+- **Privacy**: No data transmitted to external services beyond API calls
+
+- **Credentials**: Secure credential management with example templates### AI-Powered Features
+
+- **🤖 Insight Generation** - Intelligent analysis of your data patterns
+
+---- **📊 KPI Tracking** - Automated productivity metrics
+
+- **🎯 Task Prioritization** - Smart recommendations for daily focus
+
+## 🤝 Contributing- **📈 Trend Analysis** - Weekly/monthly productivity insights
+
+
+
+1. Fork the repository### Interface
+
+2. Create feature branch: `git checkout -b feature-name`- **🎨 Modern UI** - Clean, responsive design with Tailwind CSS
+
+3. Use the startup script: `./ops/startup.sh`- **🌌 Dynamic Backgrounds** - Beautiful space/sci-fi themes with image controls
+
+4. Test thoroughly with dashboard controls- **📱 Mobile Friendly** - Optimized for all screen sizes
+
+5. Commit changes: `git commit -m "Add feature"`- **⚡ Real-time Updates** - Live data synchronization
+
+6. Push branch: `git push origin feature-name`
+
+7. Submit pull request---
+
+
+
+---## 🔧 Architecture
+
+
+
+## 📄 License### Backend
+
+- **Framework**: Python FastAPI server (`src/main.py`)
+
+**Business Source License 1.1**- **Database**: SQLite with automated integrity checks
+
+- **APIs**: RESTful endpoints with OpenAPI documentation
+
+- ✅ **Non-commercial use**: Free for personal and educational use- **Background Tasks**: Automated data collection and processing
+
+- ✅ **Commercial use**: Allowed after November 5, 2027
+
+- ✅ **Modification**: Permitted with attribution### Frontend
+
+- 🔄 **Future**: Converts to Apache-2.0 on November 5, 2027- **Technology**: Single HTML page with embedded CSS/JavaScript  
+
+- **Styling**: Tailwind CSS for responsive design
+
+---- **Interactivity**: Vanilla JavaScript for dynamic content
+
+- **Assets**: Local static files with background image management
+
+**Built with ❤️ for personal productivity and powered by AI intelligence**
+
+### Infrastructure  
+
+*Part of the [Buildly Labs](https://buildly.io) ecosystem*- **Environment**: Python virtual environment with automatic setup
+- **Dependencies**: Automated package installation and updates
+- **Logging**: Comprehensive logging with real-time viewing
+- **Process Management**: Background server with health monitoring
+
+---
+
+## 📦 Alternative Deployment
+
+### Docker Deployment
 ```bash
-./ops/startup.sh
+# Build and run with Docker
+docker-compose up -d
+
+# View logs
+docker-compose logs -f
 ```
 
-**Full deployment guides:** See [`devdocs/OPERATIONS.md`](devdocs/OPERATIONS.md)
-
----
-
-## 🎯 What's New in v1.0
-
-- **Smart AI Assistant** with duplicate task filtering and personalized suggestions
-- **5-Minute Overview** summary on AI Assistant page
-- **Background Management** with like/dislike feedback and custom uploads
-- **News Source Management** with add/remove/toggle capabilities
-- **Full-page backgrounds** with transparent cards
-- **Settings persistence** across sessions
-
-**Full release notes:** See [`devdocs/RELEASE_NOTES.md`](devdocs/RELEASE_NOTES.md)
-
----
-
-## 📚 Documentation
-
-| Document | Description |
-|----------|-------------|
-| [**SETUP.md**](devdocs/SETUP.md) | Installation, configuration, environment variables |
-| [**OPERATIONS.md**](devdocs/OPERATIONS.md) | Deployment (Docker, K8s, local) and maintenance |
-| [**REFERENCE.md**](devdocs/REFERENCE.md) | API endpoints, request/response formats |
-| [**CHANGELOG.md**](devdocs/CHANGELOG.md) | Detailed version history |
-| [**RELEASE_NOTES.md**](devdocs/RELEASE_NOTES.md) | Feature highlights and migration guides |
-
----
-
-## 🛡️ License & Support
-
-### License
-
-**BSL 1.1 → Apache-2.0** (Change Date: November 5, 2027)
-
-- ✅ Free for personal use, development, and evaluation
-- ✅ Production use with <100 active users
-- ℹ️ Commercial licenses available for larger deployments
-
-See [`LICENSE.md`](LICENSE.md) for complete terms.
-
-### Support
-
-**30-day installation support included** with every deployment.
-
-- **Community:** GitHub Issues (2-5 days, best-effort)
-- **Buildly Labs Customers:** 24-hour guaranteed response
-
-See [`SUPPORT.md`](SUPPORT.md) for details and contact information.
-
----
-
-## 🧪 Testing
+### Manual Setup (Not Recommended)
+If you must set up manually (not recommended):
 
 ```bash
-# Install test dependencies
-pip install -r tests/requirements.txt
+# Create virtual environment
+python3 -m venv venv
+source venv/bin/activate
 
-# Run smoke tests
-pytest tests/test_smoke.py -v
+# Install dependencies
+pip install -r requirements.txt
+
+# Configure environment
+cp config/config.yaml.example config/config.yaml
+cp config/credentials.yaml.example config/credentials.yaml
+
+# Start manually (from src directory)
+cd src && python main.py
 ```
 
-Tests cover:
-- Health endpoint validation
-- Basic CRUD operations
-- UI load checks
-- API endpoint responses
+**⚠️ Warning**: Manual setup skips important initialization steps. Always prefer `./ops/startup.sh`.
+
+---
+
+## 🔐 Security & Privacy
+
+### Data Handling
+- **Local Storage**: All data stored locally in SQLite database
+- **API Security**: OAuth 2.0 for Google services, token-based for GitHub
+- **Privacy**: No data transmitted to external services beyond API calls
+- **Credentials**: Secure credential management with example templates
+
+### Best Practices
+- **Environment Variables**: Sensitive data in `.env` files (not committed)
+- **Token Management**: Automatic token refresh where supported
+- **Database Security**: Regular integrity checks and repair functionality
+- **Process Isolation**: Background server with controlled access
 
 ---
 
 ## 🤝 Contributing
 
-We welcome contributions! Please:
+### Development Setup
+1. Fork the repository
+2. Create feature branch: `git checkout -b feature-name`
+3. Use the startup script: `./ops/startup.sh`
+4. Test thoroughly with: `./ops/test_dashboard.sh`
+5. Commit changes: `git commit -m "Add feature"`
+6. Push branch: `git push origin feature-name`
+7. Submit pull request
 
-1. Check existing [Issues](https://github.com/buildly-marketplace/personal-dashboard/issues)
-2. Fork the repository
-3. Create a feature branch
-4. Follow code style (see `devdocs/`)
-5. Add tests for new features
-6. Submit a pull request
-
----
-
-## 🔒 Security
-
-Report security vulnerabilities to: **security@buildly.io**
-
-- Do not open public issues for security bugs
-- We'll respond within 48 hours
-- See `devdocs/SECURITY.md` for responsible disclosure policy
+### Code Standards
+- **Python**: Follow PEP 8 guidelines
+- **Documentation**: Update devdocs for new features
+- **Testing**: Ensure all endpoints work correctly
+- **AI Memory**: Update AI instruction files for significant changes
 
 ---
 
-## 🌟 Screenshots
+## 📄 License
 
-### Dashboard Overview
-![Overview](assets/screenshot-overview.png)
+**Business Source License 1.1**
 
-### AI Assistant
-![AI Assistant](assets/screenshot-ai-assistant.png)
+- ✅ **Non-commercial use**: Free for personal and educational use
+- ✅ **Commercial use**: Allowed after November 5, 2027
+- ✅ **Modification**: Permitted with attribution
+- 🔄 **Future**: Converts to Apache-2.0 on November 5, 2027
 
-### Task Management
-![Tasks](assets/screenshot-tasks.png)
-
----
-
-## 📊 Marketplace
-
-Available on **[Buildly Forge](https://buildly.io/marketplace/personal-dashboard)**
-
-- One-click deployment
-- Integrated billing
-- Buildly Labs customers get 50% discount
-- 30-day support included
+See [LICENSE.md](LICENSE.md) for complete terms.
 
 ---
 
-## 🔗 Links
+## 🆘 Support
 
-- **Repository:** [github.com/buildly-marketplace/personal-dashboard](https://github.com/buildly-marketplace/personal-dashboard)
-- **Documentation:** [docs.buildly.io/personal-dashboard](https://docs.buildly.io/personal-dashboard)
-- **Marketplace:** [buildly.io/marketplace/personal-dashboard](https://buildly.io/marketplace/personal-dashboard)
-- **Support:** [support.buildly.io](https://support.buildly.io)
+### Getting Help
+- **Documentation**: Check [`devdocs/`](devdocs/) for detailed guides
+- **Issues**: Report bugs on GitHub Issues
+- **Logs**: Use `./ops/startup.sh logs` for troubleshooting
+- **Status**: Check server health with `./ops/startup.sh status`
 
----
-
-## 📄 Metadata
-
-```yaml
-Name: Personal Dashboard
-Version: 1.0.0
-License: BSL-1.1 → Apache-2.0
-Targets: docker, kubernetes, github-pages, local
-Python: 3.10+
-Category: Productivity, AI Tools, Dashboards
-```
-
-See [`BUILDLY.yaml`](BUILDLY.yaml) for complete marketplace metadata.
+### Common Issues
+- **Server won't start**: Check logs and ensure port 8008 is available
+- **Missing data**: Verify API credentials in `config/credentials.yaml`
+- **Database errors**: Run `./ops/startup.sh repair` to fix corruption
+- **Import errors**: Ensure using startup script, not manual Python execution
 
 ---
 
-**Built with ❤️ by Buildly Labs**
+**Built with ❤️ for personal productivity and powered by AI intelligence**
 
-*Ship fast, keep it simple, stay open.*
+*Part of the [Buildly Labs](https://buildly.io) ecosystem*

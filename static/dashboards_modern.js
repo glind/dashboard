@@ -332,12 +332,7 @@ class DashboardManager {
             const response = await fetch(`/api/dashboards/${encodeURIComponent(projectName)}/start`, {
                 method: 'POST'
             });
-            
             const result = await response.json();
-            
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}: ${result.detail || result.error || 'Request failed'}`);
-            }
             
             if (result.success) {
                 // Update button to monitoring state
@@ -370,29 +365,8 @@ class DashboardManager {
             button.innerHTML = '▶️ Start';
             button.disabled = false;
             
-            // Show detailed error status with better error handling
-            let errorHtml = `<div class="text-red-400 bg-red-900/20 p-2 rounded text-left">❌ <strong>Startup Failed</strong><br>`;
-            
-            // Handle different types of errors
-            if (error.message) {
-                errorHtml += `<small class="block mt-1 text-xs"><strong>Error:</strong> ${error.message}</small>`;
-            }
-            
-            // Add help text for common issues
-            if (error.message && error.message.includes('Failed to fetch')) {
-                errorHtml += `<small class="block mt-1 text-xs text-yellow-300"><strong>Hint:</strong> Check if the server is running and reachable</small>`;
-            } else if (error.message && error.message.includes('command not found')) {
-                errorHtml += `<small class="block mt-1 text-xs text-yellow-300"><strong>Hint:</strong> The startup script may be missing or not executable</small>`;
-            } else if (error.message && error.message.includes('Permission denied')) {
-                errorHtml += `<small class="block mt-1 text-xs text-yellow-300"><strong>Hint:</strong> Check file permissions for the startup script</small>`;
-            }
-            
-            errorHtml += `<button onclick="this.closest('[id^=status-]').style.display='none'" 
-                            class="mt-2 bg-gray-600 hover:bg-gray-700 text-white text-xs px-2 py-1 rounded">
-                            Close
-                          </button></div>`;
-            
-            statusDiv.innerHTML = errorHtml;
+            // Show error status
+            statusDiv.innerHTML = `<div class="text-red-400 bg-red-900/20 p-2 rounded">❌ Error: ${error.message}</div>`;
         }
     }
     

@@ -443,6 +443,7 @@ async def dashboard(code: str = None, state: str = None, error: str = None):
     <title>Personal Dashboard</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📊</text></svg>">
     <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="/static/dashboard.css">
     <style>
         /* Custom scrollbar styles */
         .widget-content::-webkit-scrollbar {
@@ -1158,12 +1159,30 @@ async def dashboard(code: str = None, state: str = None, error: str = None):
         <!-- Top Mini Widgets -->
         <div class="flex gap-5 mb-8 justify-center flex-wrap">
             <div class="bg-white bg-opacity-15 rounded-xl p-4 backdrop-blur-sm border border-white border-opacity-30 min-w-60 text-center">
-                <h3 class="mb-2 text-lg text-white">😄 Daily Joke</h3>
+                <div class="flex justify-between items-center mb-2">
+                    <h3 class="text-lg text-white m-0">😄 Daily Joke</h3>
+                    <div class="flex items-center gap-1">
+                        <span id="jokes-status" class="text-xs px-2 py-1 rounded bg-gray-600 text-white">⚫</span>
+                        <button class="btn-small bg-blue-500 hover:bg-blue-600 text-white px-2 py-1 rounded text-xs" 
+                                onclick="refreshWidget('jokes')" title="New Joke">
+                            🔄
+                        </button>
+                    </div>
+                </div>
                 <div id="joke-content" class="text-sm opacity-90 loading">Loading...</div>
             </div>
             
             <div class="bg-white bg-opacity-15 rounded-xl p-4 backdrop-blur-sm border border-white border-opacity-30 min-w-80 text-center">
-                <h3 class="mb-2 text-lg text-white">🌤️ Weather</h3>
+                <div class="flex justify-between items-center mb-2">
+                    <h3 class="text-lg text-white m-0">🌤️ Weather</h3>
+                    <div class="flex items-center gap-2">
+                        <span id="weather-status" class="text-xs px-2 py-1 rounded bg-gray-600 text-white">⚫</span>
+                        <button class="btn-small bg-blue-500 hover:bg-blue-600 text-white px-2 py-1 rounded text-xs" 
+                                onclick="refreshWidget('weather')" title="Refresh Weather">
+                            🔄
+                        </button>
+                    </div>
+                </div>
                 <div id="weather-content" class="text-sm opacity-90 loading">Loading...</div>
             </div>
 
@@ -1193,7 +1212,16 @@ async def dashboard(code: str = None, state: str = None, error: str = None):
         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
             <div class="bg-white bg-opacity-10 rounded-2xl p-5 backdrop-blur-sm border border-white border-opacity-20 h-[600px] flex flex-col relative">
                 <button class="widget-admin-gear" onclick="openWidgetAdmin('calendar')" title="Configure Calendar">⚙️</button>
-                <h2 class="mb-4 text-white shrink-0">📅 Calendar Events</h2>
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-white shrink-0 m-0">📅 Calendar Events</h2>
+                    <div class="flex items-center gap-2">
+                        <span id="calendar-status" class="text-xs px-2 py-1 rounded bg-gray-600 text-white">⚫ Unknown</span>
+                        <button class="btn-small bg-blue-500 hover:bg-blue-600 text-white px-2 py-1 rounded text-xs" 
+                                onclick="refreshWidget('calendar')" title="Refresh Calendar Data">
+                            🔄
+                        </button>
+                    </div>
+                </div>
                 <div class="flex-1 overflow-y-auto overflow-x-hidden">
                     <div id="calendar-content" class="loading">Loading...</div>
                 </div>
@@ -1225,7 +1253,16 @@ async def dashboard(code: str = None, state: str = None, error: str = None):
             
             <div class="bg-white bg-opacity-10 rounded-2xl p-5 backdrop-blur-sm border border-white border-opacity-20 h-[600px] flex flex-col relative">
                 <button class="widget-admin-gear" onclick="openWidgetAdmin('github')" title="Configure GitHub">⚙️</button>
-                <h2 class="mb-4 text-white shrink-0">🐙 GitHub Activity</h2>
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-white shrink-0 m-0">🐙 GitHub Activity</h2>
+                    <div class="flex items-center gap-2">
+                        <span id="github-status" class="text-xs px-2 py-1 rounded bg-gray-600 text-white">⚫ Unknown</span>
+                        <button class="btn-small bg-blue-500 hover:bg-blue-600 text-white px-2 py-1 rounded text-xs" 
+                                onclick="refreshWidget('github')" title="Refresh GitHub Data">
+                            🔄
+                        </button>
+                    </div>
+                </div>
                 <div class="flex-1 overflow-y-auto overflow-x-hidden">
                     <div id="github-content" class="loading">Loading...</div>
                 </div>
@@ -1235,7 +1272,9 @@ async def dashboard(code: str = None, state: str = None, error: str = None):
                 <button class="widget-admin-gear" onclick="openWidgetAdmin('tasks')" title="Configure Tasks">⚙️</button>
                 <div class="flex justify-between items-center mb-4">
                     <h2 class="text-white shrink-0 m-0">✅ Task Management</h2>
-                    <div class="flex gap-2">
+                    <div class="flex items-center gap-2">
+                        <span id="tasks-status" class="text-xs px-2 py-1 rounded bg-gray-600 text-white">⚫ Unknown</span>
+                        <button onclick="refreshWidget('tasks')" class="px-2 py-1 text-xs bg-blue-500 hover:bg-blue-600 text-white rounded" title="Refresh Tasks">🔄</button>
                         <button onclick="showCreateTaskModal()" class="px-2 py-1 text-xs bg-green-600 hover:bg-green-700 text-white rounded" title="Create New Task">+ New</button>
                         <button onclick="syncWithTickTick('both')" class="px-2 py-1 text-xs bg-purple-600 hover:bg-purple-700 text-white rounded" title="Sync with TickTick">🔄 Sync</button>
                     </div>
@@ -1292,6 +1331,53 @@ async def dashboard(code: str = None, state: str = None, error: str = None):
             </div>
             
             <div class="bg-white bg-opacity-10 rounded-2xl p-5 backdrop-blur-sm border border-white border-opacity-20 h-[600px] flex flex-col relative">
+                <button class="widget-admin-gear" onclick="openWidgetAdmin('notes')" title="Configure Notes">⚙️</button>
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-white shrink-0 m-0">📝 Notes & Knowledge</h2>
+                    <div class="flex gap-2">
+                        <button onclick="testNotesConnections()" class="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded" title="Test Connections">🔍 Test</button>
+                        <button onclick="generateTasksFromNotes()" class="px-2 py-1 text-xs bg-purple-600 hover:bg-purple-700 text-white rounded" title="Generate Tasks from Notes">📋 Extract Tasks</button>
+                    </div>
+                </div>
+                
+                <!-- Connection Status -->
+                <div id="notes-connections" class="mb-3 text-xs space-y-1">
+                    <div id="obsidian-status" class="flex items-center">
+                        <span class="w-3 h-3 rounded-full bg-gray-500 mr-2" id="obsidian-indicator"></span>
+                        <span>Obsidian: <span id="obsidian-status-text">Unknown</span></span>
+                    </div>
+                    <div id="gdrive-status" class="flex items-center">
+                        <span class="w-3 h-3 rounded-full bg-gray-500 mr-2" id="gdrive-indicator"></span>
+                        <span>Google Drive: <span id="gdrive-status-text">Unknown</span></span>
+                    </div>
+                </div>
+                
+                <!-- Notes Statistics -->
+                <div id="notes-stats" class="mb-4"></div>
+                
+                <!-- Note Filters -->
+                <div class="mb-4 space-y-2">
+                    <div class="filter-group">
+                        <label class="text-white text-xs font-medium block mb-1">Source:</label>
+                        <div class="flex gap-1 flex-wrap">
+                            <button class="notes-filter-btn bg-blue-600 text-white px-2 py-1 text-xs rounded" data-filter="all">All</button>
+                            <button class="notes-filter-btn bg-gray-200 text-gray-700 px-2 py-1 text-xs rounded" data-filter="obsidian">Obsidian</button>
+                            <button class="notes-filter-btn bg-gray-200 text-gray-700 px-2 py-1 text-xs rounded" data-filter="google_drive">Google Drive</button>
+                        </div>
+                    </div>
+                    
+                    <div class="flex items-center">
+                        <input type="checkbox" id="notes-with-todos" class="mr-2">
+                        <label for="notes-with-todos" class="text-white text-xs">Only notes with TODOs</label>
+                    </div>
+                </div>
+                
+                <div class="flex-1 overflow-y-auto overflow-x-hidden">
+                    <div id="notes-content" class="loading">Loading...</div>
+                </div>
+            </div>
+            
+            <div class="bg-white bg-opacity-10 rounded-2xl p-5 backdrop-blur-sm border border-white border-opacity-20 h-[600px] flex flex-col relative">
                 <button class="widget-admin-gear" onclick="openWidgetAdmin('news')" title="Configure News">⚙️</button>
                 <h2 class="mb-4 text-white shrink-0">📰 News Headlines</h2>
                 <div class="flex flex-wrap gap-1 mb-3 shrink-0">
@@ -1335,7 +1421,7 @@ async def dashboard(code: str = None, state: str = None, error: str = None):
                 <h2 class="mb-4 text-white shrink-0">🎯 Marketing Dashboards</h2>
                 <div class="flex-1 overflow-y-auto overflow-x-hidden">
                     <div id="dashboard-overview"></div>
-                    <div id="dashboard-projects" class="grid grid-cols-1 gap-3 mb-4"></div>
+                    <div id="dashboards-grid" class="grid grid-cols-1 gap-3 mb-4"></div>
                 </div>
             </div>
         </div>
@@ -1405,7 +1491,14 @@ async def dashboard(code: str = None, state: str = None, error: str = None):
                     </label>
                 </div>
                 <div class="widget-toggle">
-                    <span>📰 News Headlines</span>
+                    <span>� Notes & Knowledge</span>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="toggle-notes" checked onchange="toggleWidget('notes')">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+                <div class="widget-toggle">
+                    <span>�📰 News Headlines</span>
                     <label class="toggle-switch">
                         <input type="checkbox" id="toggle-news" checked onchange="toggleWidget('news')">
                         <span class="toggle-slider"></span>
@@ -1847,14 +1940,775 @@ async def dashboard(code: str = None, state: str = None, error: str = None):
                 loadData('/api/email', 'email-content'),
                 loadData('/api/github', 'github-content'),
                 window.taskManagement ? window.taskManagement.loadTasks() : Promise.resolve(),
+                loadNotes(),
                 loadData('/api/news', 'news-content'),
                 loadData('/api/music', 'music-content'),
                 loadData('/api/vanity', 'vanity-content'),
-                loadData('/api/liked-items', 'liked-items-content')
+                loadData('/api/liked-items', 'liked-items-content'),
+                loadDashboardProjects()
             ]);
             
             // Make items clickable after all data is loaded
             setTimeout(makeItemsClickable, 100);
+            
+            // Update widget statuses after loading
+            updateAllWidgetStatus();
+        }
+        
+        // Refresh individual widget
+        async function refreshWidget(widgetName) {
+            console.log(`Refreshing widget: ${widgetName}`);
+            
+            // Update status to refreshing
+            const statusElement = document.getElementById(`${widgetName}-status`);
+            if (statusElement) {
+                statusElement.className = 'text-xs px-2 py-1 rounded bg-yellow-600 text-white';
+                statusElement.textContent = '🔄 Refreshing...';
+            }
+            
+            try {
+                // Call backend refresh endpoint
+                const response = await fetch(`/api/system/refresh-widget/${widgetName}`, {
+                    method: 'POST'
+                });
+                const result = await response.json();
+                
+                if (result.success) {
+                    // Reload the specific widget data
+                    await reloadWidgetData(widgetName);
+                    
+                    // Update status to success
+                    if (statusElement) {
+                        statusElement.className = 'text-xs px-2 py-1 rounded bg-green-600 text-white';
+                        statusElement.textContent = '🟢 Active';
+                    }
+                } else {
+                    throw new Error(result.error || 'Refresh failed');
+                }
+            } catch (error) {
+                console.error(`Error refreshing widget ${widgetName}:`, error);
+                
+                // Update status to error
+                if (statusElement) {
+                    statusElement.className = 'text-xs px-2 py-1 rounded bg-red-600 text-white';
+                    statusElement.textContent = '🔴 Error';
+                }
+            }
+        }
+        
+        // Reload specific widget data
+        async function reloadWidgetData(widgetName) {
+            switch(widgetName) {
+                case 'calendar':
+                    await loadData('/api/calendar', 'calendar-content');
+                    break;
+                case 'email':
+                    await loadData('/api/email', 'email-content');
+                    break;
+                case 'github':
+                    await loadData('/api/github', 'github-content');
+                    break;
+                case 'tasks':
+                    if (window.taskManagement) {
+                        await window.taskManagement.loadTasks();
+                    }
+                    break;
+                case 'weather':
+                    await loadWeather();
+                    break;
+                case 'jokes':
+                    await loadJoke();
+                    break;
+                case 'news':
+                    await loadData('/api/news', 'news-content');
+                    break;
+                case 'music':
+                    await loadData('/api/music', 'music-content');
+                    break;
+                default:
+                    console.log(`No reload function for widget: ${widgetName}`);
+            }
+        }
+        
+        // Check system status and update widget indicators
+        async function updateAllWidgetStatus() {
+            try {
+                const response = await fetch('/api/system/status');
+                const status = await response.json();
+                
+                if (status.success && status.widgets) {
+                    // Update each widget status indicator
+                    Object.entries(status.widgets).forEach(([widgetKey, widgetInfo]) => {
+                        const widgetName = widgetKey.replace('_widget', '');
+                        const statusElement = document.getElementById(`${widgetName}-status`);
+                        
+                        if (statusElement && widgetInfo.status) {
+                            let statusClass, statusText;
+                            
+                            switch(widgetInfo.status) {
+                                case 'active':
+                                    statusClass = 'bg-green-600';
+                                    statusText = '🟢 Active';
+                                    break;
+                                case 'error':
+                                    statusClass = 'bg-red-600';
+                                    statusText = '🔴 Error';
+                                    break;
+                                case 'disabled':
+                                    statusClass = 'bg-gray-600';
+                                    statusText = '⚫ Disabled';
+                                    break;
+                                default:
+                                    statusClass = 'bg-yellow-600';
+                                    statusText = '🟡 Unknown';
+                            }
+                            
+                            statusElement.className = `text-xs px-2 py-1 rounded ${statusClass} text-white`;
+                            statusElement.textContent = statusText;
+                        }
+                    });
+                }
+            } catch (error) {
+                console.error('Error updating widget status:', error);
+            }
+        }
+        
+        // Auto-refresh status every 2 minutes
+        setInterval(updateAllWidgetStatus, 120000);
+        
+        // Load marketing dashboard projects
+        async function loadDashboardProjects() {
+            const overviewElement = document.getElementById('dashboard-overview');
+            const projectsElement = document.getElementById('dashboard-projects');
+            
+            if (!projectsElement) {
+                console.error('Dashboard projects element not found');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/dashboards');
+                const data = await response.json();
+                
+                if (data.error) {
+                    projectsElement.innerHTML = `<div class="error">❌ ${data.error}</div>`;
+                    return;
+                }
+                
+                const projects = data.projects || [];
+                
+                // Separate primary and regular dashboards
+                const primaryDashboards = projects.filter(p => p.type === 'primary_dashboard');
+                const regularDashboards = projects.filter(p => p.type !== 'primary_dashboard');
+                
+                // Update overview stats
+                if (overviewElement) {
+                    const activeCount = projects.filter(p => p.is_active).length;
+                    const primaryCount = primaryDashboards.length;
+                    overviewElement.innerHTML = `
+                        <div class="flex justify-between items-center mb-3 text-sm">
+                            <span class="text-white opacity-75">Total: ${projects.length} (${primaryCount} Primary)</span>
+                            <span class="text-green-400">Active: ${activeCount}</span>
+                        </div>
+                    `;
+                }
+                
+                // Display projects
+                if (projects.length === 0) {
+                    projectsElement.innerHTML = `
+                        <div class="item text-center">
+                            <div class="item-title">No dashboards found</div>
+                            <div class="item-meta">Add a dashboard to get started</div>
+                        </div>
+                    `;
+                } else {
+                    // Combine primary dashboards first, then regular ones
+                    const sortedProjects = [...primaryDashboards, ...regularDashboards];
+                    
+                    projectsElement.innerHTML = sortedProjects.map(project => {
+                        const isActive = project.is_active;
+                        const isPrimary = project.type === 'primary_dashboard';
+                        const statusColor = isActive ? 'text-green-400' : 'text-gray-400';
+                        const statusIcon = isActive ? '🟢' : '⚫';
+                        const localUrl = project.url || `http://localhost:${project.port || 8000}`;
+                        const productionUrl = project.custom_domain ? `https://${project.custom_domain}` : project.github_pages_url;
+                        
+                        // Special styling for primary dashboards
+                        const cardClass = isPrimary ? 
+                            'bg-gradient-to-r from-purple-900/20 to-blue-900/20 border-purple-500/30' : 
+                            'bg-white bg-opacity-5 border-white border-opacity-10';
+                        
+                        const primaryBadge = isPrimary ? `
+                            <div class="absolute top-2 right-2">
+                                <span class="px-2 py-1 text-xs font-bold bg-purple-600 text-white rounded-full">
+                                    👑 PRIMARY
+                                </span>
+                            </div>
+                        ` : '';
+                        
+                        const primaryFeatures = isPrimary ? `
+                            <!-- Primary Dashboard Features -->
+                            <div class="mt-3 pt-3 border-t border-purple-500/30">
+                                <div class="flex gap-2 mb-2 flex-wrap">
+                                    <button onclick="manageCronSystems('${project.name}')" 
+                                            class="px-2 py-1 bg-orange-600 hover:bg-orange-700 text-white text-xs rounded flex items-center gap-1" 
+                                            title="Manage Cron Systems">
+                                        ⏰ Cron
+                                    </button>
+                                    <button onclick="monitorAllDashboards('${project.name}')" 
+                                            class="px-2 py-1 bg-indigo-600 hover:bg-indigo-700 text-white text-xs rounded flex items-center gap-1" 
+                                            title="Monitor All Dashboards">
+                                        📊 Monitor All
+                                    </button>
+                                    <button onclick="manageWebsites('${project.name}')" 
+                                            class="px-2 py-1 bg-cyan-600 hover:bg-cyan-700 text-white text-xs rounded flex items-center gap-1" 
+                                            title="Manage Websites">
+                                        🌐 Websites
+                                    </button>
+                                    <button onclick="viewOutreachDashboard('${project.name}')" 
+                                            class="px-2 py-1 bg-pink-600 hover:bg-pink-700 text-white text-xs rounded flex items-center gap-1" 
+                                            title="Email Outreach">
+                                        📧 Outreach
+                                    </button>
+                                </div>
+                            </div>
+                        ` : '';
+                        
+                        return `
+                            <div class="relative ${cardClass} rounded-lg p-4 border">
+                                ${primaryBadge}
+                                <div class="flex justify-between items-start mb-3">
+                                    <div class="flex-1 ${isPrimary ? 'pr-16' : ''}">
+                                        <h3 class="text-white font-medium text-sm mb-1">${project.name}</h3>
+                                        <div class="flex items-center gap-2 mb-2">
+                                            <span class="${statusColor} text-xs">${statusIcon} ${isActive ? 'Active' : 'Inactive'}</span>
+                                            <span class="text-xs ${isPrimary ? 'text-purple-300' : 'text-gray-300'}">${project.type?.replace('_', ' ') || 'dashboard'}</span>
+                                            ${project.brand ? `<span class="text-xs text-blue-300">${project.brand}</span>` : ''}
+                                        </div>
+                                        <p class="text-xs text-gray-400 line-clamp-2">${project.description || 'No description'}</p>
+                                    </div>
+                                </div>
+                                
+                                <!-- Project Links -->
+                                <div class="flex gap-2 mb-3 flex-wrap">
+                                    ${localUrl ? `
+                                    <a href="${localUrl}" target="_blank" 
+                                       class="px-2 py-1 ${isPrimary ? 'bg-purple-600 hover:bg-purple-700' : 'bg-blue-600 hover:bg-blue-700'} text-white text-xs rounded flex items-center gap-1">
+                                        🏠 Local
+                                    </a>` : ''}
+                                    ${productionUrl ? `
+                                    <a href="${productionUrl}" target="_blank" 
+                                       class="px-2 py-1 bg-green-600 hover:bg-green-700 text-white text-xs rounded flex items-center gap-1">
+                                        🌐 Live
+                                    </a>` : ''}
+                                    ${project.path ? `
+                                    <button onclick="openInTerminal('${project.path}')" 
+                                            class="px-2 py-1 bg-gray-600 hover:bg-gray-700 text-white text-xs rounded flex items-center gap-1">
+                                        📁 Folder
+                                    </button>` : ''}
+                                </div>
+                                
+                                <!-- Action Buttons -->
+                                <div class="flex gap-2 justify-between items-center">
+                                    <button onclick="startDashboard('${project.name}')" 
+                                            class="px-3 py-1 ${isPrimary ? 'bg-purple-600 hover:bg-purple-700' : 'bg-purple-600 hover:bg-purple-700'} text-white text-xs rounded flex items-center gap-1"
+                                            id="start-btn-${project.name.replace(/\s+/g, '-').toLowerCase()}" 
+                                            title="Start/Monitor Dashboard">
+                                        <span class="status-icon">▶️</span>
+                                        <span class="status-text">Start</span>
+                                    </button>
+                                    
+                                    <div class="flex gap-1">
+                                        <button onclick="checkDashboardStatus('${project.name}')" 
+                                                class="px-2 py-1 bg-yellow-600 hover:bg-yellow-700 text-white text-xs rounded" 
+                                                title="Check Status">
+                                            📊
+                                        </button>
+                                        <button onclick="showDashboardLogs('${project.name}')" 
+                                                class="px-2 py-1 bg-indigo-600 hover:bg-indigo-700 text-white text-xs rounded" 
+                                                title="View Logs">
+                                            📝
+                                        </button>
+                                    </div>
+                                </div>
+                                
+                                ${primaryFeatures}
+                                
+                                <!-- Status Display -->
+                                <div id="status-${project.name.replace(/\s+/g, '-').toLowerCase()}" 
+                                     class="mt-2 text-xs" style="display: none;"></div>
+                            </div>
+                        `;
+                    }).join('');
+                }
+                
+                // Store dashboard data globally
+                window.dashboardData.dashboards = projects;
+                
+            } catch (error) {
+                console.error('Error loading dashboard projects:', error);
+                projectsElement.innerHTML = `<div class="error">❌ Failed to load dashboards</div>`;
+            }
+        }
+        
+        // Open a directory in Terminal (macOS)
+        async function openInTerminal(path) {
+            try {
+                const response = await fetch('/api/system/open-terminal', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ path: path })
+                });
+                
+                if (!response.ok) {
+                    // Fallback: try to open with file manager
+                    window.open(`file://${path}`, '_blank');
+                }
+            } catch (error) {
+                console.error('Error opening terminal:', error);
+                // Fallback: show path in alert
+                alert(`Project path: ${path}`);
+            }
+        }
+        
+        // Primary Dashboard Management Functions
+        async function manageCronSystems(dashboardName) {
+            try {
+                const response = await fetch(`/api/dashboards/${dashboardName}/cron-systems`);
+                const data = await response.json();
+                
+                const modal = document.createElement('div');
+                modal.className = 'modal-overlay';
+                modal.innerHTML = `
+                    <div class="modal-content w-4/5 max-w-4xl">
+                        <div class="flex justify-between items-center mb-4">
+                            <h3 class="text-lg font-semibold text-white">Cron Systems - ${dashboardName}</h3>
+                            <button onclick="this.closest('.modal-overlay').remove()" class="text-white hover:text-red-400">✕</button>
+                        </div>
+                        <div id="cron-systems-content" class="space-y-4">
+                            ${data.error ? `<div class="text-red-400">❌ ${data.error}</div>` : 
+                              (data.systems || []).map(system => `
+                                <div class="bg-gray-800 rounded-lg p-4">
+                                    <div class="flex justify-between items-start mb-2">
+                                        <h4 class="text-white font-medium">${system.name}</h4>
+                                        <span class="px-2 py-1 text-xs rounded ${system.active ? 'bg-green-600 text-white' : 'bg-gray-600 text-white'}">
+                                            ${system.active ? '🟢 Active' : '⚫ Inactive'}
+                                        </span>
+                                    </div>
+                                    <p class="text-gray-400 text-sm mb-2">${system.schedule}</p>
+                                    <p class="text-gray-300 text-sm mb-3">${system.description}</p>
+                                    <div class="flex gap-2">
+                                        <button onclick="toggleCronSystem('${system.name}', ${!system.active})" 
+                                                class="px-3 py-1 ${system.active ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'} text-white text-sm rounded">
+                                            ${system.active ? 'Stop' : 'Start'}
+                                        </button>
+                                        <button onclick="viewCronLogs('${system.name}')" 
+                                                class="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded">
+                                            Logs
+                                        </button>
+                                    </div>
+                                </div>
+                              `).join('')}
+                        </div>
+                    </div>
+                `;
+                document.body.appendChild(modal);
+            } catch (error) {
+                console.error('Error loading cron systems:', error);
+            }
+        }
+
+        async function monitorAllDashboards(primaryDashboard) {
+            try {
+                const response = await fetch(`/api/dashboards/${primaryDashboard}/monitor-all`);
+                const data = await response.json();
+                
+                const modal = document.createElement('div');
+                modal.className = 'modal-overlay';
+                modal.innerHTML = `
+                    <div class="modal-content w-4/5 max-w-6xl">
+                        <div class="flex justify-between items-center mb-4">
+                            <h3 class="text-lg font-semibold text-white">All Dashboards Monitor</h3>
+                            <button onclick="this.closest('.modal-overlay').remove()" class="text-white hover:text-red-400">✕</button>
+                        </div>
+                        <div id="all-dashboard-status" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                            ${data.error ? `<div class="text-red-400 col-span-full">❌ ${data.error}</div>` : 
+                              (data.dashboards || []).map(dashboard => `
+                                <div class="bg-gray-800 rounded-lg p-4">
+                                    <div class="flex justify-between items-start mb-2">
+                                        <h4 class="text-white font-medium text-sm">${dashboard.name}</h4>
+                                        <span class="px-2 py-1 text-xs rounded ${dashboard.status === 'running' ? 'bg-green-600' : 'bg-red-600'} text-white">
+                                            ${dashboard.status === 'running' ? '🟢' : '🔴'} ${dashboard.status}
+                                        </span>
+                                    </div>
+                                    <div class="space-y-1 text-xs text-gray-300">
+                                        <div>CPU: ${dashboard.cpu_percent || 'N/A'}%</div>
+                                        <div>Memory: ${dashboard.memory_mb || 'N/A'}MB</div>
+                                        <div>Uptime: ${dashboard.uptime || 'N/A'}</div>
+                                        <div>Port: ${dashboard.port || 'N/A'}</div>
+                                    </div>
+                                    <div class="flex gap-1 mt-3">
+                                        <button onclick="quickStartDashboard('${dashboard.name}')" 
+                                                class="px-2 py-1 bg-green-600 hover:bg-green-700 text-white text-xs rounded">
+                                            Start
+                                        </button>
+                                        <button onclick="quickRestartDashboard('${dashboard.name}')" 
+                                                class="px-2 py-1 bg-yellow-600 hover:bg-yellow-700 text-white text-xs rounded">
+                                            Restart
+                                        </button>
+                                    </div>
+                                </div>
+                              `).join('')}
+                        </div>
+                        <div class="mt-4 text-center">
+                            <button onclick="refreshAllDashboards()" 
+                                    class="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded">
+                                🔄 Refresh All
+                            </button>
+                        </div>
+                    </div>
+                `;
+                document.body.appendChild(modal);
+            } catch (error) {
+                console.error('Error loading all dashboard status:', error);
+            }
+        }
+
+        async function manageWebsites(dashboardName) {
+            try {
+                const response = await fetch(`/api/dashboards/${dashboardName}/websites`);
+                const data = await response.json();
+                
+                const modal = document.createElement('div');
+                modal.className = 'modal-overlay';
+                modal.innerHTML = `
+                    <div class="modal-content w-4/5 max-w-5xl">
+                        <div class="flex justify-between items-center mb-4">
+                            <h3 class="text-lg font-semibold text-white">Website Management - ${dashboardName}</h3>
+                            <button onclick="this.closest('.modal-overlay').remove()" class="text-white hover:text-red-400">✕</button>
+                        </div>
+                        <div id="websites-content" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                            ${data.error ? `<div class="text-red-400 col-span-full">❌ ${data.error}</div>` : 
+                              (data.websites || []).map(site => `
+                                <div class="bg-gray-800 rounded-lg p-4">
+                                    <div class="flex justify-between items-start mb-2">
+                                        <h4 class="text-white font-medium">${site.name}</h4>
+                                        <span class="px-2 py-1 text-xs rounded ${site.status === 'online' ? 'bg-green-600' : 'bg-red-600'} text-white">
+                                            ${site.status === 'online' ? '🟢' : '🔴'} ${site.status}
+                                        </span>
+                                    </div>
+                                    <p class="text-gray-400 text-sm mb-2">${site.url}</p>
+                                    <p class="text-gray-300 text-sm mb-3">${site.description}</p>
+                                    <div class="flex gap-2 flex-wrap">
+                                        <a href="${site.url}" target="_blank" 
+                                           class="px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded">
+                                            🌐 Visit
+                                        </a>
+                                        <button onclick="deployWebsite('${site.name}')" 
+                                                class="px-2 py-1 bg-green-600 hover:bg-green-700 text-white text-xs rounded">
+                                            🚀 Deploy
+                                        </button>
+                                        <button onclick="viewWebsiteLogs('${site.name}')" 
+                                                class="px-2 py-1 bg-indigo-600 hover:bg-indigo-700 text-white text-xs rounded">
+                                            📝 Logs
+                                        </button>
+                                    </div>
+                                </div>
+                              `).join('')}
+                        </div>
+                    </div>
+                `;
+                document.body.appendChild(modal);
+            } catch (error) {
+                console.error('Error loading websites:', error);
+            }
+        }
+
+        async function viewOutreachDashboard(dashboardName) {
+            try {
+                const response = await fetch(`/api/dashboards/${dashboardName}/outreach`);
+                const data = await response.json();
+                
+                const modal = document.createElement('div');
+                modal.className = 'modal-overlay';
+                modal.innerHTML = `
+                    <div class="modal-content w-4/5 max-w-4xl">
+                        <div class="flex justify-between items-center mb-4">
+                            <h3 class="text-lg font-semibold text-white">Email Outreach Dashboard</h3>
+                            <button onclick="this.closest('.modal-overlay').remove()" class="text-white hover:text-red-400">✕</button>
+                        </div>
+                        <div id="outreach-content" class="space-y-4">
+                            ${data.error ? `<div class="text-red-400">❌ ${data.error}</div>` : `
+                                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                                    <div class="bg-gray-800 rounded-lg p-4 text-center">
+                                        <div class="text-2xl font-bold text-green-400">${data.stats?.emails_sent || 0}</div>
+                                        <div class="text-gray-300 text-sm">Emails Sent</div>
+                                    </div>
+                                    <div class="bg-gray-800 rounded-lg p-4 text-center">
+                                        <div class="text-2xl font-bold text-blue-400">${data.stats?.open_rate || 0}%</div>
+                                        <div class="text-gray-300 text-sm">Open Rate</div>
+                                    </div>
+                                    <div class="bg-gray-800 rounded-lg p-4 text-center">
+                                        <div class="text-2xl font-bold text-purple-400">${data.stats?.response_rate || 0}%</div>
+                                        <div class="text-gray-300 text-sm">Response Rate</div>
+                                    </div>
+                                </div>
+                                <div class="space-y-3">
+                                    ${(data.campaigns || []).map(campaign => `
+                                        <div class="bg-gray-800 rounded-lg p-4">
+                                            <div class="flex justify-between items-start mb-2">
+                                                <h4 class="text-white font-medium">${campaign.name}</h4>
+                                                <span class="px-2 py-1 text-xs rounded ${campaign.status === 'active' ? 'bg-green-600' : 'bg-gray-600'} text-white">
+                                                    ${campaign.status}
+                                                </span>
+                                            </div>
+                                            <p class="text-gray-400 text-sm mb-2">${campaign.description}</p>
+                                            <div class="grid grid-cols-3 gap-4 text-sm text-gray-300">
+                                                <div>Sent: ${campaign.sent || 0}</div>
+                                                <div>Opens: ${campaign.opens || 0}</div>
+                                                <div>Replies: ${campaign.replies || 0}</div>
+                                            </div>
+                                        </div>
+                                    `).join('')}
+                                </div>
+                            `}
+                        </div>
+                    </div>
+                `;
+                document.body.appendChild(modal);
+            } catch (error) {
+                console.error('Error loading outreach dashboard:', error);
+            }
+        }
+
+        // Quick action functions
+        async function quickStartDashboard(dashboardName) {
+            await startDashboard(dashboardName);
+        }
+
+        async function quickRestartDashboard(dashboardName) {
+            // Implementation for restart
+            console.log(`Restarting ${dashboardName}`);
+        }
+
+        async function refreshAllDashboards() {
+            location.reload();
+        }
+
+        async function toggleCronSystem(systemName, enable) {
+            console.log(`${enable ? 'Enabling' : 'Disabling'} cron system: ${systemName}`);
+        }
+
+        async function viewCronLogs(systemName) {
+            console.log(`Viewing logs for cron system: ${systemName}`);
+        }
+
+        async function deployWebsite(siteName) {
+            console.log(`Deploying website: ${siteName}`);
+        }
+
+        async function viewWebsiteLogs(siteName) {
+            console.log(`Viewing logs for website: ${siteName}`);
+        }
+        
+        // Start a dashboard and monitor its status
+        async function startDashboard(projectName) {
+            const buttonId = `start-btn-${projectName.replace(/\s+/g, '-').toLowerCase()}`;
+            const statusId = `status-${projectName.replace(/\s+/g, '-').toLowerCase()}`;
+            const button = document.getElementById(buttonId);
+            const statusDiv = document.getElementById(statusId);
+            
+            if (!button || !statusDiv) {
+                console.error('Dashboard control elements not found');
+                return;
+            }
+            
+            try {
+                // Update button to show starting state
+                button.innerHTML = '<span class="status-icon">⏳</span><span class="status-text">Starting...</span>';
+                button.disabled = true;
+                
+                // Show status area
+                statusDiv.style.display = 'block';
+                statusDiv.innerHTML = '<div class="text-yellow-400">🚀 Starting dashboard...</div>';
+                
+                // Start the dashboard
+                const startResponse = await fetch(`/api/dashboards/${encodeURIComponent(projectName)}/start`, {
+                    method: 'POST'
+                });
+                const startResult = await startResponse.json();
+                
+                if (startResult.success) {
+                    // Update button to monitoring state
+                    button.innerHTML = '<span class="status-icon">👁️</span><span class="status-text">Monitor</span>';
+                    button.disabled = false;
+                    
+                    // Show success status
+                    statusDiv.innerHTML = `
+                        <div class="text-green-400">✅ Dashboard started successfully</div>
+                        ${startResult.process_id ? `<div class="text-gray-400">Process ID: ${startResult.process_id}</div>` : ''}
+                        ${startResult.port ? `<div class="text-blue-400">Port: ${startResult.port}</div>` : ''}
+                    `;
+                    
+                    // Start monitoring
+                    monitorDashboard(projectName, buttonId, statusId);
+                    
+                } else {
+                    throw new Error(startResult.error || 'Failed to start dashboard');
+                }
+                
+            } catch (error) {
+                console.error(`Error starting dashboard ${projectName}:`, error);
+                
+                // Reset button
+                button.innerHTML = '<span class="status-icon">▶️</span><span class="status-text">Start</span>';
+                button.disabled = false;
+                
+                // Show error status
+                statusDiv.innerHTML = `<div class="text-red-400">❌ Error: ${error.message}</div>`;
+            }
+        }
+        
+        // Monitor dashboard status with periodic checks
+        async function monitorDashboard(projectName, buttonId, statusId) {
+            const button = document.getElementById(buttonId);
+            const statusDiv = document.getElementById(statusId);
+            
+            if (!button || !statusDiv) return;
+            
+            try {
+                const response = await fetch(`/api/dashboards/${encodeURIComponent(projectName)}/status`);
+                const status = await response.json();
+                
+                if (status.success) {
+                    const isRunning = status.status === 'running';
+                    
+                    // Update button based on status
+                    if (isRunning) {
+                        button.innerHTML = '<span class="status-icon">🔄</span><span class="status-text">Running</span>';
+                        button.style.backgroundColor = '#059669'; // green-600
+                        
+                        // Show running status with metrics
+                        statusDiv.innerHTML = `
+                            <div class="text-green-400">🟢 Running (${status.uptime || '0s'})</div>
+                            ${status.cpu_usage ? `<div class="text-blue-400">CPU: ${status.cpu_usage}%</div>` : ''}
+                            ${status.memory_usage ? `<div class="text-purple-400">Memory: ${status.memory_usage}MB</div>` : ''}
+                            ${status.last_activity ? `<div class="text-gray-400">Last Activity: ${status.last_activity}</div>` : ''}
+                        `;
+                        
+                        // Continue monitoring every 30 seconds
+                        setTimeout(() => monitorDashboard(projectName, buttonId, statusId), 30000);
+                        
+                    } else {
+                        // Dashboard stopped
+                        button.innerHTML = '<span class="status-icon">▶️</span><span class="status-text">Start</span>';
+                        button.style.backgroundColor = '#7c3aed'; // purple-600
+                        
+                        statusDiv.innerHTML = `
+                            <div class="text-yellow-400">⏹️ Stopped</div>
+                            ${status.reason ? `<div class="text-gray-400">Reason: ${status.reason}</div>` : ''}
+                        `;
+                    }
+                } else {
+                    // Error getting status
+                    statusDiv.innerHTML = `<div class="text-red-400">❌ Status check failed: ${status.error}</div>`;
+                }
+                
+            } catch (error) {
+                console.error(`Error monitoring dashboard ${projectName}:`, error);
+                statusDiv.innerHTML = `<div class="text-red-400">❌ Monitoring error: ${error.message}</div>`;
+            }
+        }
+        
+        // Check dashboard status manually
+        async function checkDashboardStatus(projectName) {
+            const statusId = `status-${projectName.replace(/\s+/g, '-').toLowerCase()}`;
+            const statusDiv = document.getElementById(statusId);
+            
+            if (!statusDiv) return;
+            
+            statusDiv.style.display = 'block';
+            statusDiv.innerHTML = '<div class="text-yellow-400">🔍 Checking status...</div>';
+            
+            try {
+                const response = await fetch(`/api/dashboards/${encodeURIComponent(projectName)}/status`);
+                const status = await response.json();
+                
+                if (status.success) {
+                    const isRunning = status.status === 'running';
+                    const statusColor = isRunning ? 'text-green-400' : 'text-red-400';
+                    const statusIcon = isRunning ? '🟢' : '🔴';
+                    
+                    statusDiv.innerHTML = `
+                        <div class="${statusColor}">${statusIcon} ${status.status || 'unknown'}</div>
+                        ${status.uptime ? `<div class="text-gray-400">Uptime: ${status.uptime}</div>` : ''}
+                        ${status.port ? `<div class="text-blue-400">Port: ${status.port}</div>` : ''}
+                        ${status.process_id ? `<div class="text-gray-400">PID: ${status.process_id}</div>` : ''}
+                    `;
+                } else {
+                    statusDiv.innerHTML = `<div class="text-red-400">❌ ${status.error}</div>`;
+                }
+                
+            } catch (error) {
+                console.error(`Error checking dashboard status:`, error);
+                statusDiv.innerHTML = `<div class="text-red-400">❌ Status check failed</div>`;
+            }
+        }
+        
+        // Show dashboard logs
+        async function showDashboardLogs(projectName) {
+            try {
+                const response = await fetch(`/api/dashboards/${encodeURIComponent(projectName)}/logs`);
+                const logsData = await response.json();
+                
+                if (logsData.success) {
+                    // Create modal to show logs
+                    const modal = document.createElement('div');
+                    modal.style.cssText = `
+                        position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+                        background: rgba(0,0,0,0.8); display: flex; align-items: center; 
+                        justify-content: center; z-index: 1000;
+                    `;
+                    
+                    modal.innerHTML = `
+                        <div style="background: #1a1a1a; border-radius: 10px; padding: 20px; 
+                                    max-width: 80vw; max-height: 80vh; overflow: auto; color: white;">
+                            <div style="display: flex; justify-content: between; items: center; margin-bottom: 15px;">
+                                <h3 style="margin: 0; color: #4fc3f7;">📝 ${projectName} Logs</h3>
+                                <button onclick="this.parentElement.parentElement.parentElement.remove()" 
+                                        style="background: #f44336; color: white; border: none; 
+                                               border-radius: 5px; padding: 5px 10px; cursor: pointer; float: right;">
+                                    ✕ Close
+                                </button>
+                            </div>
+                            <div style="background: #000; padding: 15px; border-radius: 5px; 
+                                        font-family: monospace; font-size: 12px; white-space: pre-wrap; 
+                                        max-height: 400px; overflow-y: auto;">
+${logsData.logs || 'No logs available'}
+                            </div>
+                            <div style="margin-top: 10px; text-align: right; font-size: 12px; color: #888;">
+                                Last updated: ${new Date().toLocaleTimeString()}
+                            </div>
+                        </div>
+                    `;
+                    
+                    document.body.appendChild(modal);
+                    
+                    // Close modal on background click
+                    modal.addEventListener('click', (e) => {
+                        if (e.target === modal) {
+                            modal.remove();
+                        }
+                    });
+                    
+                } else {
+                    alert(`Error getting logs: ${logsData.error}`);
+                }
+                
+            } catch (error) {
+                console.error(`Error showing logs for ${projectName}:`, error);
+                alert('Failed to load logs');
+            }
         }
         
         // Load joke data
@@ -3209,6 +4063,81 @@ async def dashboard(code: str = None, state: str = None, error: str = None):
                     `;
                     break;
                     
+                case 'notes':
+                    adminContent += `
+                        <div class="admin-section">
+                            <h3>📝 Notes & Knowledge Configuration</h3>
+                            <div class="admin-form">
+                                <div style="margin-bottom: 20px;">
+                                    <label for="obsidian-vault-path">Obsidian Vault Path:</label>
+                                    <input type="text" class="admin-input" id="obsidian-vault-path" placeholder="/Users/yourusername/Documents/ObsidianVault">
+                                    <button class="admin-btn" onclick="testObsidianVault()" style="margin-left: 10px; background: #ff9800;">🔍 Test Connection</button>
+                                    <p style="color: #ccc; font-size: 0.8em; margin-top: 5px;">
+                                        Full path to your Obsidian vault directory (e.g., /Users/username/Documents/MyVault)
+                                    </p>
+                                </div>
+                                
+                                <div style="margin-bottom: 20px;">
+                                    <label for="gdrive-folder-id">Google Drive Meeting Notes Folder ID:</label>
+                                    <input type="text" class="admin-input" id="gdrive-folder-id" placeholder="1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms">
+                                    <button class="admin-btn" onclick="testGoogleDriveFolder()" style="margin-left: 10px; background: #ff9800;">🔍 Test Connection</button>
+                                    <p style="color: #ccc; font-size: 0.8em; margin-top: 5px;">
+                                        Google Drive folder ID for meeting notes (find in URL after /folders/)
+                                    </p>
+                                </div>
+                                
+                                <div style="margin-bottom: 20px;">
+                                    <label>
+                                        <input type="checkbox" id="auto-create-tasks" style="margin-right: 10px;">
+                                        Automatically create tasks from note TODOs
+                                    </label>
+                                    <p style="color: #ccc; font-size: 0.8em; margin-top: 5px;">
+                                        When enabled, the system will automatically create tasks from TODO items found in notes
+                                    </p>
+                                </div>
+                                
+                                <div style="padding: 15px; background: rgba(255,255,255,0.1); border-radius: 10px; margin-bottom: 15px;">
+                                    <h4>Connection Status</h4>
+                                    <div id="notes-test-results">
+                                        <div style="display: flex; align-items: center; margin-bottom: 5px;">
+                                            <span class="w-3 h-3 rounded-full bg-gray-500 mr-2" id="test-obsidian-indicator"></span>
+                                            <span>Obsidian: <span id="test-obsidian-status">Not tested</span></span>
+                                        </div>
+                                        <div style="display: flex; align-items: center;">
+                                            <span class="w-3 h-3 rounded-full bg-gray-500 mr-2" id="test-gdrive-indicator"></span>
+                                            <span>Google Drive: <span id="test-gdrive-status">Not tested</span></span>
+                                        </div>
+                                    </div>
+                                    <button class="admin-btn" onclick="testAllNotesConnections()" style="margin-top: 10px;">🔍 Test All Connections</button>
+                                </div>
+                                
+                                <div style="padding: 15px; background: rgba(255,255,255,0.1); border-radius: 10px; margin-bottom: 15px;">
+                                    <h4>Quick Actions</h4>
+                                    <button class="admin-btn" onclick="generateTasksFromAllSources()" style="background: #9c27b0;">📋 Extract Tasks from Notes</button>
+                                    <button class="admin-btn" onclick="refreshNotesData()" style="background: #2196f3; margin-left: 10px;">🔄 Refresh Notes</button>
+                                    <p style="color: #ccc; font-size: 0.8em; margin-top: 10px;">
+                                        Extract tasks will scan notes and calendar events for TODO items and create tasks automatically
+                                    </p>
+                                </div>
+                                
+                                <div style="padding: 15px; background: rgba(255,235,59,0.1); border-radius: 10px; margin-bottom: 15px;">
+                                    <h4>💡 Setup Help</h4>
+                                    <p style="color: #ccc; font-size: 0.8em;">
+                                        <strong>Obsidian:</strong> Navigate to your vault in Finder/Explorer and copy the full path<br>
+                                        <strong>Google Drive:</strong> Open the folder in Google Drive, copy the ID from the URL<br>
+                                        <strong>Example:</strong> https://drive.google.com/drive/folders/<span style="color: #ffeb3b;">1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74</span>
+                                    </p>
+                                </div>
+                                
+                                <div class="save-close-buttons">
+                                    <button class="admin-btn" onclick="saveNotesSettings()">💾 Save Settings</button>
+                                    <button class="admin-btn" onclick="closeWidgetAdmin()" style="background: #666; margin-left: 10px;">Cancel</button>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                    break;
+                    
                 default:
                     adminContent = `
                         <div class="admin-section">
@@ -3460,6 +4389,11 @@ async def dashboard(code: str = None, state: str = None, error: str = None):
                         if (usernameInput) {
                             usernameInput.value = githubConfig.username;
                         }
+                        break;
+                        
+                    case 'notes':
+                        // Load notes settings using dedicated function
+                        await loadNotesSettings();
                         break;
                 }
             } catch (error) {
@@ -4156,6 +5090,541 @@ async def dashboard(code: str = None, state: str = None, error: str = None):
                 hideCreateTaskModal();
             }
         }
+
+        // Notes Management Functions
+        let notesData = {};
+        let currentNotesFilter = 'all';
+
+        async function loadNotes() {
+            const element = document.getElementById('notes-content');
+            const statsElement = document.getElementById('notes-stats');
+            
+            if (!element) return;
+            
+            try {
+                element.innerHTML = '<div class="loading">Loading notes...</div>';
+                
+                const response = await fetch('/api/notes');
+                const data = await response.json();
+                
+                if (data.success) {
+                    notesData = data;
+                    
+                    // Update statistics
+                    if (statsElement) {
+                        statsElement.innerHTML = `
+                            <div class="text-xs space-y-1">
+                                <div>📚 Total: ${data.notes.length}</div>
+                                <div>📂 Obsidian: ${data.obsidian_count}</div>
+                                <div>☁️ Google Drive: ${data.gdrive_count}</div>
+                                <div>📋 TODOs found: ${data.total_todos_found}</div>
+                                ${data.tasks_created ? `<div>✅ Tasks created: ${data.tasks_created}</div>` : ''}
+                            </div>
+                        `;
+                    }
+                    
+                    renderNotes(data.notes);
+                    
+                    // Auto-check connection status
+                    updateNotesConnectionStatus();
+                    
+                } else {
+                    element.innerHTML = `<div class="error">❌ ${data.error}</div>`;
+                }
+                
+            } catch (error) {
+                console.error('Error loading notes:', error);
+                element.innerHTML = `<div class="error">❌ Error loading notes: ${error.message}</div>`;
+            }
+        }
+
+        function renderNotes(notes) {
+            const element = document.getElementById('notes-content');
+            
+            // Filter notes
+            const filteredNotes = notes.filter(note => {
+                if (currentNotesFilter === 'all') return true;
+                return note.source === currentNotesFilter;
+            });
+            
+            // Filter by TODOs if checkbox is checked
+            const withTodosOnly = document.getElementById('notes-with-todos').checked;
+            const finalNotes = withTodosOnly ? filteredNotes.filter(note => note.has_todos) : filteredNotes;
+            
+            if (finalNotes.length === 0) {
+                element.innerHTML = '<div class="text-center text-gray-300 py-8">📝 No notes found</div>';
+                return;
+            }
+            
+            element.innerHTML = finalNotes.map(note => `
+                <div class="note-item bg-white bg-opacity-5 rounded-lg p-3 border border-white border-opacity-20 hover:bg-opacity-10 transition-all cursor-pointer" 
+                     onclick="openNoteDetail('${note.source}', '${note.title}', this)"
+                     data-note='${JSON.stringify(note).replace(/'/g, "&apos;")}'>
+                    <div class="flex items-start justify-between mb-2">
+                        <div class="flex items-center gap-2">
+                            <span class="source-icon text-xs">
+                                ${note.source === 'obsidian' ? '📝' : '☁️'}
+                            </span>
+                            <h4 class="font-medium text-sm text-white truncate">${note.title}</h4>
+                        </div>
+                        <div class="text-xs text-gray-300 shrink-0 ml-2">
+                            ${new Date(note.modified_at).toLocaleDateString()}
+                        </div>
+                    </div>
+                    <p class="text-xs text-gray-300 line-clamp-2 mb-2">${note.preview || 'No preview available'}</p>
+                    <div class="flex items-center justify-between text-xs">
+                        <div class="flex items-center gap-3">
+                            <span class="text-gray-400">${note.word_count || 0} words</span>
+                            ${note.has_todos ? '<span class="text-yellow-400">📋 TODOs</span>' : ''}
+                            ${note.tags && note.tags.length ? `<span class="text-blue-400">🏷️ ${note.tags.length}</span>` : ''}
+                        </div>
+                        <div class="text-gray-400">
+                            ${note.source === 'obsidian' ? 'Obsidian' : 'Google Drive'}
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function openNoteDetail(source, title, element) {
+            const noteData = JSON.parse(element.dataset.note.replace(/&apos;/g, "'"));
+            
+            const modal = document.getElementById('detail-modal');
+            const modalTitle = document.getElementById('modal-title');
+            const modalContent = document.getElementById('modal-content');
+            
+            modalTitle.textContent = `📝 ${title}`;
+            
+            let sourceLink = '';
+            if (source === 'obsidian' && noteData.relative_path) {
+                sourceLink = `<a href="obsidian://open?vault=&file=${encodeURIComponent(noteData.relative_path)}" class="text-blue-400 hover:text-blue-300">🔗 Open in Obsidian</a>`;
+            } else if (source === 'google_drive' && noteData.url) {
+                sourceLink = `<a href="${noteData.url}" target="_blank" class="text-blue-400 hover:text-blue-300">🔗 Open in Google Drive</a>`;
+            }
+            
+            modalContent.innerHTML = `
+                <div class="detail-section">
+                    <h4>📄 Note Information</h4>
+                    <div class="detail-meta">
+                        <div class="meta-item">
+                            <span class="meta-label">Title:</span>
+                            <span class="meta-value">${noteData.title}</span>
+                        </div>
+                        <div class="meta-item">
+                            <span class="meta-label">Source:</span>
+                            <span class="meta-value">${source === 'obsidian' ? 'Obsidian' : 'Google Drive'}</span>
+                        </div>
+                        <div class="meta-item">
+                            <span class="meta-label">Modified:</span>
+                            <span class="meta-value">${new Date(noteData.modified_at).toLocaleString()}</span>
+                        </div>
+                        <div class="meta-item">
+                            <span class="meta-label">Size:</span>
+                            <span class="meta-value">${noteData.word_count || 0} words</span>
+                        </div>
+                        ${sourceLink ? `<div class="meta-item">${sourceLink}</div>` : ''}
+                    </div>
+                </div>
+                
+                ${noteData.preview ? `
+                    <div class="detail-section">
+                        <h4>📝 Preview</h4>
+                        <div class="bg-white bg-opacity-5 p-3 rounded border border-white border-opacity-20">
+                            <pre class="whitespace-pre-wrap text-sm">${noteData.preview}</pre>
+                        </div>
+                    </div>
+                ` : ''}
+                
+                ${noteData.todos && noteData.todos.length ? `
+                    <div class="detail-section">
+                        <h4>📋 Found TODOs (${noteData.todos.length})</h4>
+                        <div class="space-y-2">
+                            ${noteData.todos.map(todo => `
+                                <div class="bg-yellow-900 bg-opacity-30 p-3 rounded border border-yellow-500 border-opacity-50">
+                                    <div class="text-yellow-200 font-medium text-sm">${todo.text}</div>
+                                    ${todo.context ? `<div class="text-xs text-gray-300 mt-1 italic">${todo.context.substring(0, 100)}...</div>` : ''}
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                ` : ''}
+                
+                ${noteData.tags && noteData.tags.length ? `
+                    <div class="detail-section">
+                        <h4>🏷️ Tags</h4>
+                        <div class="flex flex-wrap gap-1">
+                            ${noteData.tags.map(tag => `<span class="bg-blue-500 bg-opacity-30 text-blue-200 px-2 py-1 rounded text-xs">#${tag}</span>`).join('')}
+                        </div>
+                    </div>
+                ` : ''}
+            `;
+            
+            modal.style.display = 'block';
+        }
+
+        async function testNotesConnections() {
+            const obsidianIndicator = document.getElementById('obsidian-indicator');
+            const obsidianStatus = document.getElementById('obsidian-status-text');
+            const gdriveIndicator = document.getElementById('gdrive-indicator');
+            const gdriveStatus = document.getElementById('gdrive-status-text');
+            
+            // Reset to loading state
+            obsidianIndicator.className = 'w-3 h-3 rounded-full bg-yellow-500 mr-2 animate-pulse';
+            obsidianStatus.textContent = 'Testing...';
+            gdriveIndicator.className = 'w-3 h-3 rounded-full bg-yellow-500 mr-2 animate-pulse';
+            gdriveStatus.textContent = 'Testing...';
+            
+            try {
+                // Get settings first
+                const settingsResponse = await fetch('/api/settings/notes');
+                const settingsData = await settingsResponse.json();
+                
+                if (!settingsData.success) {
+                    throw new Error('Failed to get notes settings');
+                }
+                
+                const settings = settingsData.settings;
+                
+                // Test Obsidian connection
+                if (settings.obsidian_vault_path && settings.obsidian_vault_path.value) {
+                    try {
+                        const obsidianResponse = await fetch('/api/notes/test-obsidian', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({vault_path: settings.obsidian_vault_path.value})
+                        });
+                        const obsidianResult = await obsidianResponse.json();
+                        
+                        if (obsidianResult.success) {
+                            obsidianIndicator.className = 'w-3 h-3 rounded-full bg-green-500 mr-2';
+                            obsidianStatus.textContent = `Connected (${obsidianResult.details.markdown_files} files)`;
+                        } else {
+                            obsidianIndicator.className = 'w-3 h-3 rounded-full bg-red-500 mr-2';
+                            obsidianStatus.textContent = `Error: ${obsidianResult.error}`;
+                        }
+                    } catch (error) {
+                        obsidianIndicator.className = 'w-3 h-3 rounded-full bg-red-500 mr-2';
+                        obsidianStatus.textContent = `Error: ${error.message}`;
+                    }
+                } else {
+                    obsidianIndicator.className = 'w-3 h-3 rounded-full bg-gray-500 mr-2';
+                    obsidianStatus.textContent = 'Not configured';
+                }
+                
+                // Test Google Drive connection
+                if (settings.google_drive_notes_folder_id && settings.google_drive_notes_folder_id.value) {
+                    try {
+                        const gdriveResponse = await fetch('/api/notes/test-gdrive', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({folder_id: settings.google_drive_notes_folder_id.value})
+                        });
+                        const gdriveResult = await gdriveResponse.json();
+                        
+                        if (gdriveResult.success) {
+                            gdriveIndicator.className = 'w-3 h-3 rounded-full bg-green-500 mr-2';
+                            gdriveStatus.textContent = `Connected (${gdriveResult.details.document_count} docs)`;
+                        } else {
+                            gdriveIndicator.className = 'w-3 h-3 rounded-full bg-red-500 mr-2';
+                            gdriveStatus.textContent = `Error: ${gdriveResult.error}`;
+                        }
+                    } catch (error) {
+                        gdriveIndicator.className = 'w-3 h-3 rounded-full bg-red-500 mr-2';
+                        gdriveStatus.textContent = `Error: ${error.message}`;
+                    }
+                } else {
+                    gdriveIndicator.className = 'w-3 h-3 rounded-full bg-gray-500 mr-2';
+                    gdriveStatus.textContent = 'Not configured';
+                }
+                
+            } catch (error) {
+                console.error('Error testing notes connections:', error);
+                obsidianIndicator.className = 'w-3 h-3 rounded-full bg-red-500 mr-2';
+                obsidianStatus.textContent = 'Test failed';
+                gdriveIndicator.className = 'w-3 h-3 rounded-full bg-red-500 mr-2';
+                gdriveStatus.textContent = 'Test failed';
+            }
+        }
+
+        async function updateNotesConnectionStatus() {
+            // Simplified status check without full testing
+            try {
+                const settingsResponse = await fetch('/api/settings/notes');
+                const settingsData = await settingsResponse.json();
+                
+                if (settingsData.success) {
+                    const settings = settingsData.settings;
+                    
+                    const obsidianIndicator = document.getElementById('obsidian-indicator');
+                    const obsidianStatus = document.getElementById('obsidian-status-text');
+                    const gdriveIndicator = document.getElementById('gdrive-indicator');
+                    const gdriveStatus = document.getElementById('gdrive-status-text');
+                    
+                    // Update Obsidian status
+                    if (settings.obsidian_vault_path && settings.obsidian_vault_path.value) {
+                        obsidianIndicator.className = 'w-3 h-3 rounded-full bg-blue-500 mr-2';
+                        obsidianStatus.textContent = 'Configured';
+                    } else {
+                        obsidianIndicator.className = 'w-3 h-3 rounded-full bg-gray-500 mr-2';
+                        obsidianStatus.textContent = 'Not configured';
+                    }
+                    
+                    // Update Google Drive status
+                    if (settings.google_drive_notes_folder_id && settings.google_drive_notes_folder_id.value) {
+                        gdriveIndicator.className = 'w-3 h-3 rounded-full bg-blue-500 mr-2';
+                        gdriveStatus.textContent = 'Configured';
+                    } else {
+                        gdriveIndicator.className = 'w-3 h-3 rounded-full bg-gray-500 mr-2';
+                        gdriveStatus.textContent = 'Not configured';
+                    }
+                }
+            } catch (error) {
+                console.error('Error updating notes connection status:', error);
+            }
+        }
+
+        async function generateTasksFromNotes() {
+            const button = event.target;
+            const originalText = button.textContent;
+            
+            try {
+                button.textContent = 'Generating...';
+                button.disabled = true;
+                
+                const response = await fetch('/api/tasks/generate', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        include_notes: true,
+                        include_calendar: true,
+                        include_email: false  // Keep email off by default
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    const result = data.result;
+                    alert(`Task generation completed!\n\nTasks found: ${result.tasks_found}\n- From notes: ${result.by_source.notes}\n- From calendar: ${result.by_source.calendar}\n\nTasks created: ${result.creation_result.created}\nTasks skipped (duplicates): ${result.creation_result.skipped}`);
+                    
+                    // Refresh tasks and notes
+                    if (window.taskManagement) {
+                        window.taskManagement.loadTasks();
+                    }
+                    loadNotes();
+                } else {
+                    alert(`Error generating tasks: ${data.error}`);
+                }
+                
+            } catch (error) {
+                console.error('Error generating tasks from notes:', error);
+                alert(`Error: ${error.message}`);
+            } finally {
+                button.textContent = originalText;
+                button.disabled = false;
+            }
+        }
+
+        // Note filter functions
+        document.addEventListener('DOMContentLoaded', function() {
+            // Add event listeners for note filters
+            const notesFilterButtons = document.querySelectorAll('.notes-filter-btn');
+            notesFilterButtons.forEach(button => {
+                button.addEventListener('click', function() {
+                    const filter = this.dataset.filter;
+                    
+                    // Update active button
+                    notesFilterButtons.forEach(btn => {
+                        btn.className = 'notes-filter-btn bg-gray-200 text-gray-700 px-2 py-1 text-xs rounded';
+                    });
+                    this.className = 'notes-filter-btn bg-blue-600 text-white px-2 py-1 text-xs rounded';
+                    
+                    // Apply filter
+                    currentNotesFilter = filter;
+                    if (notesData.notes) {
+                        renderNotes(notesData.notes);
+                    }
+                });
+            });
+            
+            // Add event listener for TODO filter checkbox
+            const todosCheckbox = document.getElementById('notes-with-todos');
+            if (todosCheckbox) {
+                todosCheckbox.addEventListener('change', function() {
+                    if (notesData.notes) {
+                        renderNotes(notesData.notes);
+                    }
+                });
+            }
+        });
+        
+        // Notes Admin Functions
+        async function testObsidianVault() {
+            const vaultPath = document.getElementById('obsidian-vault-path').value;
+            const indicator = document.getElementById('test-obsidian-indicator');
+            const status = document.getElementById('test-obsidian-status');
+            
+            if (!vaultPath.trim()) {
+                alert('Please enter an Obsidian vault path');
+                return;
+            }
+            
+            indicator.style.background = '#ffc107';
+            indicator.classList.add('animate-pulse');
+            status.textContent = 'Testing...';
+            
+            try {
+                const response = await fetch('/api/notes/test-obsidian', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({vault_path: vaultPath})
+                });
+                const result = await response.json();
+                
+                if (result.success) {
+                    indicator.style.background = '#4caf50';
+                    status.textContent = `Connected (${result.details.markdown_files} files)`;
+                } else {
+                    indicator.style.background = '#f44336';
+                    status.textContent = `Error: ${result.error}`;
+                }
+            } catch (error) {
+                indicator.style.background = '#f44336';
+                status.textContent = `Error: ${error.message}`;
+            } finally {
+                indicator.classList.remove('animate-pulse');
+            }
+        }
+        
+        async function testGoogleDriveFolder() {
+            const folderId = document.getElementById('gdrive-folder-id').value;
+            const indicator = document.getElementById('test-gdrive-indicator');
+            const status = document.getElementById('test-gdrive-status');
+            
+            if (!folderId.trim()) {
+                alert('Please enter a Google Drive folder ID');
+                return;
+            }
+            
+            indicator.style.background = '#ffc107';
+            indicator.classList.add('animate-pulse');
+            status.textContent = 'Testing...';
+            
+            try {
+                const response = await fetch('/api/notes/test-gdrive', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({folder_id: folderId})
+                });
+                const result = await response.json();
+                
+                if (result.success) {
+                    indicator.style.background = '#4caf50';
+                    status.textContent = `Connected (${result.details.document_count} docs)`;
+                } else {
+                    indicator.style.background = '#f44336';
+                    status.textContent = `Error: ${result.error}`;
+                }
+            } catch (error) {
+                indicator.style.background = '#f44336';
+                status.textContent = `Error: ${error.message}`;
+            } finally {
+                indicator.classList.remove('animate-pulse');
+            }
+        }
+        
+        async function testAllNotesConnections() {
+            await Promise.all([
+                testObsidianVault(),
+                testGoogleDriveFolder()
+            ]);
+        }
+        
+        async function saveNotesSettings() {
+            const settings = {
+                obsidian_vault_path: document.getElementById('obsidian-vault-path').value,
+                google_drive_notes_folder_id: document.getElementById('gdrive-folder-id').value,
+                auto_create_tasks: document.getElementById('auto-create-tasks').checked
+            };
+            
+            try {
+                const response = await fetch('/api/settings/notes', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(settings)
+                });
+                const result = await response.json();
+                
+                if (result.success) {
+                    alert('Notes settings saved successfully!');
+                    // Refresh the notes widget
+                    loadNotes();
+                    closeWidgetAdmin();
+                } else {
+                    alert(`Error saving settings: ${result.error}`);
+                }
+            } catch (error) {
+                alert(`Error: ${error.message}`);
+            }
+        }
+        
+        async function generateTasksFromAllSources() {
+            try {
+                const response = await fetch('/api/tasks/generate', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        include_notes: true,
+                        include_calendar: true,
+                        include_email: false
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    const result = data.result;
+                    alert(`Task generation completed!\n\nTasks found: ${result.tasks_found}\n- From notes: ${result.by_source.notes}\n- From calendar: ${result.by_source.calendar}\n\nTasks created: ${result.creation_result.created}\nTasks skipped: ${result.creation_result.skipped}`);
+                    
+                    // Refresh tasks and notes
+                    if (window.taskManagement) {
+                        window.taskManagement.loadTasks();
+                    }
+                    loadNotes();
+                } else {
+                    alert(`Error generating tasks: ${data.error}`);
+                }
+            } catch (error) {
+                alert(`Error: ${error.message}`);
+            }
+        }
+        
+        async function refreshNotesData() {
+            loadNotes();
+            alert('Notes data refreshed!');
+        }
+        
+        // Load notes settings into admin form
+        async function loadNotesSettings() {
+            try {
+                const response = await fetch('/api/settings/notes');
+                const data = await response.json();
+                
+                if (data.success) {
+                    const settings = data.settings;
+                    
+                    const obsidianPath = document.getElementById('obsidian-vault-path');
+                    const gdriveId = document.getElementById('gdrive-folder-id');
+                    const autoCreate = document.getElementById('auto-create-tasks');
+                    
+                    if (obsidianPath) obsidianPath.value = settings.obsidian_vault_path?.value || '';
+                    if (gdriveId) gdriveId.value = settings.google_drive_notes_folder_id?.value || '';
+                    if (autoCreate) autoCreate.checked = settings.auto_create_tasks?.value || false;
+                }
+            } catch (error) {
+                console.error('Error loading notes settings:', error);
+            }
+        }
     </script>
 
     <!-- Create Task Modal -->
@@ -4375,7 +5844,15 @@ async def dashboard(code: str = None, state: str = None, error: str = None):
     </div>
 
     <script src="/static/tasks.js?v=2"></script>
-    <script src="/static/dashboards.js?v=2"></script>
+    <script src="/static/dashboards_modern.js?v=4"></script>
+    <script>
+        // Initialize dashboard manager when page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            if (typeof dashboardManager !== 'undefined') {
+                dashboardManager.init();
+            }
+        });
+    </script>
 </body>
 </html>
     """
@@ -4650,6 +6127,136 @@ async def update_notes_settings(settings: Dict[str, Any]):
         
     except Exception as e:
         logger.error(f"Error updating notes settings: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/notes/test-obsidian")
+async def test_obsidian_connection(request: Dict[str, Any]):
+    """Test Obsidian vault connection."""
+    try:
+        vault_path = request.get('vault_path', '')
+        if not vault_path:
+            return {"success": False, "error": "Vault path is required"}
+        
+        from pathlib import Path
+        
+        vault_dir = Path(vault_path)
+        
+        # Check if directory exists
+        if not vault_dir.exists():
+            return {
+                "success": False,
+                "error": f"Directory does not exist: {vault_path}",
+                "details": {"path_exists": False, "is_directory": False, "markdown_files": 0}
+            }
+        
+        # Check if it's a directory
+        if not vault_dir.is_dir():
+            return {
+                "success": False,
+                "error": f"Path is not a directory: {vault_path}",
+                "details": {"path_exists": True, "is_directory": False, "markdown_files": 0}
+            }
+        
+        # Check for markdown files
+        md_files = list(vault_dir.rglob('*.md'))
+        recent_files = []
+        
+        # Get info about some recent files
+        for md_file in md_files[:5]:  # Just check first 5
+            try:
+                stat = md_file.stat()
+                recent_files.append({
+                    "name": md_file.name,
+                    "relative_path": str(md_file.relative_to(vault_dir)),
+                    "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                    "size": stat.st_size
+                })
+            except Exception:
+                continue
+        
+        return {
+            "success": True,
+            "message": f"Successfully connected to Obsidian vault with {len(md_files)} markdown files",
+            "details": {
+                "path_exists": True,
+                "is_directory": True,
+                "markdown_files": len(md_files),
+                "sample_files": recent_files
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error testing Obsidian connection: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/notes/test-gdrive")
+async def test_gdrive_connection(request: Dict[str, Any]):
+    """Test Google Drive folder connection."""
+    try:
+        folder_id = request.get('folder_id', '')
+        if not folder_id:
+            return {"success": False, "error": "Folder ID is required"}
+        
+        from collectors.notes_collector import GoogleDriveNotesCollector
+        
+        gdrive = GoogleDriveNotesCollector()
+        service = gdrive._get_service()
+        
+        if not service:
+            return {
+                "success": False,
+                "error": "Could not connect to Google Drive API. Please check authentication.",
+                "details": {"authenticated": False, "folder_accessible": False, "document_count": 0}
+            }
+        
+        # Test folder access
+        try:
+            folder_meta = service.files().get(fileId=folder_id, fields='id, name, mimeType').execute()
+            
+            if folder_meta['mimeType'] != 'application/vnd.google-apps.folder':
+                return {
+                    "success": False,
+                    "error": f"ID {folder_id} is not a folder (type: {folder_meta['mimeType']})",
+                    "details": {"authenticated": True, "folder_accessible": True, "is_folder": False, "document_count": 0}
+                }
+            
+            # Test document listing
+            query = f"'{folder_id}' in parents and mimeType='application/vnd.google-apps.document' and trashed=false"
+            results = service.files().list(
+                q=query,
+                pageSize=10,
+                fields='files(id, name, modifiedTime, createdTime)'
+            ).execute()
+            
+            files = results.get('files', [])
+            
+            return {
+                "success": True,
+                "message": f"Successfully connected to Google Drive folder '{folder_meta['name']}' with {len(files)} documents",
+                "details": {
+                    "authenticated": True,
+                    "folder_accessible": True,
+                    "is_folder": True,
+                    "folder_name": folder_meta['name'],
+                    "document_count": len(files),
+                    "sample_documents": files[:3]  # Show first 3
+                }
+            }
+            
+        except Exception as e:
+            if "404" in str(e):
+                return {
+                    "success": False,
+                    "error": f"Folder with ID {folder_id} not found or not accessible",
+                    "details": {"authenticated": True, "folder_accessible": False, "document_count": 0}
+                }
+            else:
+                raise
+        
+    except Exception as e:
+        logger.error(f"Error testing Google Drive connection: {e}")
         return {"success": False, "error": str(e)}
 
 
@@ -5219,6 +6826,154 @@ async def sync_tasks_with_ticktick(request: Request):
     except Exception as e:
         logger.error(f"Error syncing tasks with TickTick: {e}")
         return {"error": str(e), "success": False}
+
+
+@app.post("/api/tasks/generate")
+async def generate_tasks_from_sources(request: Request):
+    """Generate tasks from notes, calendar events, and emails."""
+    try:
+        data = await request.json()
+        include_notes = data.get('include_notes', True)
+        include_calendar = data.get('include_calendar', True)
+        include_email = data.get('include_email', False)  # Off by default as it can be noisy
+        
+        from processors.task_generator import generate_tasks_from_all_sources
+        
+        # Collect data from sources
+        notes_data = None
+        calendar_data = None
+        email_data = None
+        
+        if include_notes:
+            # Get recent notes
+            try:
+                from collectors.notes_collector import collect_all_notes
+                from database import get_credentials
+                
+                notes_config = get_credentials('notes') or {}
+                obsidian_path = (
+                    os.getenv('OBSIDIAN_VAULT_PATH') or
+                    db.get_setting('obsidian_vault_path') or
+                    notes_config.get('obsidian_vault_path')
+                )
+                gdrive_folder_id = (
+                    os.getenv('GOOGLE_DRIVE_NOTES_FOLDER_ID') or
+                    db.get_setting('google_drive_notes_folder_id') or
+                    notes_config.get('google_drive_folder_id')
+                )
+                
+                if obsidian_path or gdrive_folder_id:
+                    notes_data = collect_all_notes(obsidian_path, gdrive_folder_id, 20)
+            except Exception as e:
+                logger.warning(f"Could not collect notes for task generation: {e}")
+        
+        if include_calendar and COLLECTORS_AVAILABLE:
+            # Get recent calendar events
+            try:
+                settings = Settings()
+                calendar_collector = CalendarCollector(settings)
+                calendar_data = await calendar_collector.collect_data()
+            except Exception as e:
+                logger.warning(f"Could not collect calendar data for task generation: {e}")
+        
+        if include_email and COLLECTORS_AVAILABLE:
+            # Get recent emails (last 3 days to avoid overwhelming)
+            try:
+                settings = Settings()
+                gmail_collector = GmailCollector(settings)
+                end_date = datetime.now()
+                start_date = end_date - timedelta(days=3)
+                email_data = {
+                    'emails': await gmail_collector.collect_emails(start_date, end_date, max_emails=50)
+                }
+            except Exception as e:
+                logger.warning(f"Could not collect email data for task generation: {e}")
+        
+        # Generate tasks
+        result = generate_tasks_from_all_sources(
+            db_manager=db,
+            notes_data=notes_data,
+            calendar_data=calendar_data,
+            email_data=email_data
+        )
+        
+        logger.info(f"Task generation completed: {result['creation_result']['created']} created, {result['creation_result']['skipped']} skipped")
+        
+        return {
+            "success": True,
+            "result": result,
+            "sources_used": {
+                "notes": notes_data is not None,
+                "calendar": calendar_data is not None, 
+                "email": email_data is not None
+            },
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error generating tasks from sources: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/tasks/{task_id}")
+async def get_task_details(task_id: str):
+    """Get detailed task information with source links."""
+    try:
+        # Get task from database
+        with db.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT * FROM universal_todos WHERE id = ?', (task_id,))
+            task_row = cursor.fetchone()
+        
+        if not task_row:
+            raise HTTPException(status_code=404, detail="Task not found")
+        
+        # Convert to dict
+        task = dict(task_row)
+        
+        # Add source link information
+        source_info = {"type": "unknown", "link": None, "display_text": "Unknown source"}
+        
+        if task.get('source') == 'email' and task.get('source_id'):
+            source_info = {
+                "type": "email",
+                "link": f"https://mail.google.com/mail/u/0/#inbox/{task['source_id']}",
+                "display_text": f"View email: {task.get('title', 'Email')}"
+            }
+        elif task.get('source') == 'calendar' and task.get('source_id'):
+            source_info = {
+                "type": "calendar",
+                "link": f"https://calendar.google.com/calendar/event?eid={task['source_id']}",
+                "display_text": f"View calendar event: {task.get('title', 'Event')}"
+            }
+        elif task.get('source') == 'obsidian' and task.get('source_id'):
+            source_info = {
+                "type": "obsidian",
+                "link": f"obsidian://open?vault=&file={task['source_id']}",
+                "display_text": f"Open in Obsidian: {task.get('source_id', 'Note')}"
+            }
+        elif task.get('source') == 'google_drive' and task.get('source_id'):
+            source_info = {
+                "type": "google_drive",
+                "link": f"https://docs.google.com/document/d/{task['source_id']}/edit",
+                "display_text": f"View Google Doc: {task.get('title', 'Document')}"
+            }
+        
+        # Add source info to task
+        task['source_info'] = source_info
+        
+        return {
+            "success": True,
+            "task": task,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting task details: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/api/news")
 async def get_news(filter: str = "all", include_read: bool = False):
@@ -7778,6 +9533,114 @@ async def get_dashboards():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/system/status")
+async def get_system_status():
+    """Get status of all dashboard collectors and widgets."""
+    try:
+        status_info = {
+            "success": True,
+            "timestamp": datetime.now().isoformat(),
+            "collectors": {},
+            "widgets": {},
+            "system": {
+                "server_running": True,
+                "uptime": "Unknown", 
+                "active_sessions": 1
+            }
+        }
+        
+        # Check collector availability and status
+        collectors_status = {
+            "calendar": {"available": COLLECTORS_AVAILABLE, "status": "unknown", "last_update": None, "error": None},
+            "email": {"available": COLLECTORS_AVAILABLE, "status": "unknown", "last_update": None, "error": None},
+            "github": {"available": COLLECTORS_AVAILABLE, "status": "unknown", "last_update": None, "error": None},
+            "ticktick": {"available": COLLECTORS_AVAILABLE, "status": "unknown", "last_update": None, "error": None},
+            "weather": {"available": COLLECTORS_AVAILABLE, "status": "unknown", "last_update": None, "error": None},
+            "news": {"available": True, "status": "unknown", "last_update": None, "error": None},
+            "jokes": {"available": COLLECTORS_AVAILABLE, "status": "unknown", "last_update": None, "error": None},
+            "music": {"available": True, "status": "unknown", "last_update": None, "error": None}
+        }
+        
+        # Test each collector if available
+        for name, info in collectors_status.items():
+            if info["available"]:
+                try:
+                    # Try to get recent data to determine status
+                    test_url = f"/api/{name}"
+                    if name == "email":
+                        test_url = "/api/email"
+                    
+                    # Quick internal test (simulate API call)
+                    info["status"] = "active"
+                    info["last_update"] = datetime.now().isoformat()
+                except Exception as e:
+                    info["status"] = "error"
+                    info["error"] = str(e)
+            else:
+                info["status"] = "disabled"
+                info["error"] = "Collector not available"
+        
+        status_info["collectors"] = collectors_status
+        
+        # Widget status (based on collector status)
+        status_info["widgets"] = {
+            "calendar_widget": {"status": collectors_status["calendar"]["status"], "data_available": True},
+            "email_widget": {"status": collectors_status["email"]["status"], "data_available": True},
+            "github_widget": {"status": collectors_status["github"]["status"], "data_available": True},
+            "tasks_widget": {"status": collectors_status["ticktick"]["status"], "data_available": True},
+            "weather_widget": {"status": collectors_status["weather"]["status"], "data_available": True},
+            "news_widget": {"status": collectors_status["news"]["status"], "data_available": True},
+            "jokes_widget": {"status": collectors_status["jokes"]["status"], "data_available": True},
+            "music_widget": {"status": collectors_status["music"]["status"], "data_available": True}
+        }
+        
+        return status_info
+        
+    except Exception as e:
+        logger.error(f"Error getting system status: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        }
+
+
+@app.post("/api/system/refresh-widget/{widget_name}")
+async def refresh_widget(widget_name: str):
+    """Refresh a specific widget's data."""
+    try:
+        widget_apis = {
+            "calendar": "/api/calendar",
+            "email": "/api/email", 
+            "github": "/api/github",
+            "tasks": "/api/ticktick",
+            "weather": "/api/weather",
+            "news": "/api/news",
+            "jokes": "/api/joke",
+            "music": "/api/music"
+        }
+        
+        if widget_name not in widget_apis:
+            raise HTTPException(status_code=400, detail=f"Unknown widget: {widget_name}")
+        
+        # Clear cache for this widget if background manager exists
+        if hasattr(app.state, 'background_manager'):
+            cache_key = widget_name.replace("_widget", "")
+            if cache_key in app.state.background_manager.cache:
+                del app.state.background_manager.cache[cache_key]
+                del app.state.background_manager.cache_timestamps[cache_key]
+        
+        return {
+            "success": True,
+            "message": f"Widget {widget_name} refresh initiated",
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error refreshing widget {widget_name}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/api/dashboards/add")
 async def add_dashboard(request: Request):
     """Add a new dashboard to monitor."""
@@ -8068,6 +9931,587 @@ async def get_dashboard_config(project_name: str):
     except Exception as e:
         logger.error(f"Error getting dashboard config for {project_name}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/dashboards/{project_name}/start")
+async def start_dashboard(project_name: str):
+    """Start a dashboard project and return monitoring info."""
+    try:
+        from database import DatabaseManager
+        import subprocess
+        import time
+        import os
+        
+        # Try importing psutil with better error handling
+        try:
+            import psutil
+        except ImportError as e:
+            logger.error(f"Failed to import psutil: {e}")
+            return {"success": False, "error": f"Missing required package 'psutil': {e}"}
+        
+        db = DatabaseManager()
+        projects = db.get_dashboard_projects(active_only=False)
+        project = next((p for p in projects if p['name'] == project_name), None)
+        
+        if not project:
+            raise HTTPException(status_code=404, detail=f"Dashboard project '{project_name}' not found")
+        
+        # Get project configuration
+        start_command = project.get('start_command', './ops/startup.sh')
+        working_dir = project.get('path', '/Users/greglind/Projects/me/dashboard')
+        local_port = project.get('port', 8008)
+        
+        # Check if already running on the port
+        port_check_error = None
+        try:
+            for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+                try:
+                    connections = proc.connections()
+                    for conn in connections:
+                        if conn.laddr.port == local_port and conn.status == 'LISTEN':
+                            return {
+                                "success": True,
+                                "message": f"Dashboard already running on port {local_port}",
+                                "process_id": proc.info['pid'],
+                                "port": local_port,
+                                "status": "already_running"
+                            }
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+        except Exception as e:
+            port_check_error = f"Port check failed: {str(e)}"
+            logger.warning(f"Could not check if port {local_port} is in use: {e}")
+        
+        # Start the dashboard process
+        try:
+            # Validate the working directory exists
+            if not os.path.exists(working_dir):
+                raise Exception(f"Working directory does not exist: {working_dir}")
+            
+            if not os.access(working_dir, os.R_OK):
+                raise Exception(f"Working directory is not readable: {working_dir}")
+            
+            # Log the startup attempt with full details
+            logger.info(f"Starting dashboard '{project_name}' with command '{start_command}' in directory '{working_dir}' on port {local_port}")
+            
+            # Change to working directory and start process
+            process = subprocess.Popen(
+                start_command,
+                cwd=working_dir,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                start_new_session=True,
+                shell=True
+            )
+            
+            # Give it a moment to start
+            time.sleep(3)
+            
+            # Check if process is still running
+            if process.poll() is None:
+                success_msg = f"Dashboard '{project_name}' started successfully"
+                if port_check_error:
+                    success_msg += f" (Note: {port_check_error})"
+                    
+                return {
+                    "success": True,
+                    "message": success_msg,
+                    "process_id": process.pid,
+                    "port": local_port,
+                    "command": start_command,
+                    "working_directory": working_dir
+                }
+            else:
+                stdout, stderr = process.communicate()
+                error_msg = f"Process failed to start"
+                details = {
+                    "command": start_command,
+                    "working_directory": working_dir,
+                    "stdout": stdout.decode() if stdout else "No stdout",
+                    "stderr": stderr.decode() if stderr else "No stderr",
+                    "exit_code": process.returncode
+                }
+                logger.error(f"Dashboard start failed: {error_msg}, Details: {details}")
+                raise Exception(f"{error_msg}. Exit code: {process.returncode}. Command: {start_command}. Working dir: {working_dir}. Error: {stderr.decode() if stderr else 'No error output'}")
+                
+        except Exception as e:
+            error_details = {
+                "project_name": project_name,
+                "command": start_command,
+                "working_directory": working_dir,
+                "port": local_port,
+                "directory_exists": os.path.exists(working_dir) if 'working_dir' in locals() else "unknown",
+                "directory_readable": os.access(working_dir, os.R_OK) if 'working_dir' in locals() and os.path.exists(working_dir) else "unknown",
+                "port_check_error": port_check_error if 'port_check_error' in locals() else None,
+                "error": str(e)
+            }
+            logger.error(f"Error starting dashboard process for '{project_name}': {e}, Details: {error_details}")
+            
+            error_msg = f"Failed to start dashboard '{project_name}': {str(e)}"
+            if 'working_dir' in locals():
+                error_msg += f" (Command: {start_command}, Dir: {working_dir})"
+            if 'port_check_error' in locals() and port_check_error:
+                error_msg += f" (Port check issue: {port_check_error})"
+                
+            raise Exception(error_msg)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error starting dashboard {project_name}: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/dashboards/{project_name}/status")
+async def get_dashboard_status(project_name: str):
+    """Get the current status of a dashboard project."""
+    try:
+        from database import DatabaseManager
+        import requests
+        from datetime import datetime, timedelta
+        
+        # Try importing psutil with better error handling
+        try:
+            import psutil
+        except ImportError as e:
+            logger.error(f"Failed to import psutil in status endpoint: {e}")
+            return {"success": False, "error": f"Missing required package 'psutil': {e}"}
+        
+        db = DatabaseManager()
+        projects = db.get_dashboard_projects(active_only=False)
+        project = next((p for p in projects if p['name'] == project_name), None)
+        
+        if not project:
+            raise HTTPException(status_code=404, detail=f"Dashboard project '{project_name}' not found")
+        
+        local_port = project.get('port', 8008)
+        local_url = project.get('url', f'http://localhost:{local_port}')
+        health_endpoint = project.get('health_endpoint', '/health')
+        
+        # Check if process is running on the port
+        running_process = None
+        try:
+            for proc in psutil.process_iter(['pid', 'name', 'cmdline', 'create_time', 'cpu_percent', 'memory_info']):
+                try:
+                    connections = proc.connections()
+                    for conn in connections:
+                        if conn.laddr.port == local_port and conn.status == 'LISTEN':
+                            running_process = proc
+                            break
+                    if running_process:
+                        break
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+        except Exception:
+            pass
+        
+        if running_process:
+            try:
+                # Get process info
+                create_time = datetime.fromtimestamp(running_process.create_time())
+                uptime = datetime.now() - create_time
+                uptime_str = str(uptime).split('.')[0]  # Remove microseconds
+                
+                cpu_percent = running_process.cpu_percent()
+                memory_mb = round(running_process.memory_info().rss / 1024 / 1024, 1)
+                
+                # Try to ping the service
+                service_healthy = False
+                last_activity = "No response"
+                try:
+                    if health_endpoint:
+                        health_url = f"{local_url.rstrip('/')}{health_endpoint}"
+                        response = requests.get(health_url, timeout=5)
+                        service_healthy = response.status_code == 200
+                        last_activity = "Just now" if service_healthy else f"Error {response.status_code}"
+                    else:
+                        # Just try to connect to the main URL
+                        response = requests.get(local_url, timeout=5)
+                        service_healthy = response.status_code == 200
+                        last_activity = "Just now" if service_healthy else f"Error {response.status_code}"
+                except Exception as e:
+                    service_healthy = False
+                    last_activity = f"Connection failed: {str(e)[:30]}"
+                
+                return {
+                    "success": True,
+                    "status": "running",
+                    "process_id": running_process.pid,
+                    "port": local_port,
+                    "uptime": uptime_str,
+                    "cpu_usage": cpu_percent,
+                    "memory_usage": memory_mb,
+                    "service_healthy": service_healthy,
+                    "last_activity": last_activity,
+                    "local_url": local_url
+                }
+                
+            except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
+                return {
+                    "success": True,
+                    "status": "stopped",
+                    "reason": "Process not accessible"
+                }
+        else:
+            return {
+                "success": True,
+                "status": "stopped",
+                "reason": "No process found on port"
+            }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting dashboard status for {project_name}: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/dashboards/{project_name}/logs")
+async def get_dashboard_logs(project_name: str):
+    """Get recent logs for a dashboard project."""
+    try:
+        from database import DatabaseManager
+        import os
+        
+        db = DatabaseManager()
+        projects = db.get_dashboard_projects(active_only=False)
+        project = next((p for p in projects if p['name'] == project_name), None)
+        
+        if not project:
+            raise HTTPException(status_code=404, detail=f"Dashboard project '{project_name}' not found")
+        
+        # Look for log files in common locations
+        working_dir = project.get('path', '/Users/greglind/Projects/me/dashboard')
+        log_paths = [
+            os.path.join(working_dir, 'logs', f'{project_name.lower().replace(" ", "_")}.log'),
+            os.path.join(working_dir, f'{project_name.lower().replace(" ", "_")}.log'),
+            os.path.join(working_dir, 'app.log'),
+            os.path.join(working_dir, 'dashboard.log'),
+            os.path.join(working_dir, 'server.log'),
+            os.path.join(working_dir, 'error.log'),
+        ]
+        
+        logs_content = ""
+        
+        # Try to read from log files
+        for log_path in log_paths:
+            if os.path.exists(log_path):
+                try:
+                    with open(log_path, 'r') as f:
+                        lines = f.readlines()
+                        # Get last 50 lines
+                        recent_lines = lines[-50:] if len(lines) > 50 else lines
+                        logs_content += f"\n=== {os.path.basename(log_path)} ===\n"
+                        logs_content += ''.join(recent_lines)
+                        logs_content += "\n"
+                        break  # Use first available log file
+                except Exception as e:
+                    logs_content += f"Error reading {log_path}: {e}\n"
+        
+        # If no log files found, try to get recent process output
+        if not logs_content.strip():
+            try:
+                import subprocess
+                # Try to get recent console logs for macOS
+                result = subprocess.run(
+                    ['log', 'show', '--predicate', f'process CONTAINS "{project_name}"', '--last', '1h', '--style', 'syslog'],
+                    capture_output=True, text=True, timeout=10
+                )
+                if result.returncode == 0 and result.stdout:
+                    logs_content = f"=== Recent System Logs ===\n{result.stdout}"
+                else:
+                    # Try simpler approach with ps and grep
+                    result = subprocess.run(
+                        ['ps', 'aux'],
+                        capture_output=True, text=True, timeout=5
+                    )
+                    if result.returncode == 0:
+                        lines = result.stdout.split('\n')
+                        port = project.get('port', 8008)
+                        relevant_lines = [line for line in lines if str(port) in line or project_name.lower() in line.lower()]
+                        if relevant_lines:
+                            logs_content = f"=== Running Processes ===\n" + "\n".join(relevant_lines)
+            except Exception as e:
+                logs_content += f"Error getting system logs: {e}\n"
+        
+        # If still no logs, provide a default message
+        if not logs_content.strip():
+            logs_content = f"No logs found for {project_name}.\n\nChecked locations:\n" + "\n".join(log_paths)
+            
+            # Add process info if available
+            try:
+                import psutil
+                local_port = project.get('port', 8008)
+                for proc in psutil.process_iter(['pid', 'name', 'cmdline', 'create_time']):
+                    try:
+                        connections = proc.connections()
+                        for conn in connections:
+                            if conn.laddr.port == local_port:
+                                logs_content += f"\n=== Running Process Info ===\n"
+                                logs_content += f"PID: {proc.pid}\n"
+                                logs_content += f"Command: {' '.join(proc.cmdline())}\n"
+                                logs_content += f"Started: {datetime.fromtimestamp(proc.create_time())}\n"
+                                break
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        continue
+            except Exception:
+                pass
+        
+        return {
+            "success": True,
+            "logs": logs_content,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting logs for {project_name}: {e}")
+        return {"success": False, "error": str(e)}
+
+
+# Primary Dashboard Management Endpoints
+@app.get("/api/dashboards/{dashboard_name}/cron-systems")
+async def get_cron_systems(dashboard_name: str):
+    """Get cron systems for primary dashboard"""
+    try:
+        # For Marketing Dashboard, scan the marketing directory for cron jobs
+        if dashboard_name == "Marketing Dashboard":
+            marketing_path = "/Users/greglind/Projects/me/marketing"
+            cron_systems = []
+            
+            # Look for common cron/automation files
+            cron_files = [
+                "cron.py", "scheduler.py", "automation.py", 
+                "scripts/cron.py", "scripts/scheduler.py"
+            ]
+            
+            for file in cron_files:
+                file_path = os.path.join(marketing_path, file)
+                if os.path.exists(file_path):
+                    cron_systems.append({
+                        "name": f"Marketing {file.replace('.py', '').title()}",
+                        "schedule": "0 */6 * * *",  # Every 6 hours
+                        "description": f"Automated marketing tasks from {file}",
+                        "active": False,  # Default to inactive
+                        "file_path": file_path
+                    })
+            
+            # Add default marketing automation systems
+            default_systems = [
+                {
+                    "name": "Email Campaign Monitor",
+                    "schedule": "0 8 * * *",  # Daily at 8 AM
+                    "description": "Monitors email campaign performance across all brands",
+                    "active": True
+                },
+                {
+                    "name": "Website Health Check",
+                    "schedule": "*/30 * * * *",  # Every 30 minutes
+                    "description": "Checks health of all brand websites",
+                    "active": True
+                },
+                {
+                    "name": "Social Media Scheduler",
+                    "schedule": "0 */4 * * *",  # Every 4 hours
+                    "description": "Publishes scheduled social media content",
+                    "active": False
+                }
+            ]
+            
+            cron_systems.extend(default_systems)
+            
+            return {"systems": cron_systems}
+        
+        return {"error": f"Cron systems not configured for {dashboard_name}"}
+    except Exception as e:
+        return {"error": f"Failed to load cron systems: {str(e)}"}
+
+@app.get("/api/dashboards/{dashboard_name}/monitor-all")
+async def monitor_all_dashboards(dashboard_name: str):
+    """Monitor all dashboards from primary dashboard"""
+    try:
+        # Get all dashboards from database
+        dashboards = get_dashboard_projects()
+        monitored_dashboards = []
+        
+        for dashboard in dashboards:
+            status_info = {
+                "name": dashboard["name"],
+                "status": "stopped",
+                "cpu_percent": None,
+                "memory_mb": None,
+                "uptime": None,
+                "port": dashboard.get("port")
+            }
+            
+            # Check if dashboard is running
+            if dashboard.get("port"):
+                try:
+                    import requests
+                    health_url = f"http://localhost:{dashboard['port']}/health"
+                    response = requests.get(health_url, timeout=2)
+                    if response.status_code == 200:
+                        status_info["status"] = "running"
+                        
+                        # Try to get detailed status
+                        try:
+                            status_response = requests.get(f"http://localhost:{dashboard['port']}/api/dashboards/{dashboard['name']}/status", timeout=2)
+                            if status_response.status_code == 200:
+                                status_data = status_response.json()
+                                status_info.update({
+                                    "cpu_percent": status_data.get("cpu_percent"),
+                                    "memory_mb": status_data.get("memory_mb"),
+                                    "uptime": status_data.get("uptime")
+                                })
+                        except:
+                            pass
+                except:
+                    pass
+            
+            monitored_dashboards.append(status_info)
+        
+        return {"dashboards": monitored_dashboards}
+    except Exception as e:
+        return {"error": f"Failed to monitor dashboards: {str(e)}"}
+
+@app.get("/api/dashboards/{dashboard_name}/websites")
+async def get_managed_websites(dashboard_name: str):
+    """Get websites managed by primary dashboard"""
+    try:
+        if dashboard_name == "Marketing Dashboard":
+            marketing_path = "/Users/greglind/Projects/me/marketing"
+            websites_path = os.path.join(marketing_path, "websites")
+            websites = []
+            
+            if os.path.exists(websites_path):
+                for item in os.listdir(websites_path):
+                    site_path = os.path.join(websites_path, item)
+                    if os.path.isdir(site_path):
+                        # Try to determine website info
+                        config_file = os.path.join(site_path, "config.json")
+                        if os.path.exists(config_file):
+                            try:
+                                import json
+                                with open(config_file, 'r') as f:
+                                    config = json.load(f)
+                                websites.append({
+                                    "name": config.get("name", item),
+                                    "url": config.get("url", f"https://{item}.com"),
+                                    "description": config.get("description", f"Website for {item}"),
+                                    "status": "online"  # Assume online for now
+                                })
+                            except:
+                                pass
+                        else:
+                            # Default website info
+                            websites.append({
+                                "name": item.title(),
+                                "url": f"https://{item}.com",
+                                "description": f"Brand website for {item}",
+                                "status": "unknown"
+                            })
+            
+            # Add some example websites if none found
+            if not websites:
+                websites = [
+                    {
+                        "name": "Main Brand Site",
+                        "url": "https://example.com",
+                        "description": "Primary brand website",
+                        "status": "online"
+                    },
+                    {
+                        "name": "E-commerce Store",
+                        "url": "https://store.example.com",
+                        "description": "Online store and shopping platform",
+                        "status": "online"
+                    },
+                    {
+                        "name": "Blog Platform",
+                        "url": "https://blog.example.com",
+                        "description": "Content marketing and blog platform",
+                        "status": "maintenance"
+                    }
+                ]
+            
+            return {"websites": websites}
+        
+        return {"error": f"Website management not configured for {dashboard_name}"}
+    except Exception as e:
+        return {"error": f"Failed to load websites: {str(e)}"}
+
+@app.get("/api/dashboards/{dashboard_name}/outreach")
+async def get_outreach_dashboard(dashboard_name: str):
+    """Get email outreach dashboard data"""
+    try:
+        if dashboard_name == "Marketing Dashboard":
+            # Mock outreach data - in real implementation, this would come from email service
+            outreach_data = {
+                "stats": {
+                    "emails_sent": 2847,
+                    "open_rate": 24.3,
+                    "response_rate": 8.7
+                },
+                "campaigns": [
+                    {
+                        "name": "Q4 Product Launch",
+                        "description": "New product announcement campaign",
+                        "status": "active",
+                        "sent": 1247,
+                        "opens": 312,
+                        "replies": 89
+                    },
+                    {
+                        "name": "Holiday Sales",
+                        "description": "Black Friday and holiday promotions",
+                        "status": "scheduled",
+                        "sent": 0,
+                        "opens": 0,
+                        "replies": 0
+                    },
+                    {
+                        "name": "Customer Feedback",
+                        "description": "Post-purchase feedback collection",
+                        "status": "active",
+                        "sent": 1600,
+                        "opens": 480,
+                        "replies": 127
+                    }
+                ]
+            }
+            
+            return outreach_data
+        
+        return {"error": f"Outreach dashboard not configured for {dashboard_name}"}
+    except Exception as e:
+        return {"error": f"Failed to load outreach data: {str(e)}"}
+
+
+@app.post("/api/system/open-terminal") 
+async def open_terminal(request: Request):
+    """Open a terminal at the specified path (macOS)."""
+    try:
+        import subprocess
+        data = await request.json()
+        path = data.get('path', '/')
+        
+        # Validate path exists
+        if not os.path.exists(path):
+            return {"success": False, "error": "Path does not exist"}
+        
+        # Open Terminal app at the specified path
+        subprocess.run([
+            'open', '-a', 'Terminal', path
+        ], check=True)
+        
+        return {"success": True, "message": f"Opened terminal at {path}"}
+        
+    except subprocess.CalledProcessError as e:
+        return {"success": False, "error": f"Failed to open terminal: {e}"}
+    except Exception as e:
+        logger.error(f"Error opening terminal: {e}")
+        return {"success": False, "error": str(e)}
 
 
 

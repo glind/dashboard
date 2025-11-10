@@ -101,6 +101,30 @@ class MusicSettings(BaseSettings):
         env_prefix = "MUSIC_"
 
 
+class ObsidianSettings(BaseSettings):
+    """Obsidian vault configuration."""
+    enabled: bool = Field(default=False, description="Enable Obsidian integration")
+    vault_path: Optional[str] = Field(default=None, description="Path to Obsidian vault directory")
+    recent_days: int = Field(default=7, description="Only check notes modified in last N days")
+
+
+class GoogleDriveNotesSettings(BaseSettings):
+    """Google Drive notes configuration."""
+    enabled: bool = Field(default=False, description="Enable Google Drive notes integration")
+    meeting_notes_folder_id: Optional[str] = Field(default=None, description="Google Drive folder ID for meeting notes")
+    credentials_file: Optional[str] = Field(default=None, description="Path to Google credentials JSON")
+
+
+class NotesSettings(BaseSettings):
+    """Notes and knowledge management configuration."""
+    obsidian: ObsidianSettings = Field(default_factory=ObsidianSettings)
+    google_drive: GoogleDriveNotesSettings = Field(default_factory=GoogleDriveNotesSettings)
+    auto_create_tasks: bool = Field(default=True, description="Automatically create tasks from notes TODOs")
+    
+    class Config:
+        env_prefix = "NOTES_"
+
+
 class DashboardSettings(BaseSettings):
     """Dashboard configuration."""
     output_dir: str = Field(default="output", description="Dashboard output directory")
@@ -146,6 +170,7 @@ class Settings(BaseSettings):
     buildly: BuildlySettings = Field(default_factory=BuildlySettings)
     weather: WeatherSettings = Field(default_factory=WeatherSettings)
     music: MusicSettings = Field(default_factory=MusicSettings)
+    notes: NotesSettings = Field(default_factory=NotesSettings)
     dashboard: DashboardSettings = Field(default_factory=DashboardSettings)
     
     # Music OAuth shortcuts for easier access

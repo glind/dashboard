@@ -102,8 +102,9 @@ class GmailCollector:
                     "error": "Authentication failed"
                 }
             
-            # Initialize risk checker
-            risk_checker = EmailRiskChecker()
+            # Initialize risk checker with shared database
+            from database import db
+            risk_checker = EmailRiskChecker(db)
             
             # Get 100 most recent emails - no date filtering, no priority analysis
             # Just get them fresh every time

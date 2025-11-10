@@ -6,6 +6,7 @@ import sqlite3
 import json
 import logging
 import os
+import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Set
@@ -13,8 +14,20 @@ from contextlib import contextmanager
 
 logger = logging.getLogger(__name__)
 
-# Database path relative to project root (one level up from src/)
-DATABASE_PATH = str(Path(__file__).parent.parent / "dashboard.db")
+# Database path - handle bundled apps properly
+def get_database_path():
+    """Get the appropriate database path for bundled vs script mode."""
+    # Check if running as a PyInstaller bundle
+    if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+        # Running as bundle - store database in user's home directory
+        config_dir = Path.home() / ".personal-dashboard"
+        config_dir.mkdir(exist_ok=True)
+        return str(config_dir / "dashboard.db")
+    else:
+        # Running as script - store in project root
+        return str(Path(__file__).parent.parent / "dashboard.db")
+
+DATABASE_PATH = get_database_path()
 
 
 class DatabaseManager:
@@ -28,6 +41,10 @@ class DatabaseManager:
     def init_database(self):
         """Initialize database tables."""
         try:
+            # Ensure the directory exists for the database file
+            db_dir = Path(self.db_path).parent
+            db_dir.mkdir(parents=True, exist_ok=True)
+            
             conn = sqlite3.connect(self.db_path)
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
@@ -2592,14 +2609,29 @@ class DatabaseManager:
 
 
 # Global database instance
-# Global database instance
-db = DatabaseManager()
+# Database instance will be created lazily
+_db = None
 
-
-# Convenience functions
 def get_db() -> DatabaseManager:
+    """Get the global database instance, creating it if needed."""
+    global _db
+    if _db is None:
+        _db = DatabaseManager()
+    return _db
+
+# For backward compatibility, expose as 'db'
+class DatabaseProxy:
+    """Proxy that forwards all attribute access to the lazy-loaded database."""
+    def __getattr__(self, name):
+        return getattr(get_db(), name)
+
+db = DatabaseProxy()
+
+
+# Convenience functions  
+def get_database_manager() -> DatabaseManager:
     """Get the global database instance."""
-    return db
+    return get_db()
 
 
 def save_credentials(service_name: str, credentials: Dict[str, Any]):

@@ -1,32 +1,62 @@
-# Personal Dashboard# Personal Dashboard
+# Personal Dashboard
 
+> **AI-Powered Personal Productivity Hub**
 
+A comprehensive dashboard that integrates email, calendar, tasks, GitHub, news, music, and weather with intelligent AI assistance—all in one beautiful interface.
 
-> **AI-Powered Personal Productivity Hub**> **AI-Powered Personal Productivity Hub**
-
-
-
-A comprehensive dashboard that integrates email, calendar, tasks, GitHub, news, music, and weather with intelligent AI assistance—all in one beautiful interface.A comprehensive dashboard that integrates email, calendar, tasks, GitHub, news, music, and weather with intelligent AI assistance—all in one beautiful interface.
-
-
-
-## 🚀 Quick Start[![License: BSL 1.1](https://img.shields.io/badge/License-BSL%201.1-blue.svg)](LICENSE.md)
-
+[![License: BSL 1.1](https://img.shields.io/badge/License-BSL%201.1-blue.svg)](LICENSE.md)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![Docker](https://img.shields.io/badge/docker-ready-brightgreen.svg)](https://www.docker.com/)
 
-```bash[![Docker](https://img.shields.io/badge/docker-ready-brightgreen.svg)](https://www.docker.com/)
-
-# Clone repository
-
-git clone https://github.com/buildly-marketplace/personal-dashboard.git---
-
-cd personal-dashboard
+---
 
 ## 🚀 Quick Start
 
-# Start dashboard (handles everything automatically)
+```bash
+# Clone repository
+git clone https://github.com/buildly-marketplace/personal-dashboard.git
+cd personal-dashboard
 
-./ops/startup.sh```bash
+# Setup credentials (REQUIRED)
+./scripts/setup-credentials.sh
+
+# Start dashboard (handles everything automatically)  
+./ops/startup.sh
+```
+
+🌐 **Dashboard URL**: http://localhost:8008
+
+---
+
+## 🔒 Security Setup (CRITICAL)
+
+### ⚠️ Before First Run
+
+The dashboard requires API credentials that are **NOT** included in this repository for security reasons.
+
+1. **Run the setup script**:
+   ```bash
+   ./scripts/setup-credentials.sh
+   ```
+
+2. **Configure your credentials**:
+   - Edit `src/config/credentials.yaml` with your API tokens
+   - Edit `src/config/google_oauth_config.json` with your Google OAuth credentials
+   - Edit `.env` with your environment variables
+
+3. **Get API Keys**:
+   - **GitHub**: https://github.com/settings/tokens (repo, read:user permissions)
+   - **Google**: https://console.cloud.google.com/apis/credentials (Gmail, Calendar APIs)
+   - **TickTick**: TickTick developer settings
+   - **OpenWeather**: https://openweathermap.org/api
+   - **News API**: https://newsapi.org/
+
+### 🛡️ Security Best Practices
+
+- ✅ Credential files are automatically excluded from git
+- ✅ Use environment variables for production
+- ✅ Never commit actual API keys
+- ✅ Rotate credentials regularly
 
 # Clone repository
 

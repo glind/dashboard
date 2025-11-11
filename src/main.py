@@ -1156,6 +1156,36 @@ async def dashboard(code: str = None, state: str = None, error: str = None):
             </div>
         </div>
         
+        <!-- Server Control Panel -->
+        <div id="server-control-panel" class="bg-white bg-opacity-10 rounded-xl p-4 backdrop-blur-sm border border-white border-opacity-20 mb-6">
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-lg text-white font-semibold flex items-center gap-2">
+                    🖥️ Python Web Servers
+                </h2>
+                <div class="flex items-center gap-2">
+                    <span id="server-count" class="text-xs px-2 py-1 rounded bg-blue-600 text-white">0 servers</span>
+                    <button onclick="refreshServers()" 
+                            class="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded text-xs flex items-center gap-1">
+                        <span id="refresh-servers-icon">🔄</span> Refresh
+                    </button>
+                </div>
+            </div>
+            
+            <div id="servers-container">
+                <!-- Server cards will be populated here -->
+                <div class="text-gray-300 text-sm flex items-center justify-center py-8">
+                    <span class="animate-spin mr-2">⏳</span> Scanning for Python web servers...
+                </div>
+            </div>
+            
+            <!-- No servers message (hidden by default) -->
+            <div id="no-servers-message" class="hidden text-center py-8 text-gray-300">
+                <div class="text-4xl mb-2">🔍</div>
+                <div class="text-lg mb-2">No Python web servers found</div>
+                <div class="text-sm opacity-75">Start a Python web server and click refresh to see it here</div>
+            </div>
+        </div>
+        
         <!-- Top Mini Widgets -->
         <div class="flex gap-5 mb-8 justify-center flex-wrap">
             <div class="bg-white bg-opacity-15 rounded-xl p-4 backdrop-blur-sm border border-white border-opacity-30 min-w-60 text-center">
@@ -5625,6 +5655,165 @@ ${logsData.logs || 'No logs available'}
                 console.error('Error loading notes settings:', error);
             }
         }
+
+        // ===================================================================
+        // SERVER MANAGEMENT FUNCTIONS
+        // ===================================================================
+        
+        let serversData = [];
+        
+        async function refreshServers() {
+            try {
+                const refreshIcon = document.getElementById('refresh-servers-icon');
+                refreshIcon.style.animation = 'spin 1s linear infinite';
+                
+                const response = await fetch('/api/servers');
+                const result = await response.json();
+                
+                if (result.success) {
+                    serversData = result.servers;
+                    renderServers();
+                    updateServerCount(result.servers.length);
+                } else {
+                    console.error('Failed to refresh servers:', result.error);
+                }
+            } catch (error) {
+                console.error('Error refreshing servers:', error);
+            } finally {
+                const refreshIcon = document.getElementById('refresh-servers-icon');
+                refreshIcon.style.animation = '';
+            }
+        }
+        
+        function renderServers() {
+            const container = document.getElementById('servers-container');
+            
+            if (serversData.length === 0) {
+                container.innerHTML = '<div class="text-gray-300 text-sm">No Python servers detected</div>';
+                return;
+            }
+            
+            const serversHtml = serversData.map(server => `
+                <div class="server-card bg-white bg-opacity-20 rounded-lg p-3 border border-white border-opacity-30 min-w-80">
+                    <div class="flex items-center justify-between mb-2">
+                        <div class="flex items-center gap-2">
+                            <span class="server-status-indicator ${server.status === 'running' ? 'status-running' : 'status-stopped'}" 
+                                  title="Server Status"></span>
+                            <h4 class="text-white font-medium text-sm">${server.name}</h4>
+                            <span class="text-xs px-2 py-1 rounded bg-gray-600 text-white">${server.type}</span>
+                        </div>
+                        <div class="flex items-center gap-1">
+                            <button onclick="openServerUrl('${server.url}')" 
+                                    class="bg-green-500 hover:bg-green-600 text-white px-2 py-1 rounded text-xs"
+                                    title="Open in browser">
+                                🌐
+                            </button>
+                            <button onclick="toggleServer(${server.port}, '${server.status}')" 
+                                    class="server-toggle-btn ${server.status === 'running' ? 'bg-red-500 hover:bg-red-600' : 'bg-green-500 hover:bg-green-600'} 
+                                           text-white px-2 py-1 rounded text-xs"
+                                    ${!server.can_control ? 'disabled' : ''}>
+                                ${server.status === 'running' ? '⏹️ Stop' : '▶️ Start'}
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="text-xs text-gray-300 mb-2">
+                        <div class="flex items-center justify-between">
+                            <span>Port: ${server.port}</span>
+                            <span>PID: ${server.pid || 'Unknown'}</span>
+                        </div>
+                        ${server.cmdline ? `<div class="mt-1 truncate" title="${server.cmdline}">Path: ${extractPath(server.cmdline)}</div>` : ''}
+                    </div>
+                    
+                    <div class="flex items-center justify-between text-xs text-gray-400">
+                        <div class="flex items-center gap-3">
+                            <span>CPU: ${server.cpu_percent?.toFixed(1) || 0}%</span>
+                            <span>RAM: ${server.memory_mb?.toFixed(0) || 0}MB</span>
+                        </div>
+                        <button onclick="mapToDashboard('${server.name}', ${server.port})" 
+                                class="bg-blue-500 hover:bg-blue-600 text-white px-2 py-1 rounded text-xs"
+                                title="Map to dashboard">
+                            📋 Map
+                        </button>
+                    </div>
+                </div>
+            `).join('');
+            
+            container.innerHTML = serversHtml;
+        }
+        
+        function extractPath(cmdline) {
+            // Extract the working directory or script path from command line
+            const parts = cmdline.split(' ');
+            for (let part of parts) {
+                if (part.includes('/') && !part.startsWith('-')) {
+                    // Found a path-like argument
+                    if (part.includes('.py')) {
+                        // Return the directory of the Python file
+                        return part.substring(0, part.lastIndexOf('/')) || part;
+                    }
+                    return part;
+                }
+            }
+            return 'Unknown';
+        }
+        
+        async function toggleServer(port, currentStatus) {
+            try {
+                if (currentStatus === 'running') {
+                    // Stop the server
+                    const response = await fetch(`/api/servers/${port}/stop`, {
+                        method: 'POST'
+                    });
+                    const result = await response.json();
+                    
+                    if (result.success) {
+                        console.log(`Server on port ${port} stopped`);
+                        // Wait a moment then refresh
+                        setTimeout(refreshServers, 1000);
+                    } else {
+                        alert(`Failed to stop server: ${result.error}`);
+                    }
+                } else {
+                    // For starting servers, we'd need the start command
+                    alert('Server starting not yet implemented. Use the dashboard start functionality.');
+                }
+            } catch (error) {
+                console.error('Error toggling server:', error);
+                alert('Error controlling server');
+            }
+        }
+        
+        function openServerUrl(url) {
+            window.open(url, '_blank');
+        }
+        
+        function mapToDashboard(serverName, port) {
+            // Open the add dashboard modal with pre-filled info
+            const modal = document.getElementById('add-dashboard-modal');
+            const nameField = document.getElementById('dashboard-name');
+            const urlField = document.getElementById('dashboard-local-url');
+            const typeField = document.getElementById('dashboard-type');
+            
+            if (nameField) nameField.value = serverName;
+            if (urlField) urlField.value = `http://localhost:${port}`;
+            if (typeField) typeField.value = 'web_app';
+            
+            modal.style.display = 'block';
+        }
+        
+        function updateServerCount(count) {
+            const countElement = document.getElementById('server-count');
+            countElement.textContent = `${count} server${count !== 1 ? 's' : ''}`;
+        }
+        
+        // Auto-refresh servers periodically
+        setInterval(refreshServers, 10000); // Refresh every 10 seconds
+        
+        // Load servers on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            refreshServers();
+        });
     </script>
 
     <!-- Create Task Modal -->
@@ -10547,6 +10736,81 @@ async def shutdown_event():
     logger.info("Shutting down background data collection...")
     background_manager.stop()
     logger.info("Background threads stopped")
+
+# ===================================================================
+# SERVER MANAGEMENT ENDPOINTS
+# ===================================================================
+
+@app.get("/api/servers")
+async def get_all_servers():
+    """Get all Python web servers running on the system"""
+    try:
+        from utils.server_manager import ServerManager
+        
+        server_manager = ServerManager()
+        servers = server_manager.discover_python_servers()
+        
+        return {"success": True, "servers": servers}
+    except Exception as e:
+        logger.error(f"Error discovering servers: {e}")
+        return {"success": False, "error": str(e), "servers": []}
+
+@app.get("/api/servers/{port}/status")
+async def get_server_status(port: int):
+    """Get detailed status for a specific server"""
+    try:
+        from utils.server_manager import ServerManager
+        
+        server_manager = ServerManager()
+        status = server_manager.get_server_status(port)
+        
+        return {"success": True, "status": status}
+    except Exception as e:
+        logger.error(f"Error getting server status for port {port}: {e}")
+        return {"success": False, "error": str(e)}
+
+@app.post("/api/servers/{port}/stop")
+async def stop_server(port: int):
+    """Stop a server running on a specific port"""
+    try:
+        from utils.server_manager import ServerManager
+        
+        server_manager = ServerManager()
+        servers = server_manager.discover_python_servers()
+        server = next((s for s in servers if s['port'] == port), None)
+        
+        if not server:
+            raise HTTPException(status_code=404, detail=f"Server on port {port} not found")
+        
+        if not server.get('can_control'):
+            raise HTTPException(status_code=400, detail=f"Cannot control server on port {port} (no PID available)")
+        
+        success = server_manager.stop_server(server)
+        
+        if success:
+            return {"success": True, "message": f"Server on port {port} stopped successfully"}
+        else:
+            return {"success": False, "error": f"Failed to stop server on port {port}"}
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error stopping server on port {port}: {e}")
+        return {"success": False, "error": str(e)}
+
+@app.post("/api/servers/refresh")
+async def refresh_servers():
+    """Refresh the list of discovered servers"""
+    try:
+        from utils.server_manager import ServerManager
+        
+        server_manager = ServerManager()
+        servers = server_manager.discover_python_servers()
+        
+        return {"success": True, "servers": servers, "message": f"Found {len(servers)} servers"}
+    except Exception as e:
+        logger.error(f"Error refreshing servers: {e}")
+        return {"success": False, "error": str(e), "servers": []}
 
 
 if __name__ == "__main__":

@@ -239,9 +239,23 @@ function renderTaskCard(task) {
         formatRelativeDate(task.due_date) : 
         '<span class="text-gray-400">No due date</span>';
     
-    const emailLink = task.gmail_link ? 
-        `<a href="${task.gmail_link}" target="_blank" class="text-blue-600 hover:text-blue-800 text-sm">📧 View Email</a>` : 
-        '';
+    // Extract source link from task
+    let sourceLink = '';
+    if (task.gmail_link) {
+        sourceLink = `<a href="${task.gmail_link}" target="_blank" class="text-blue-600 hover:text-blue-800 text-sm flex items-center gap-1">📧 View Email</a>`;
+    } else if (task.source_link) {
+        const linkText = task.source === 'calendar' ? '📅 View Calendar Event' : 
+                        task.source === 'email' ? '📧 View Email' :
+                        task.source === 'note' ? '📝 View Note' : '🔗 View Source';
+        sourceLink = `<a href="${task.source_link}" target="_blank" class="text-blue-600 hover:text-blue-800 text-sm flex items-center gap-1">${linkText}</a>`;
+    }
+    
+    // Show/hide full content toggle
+    const hasContent = task.content || task.description;
+    const contentId = `task-content-${task.id}`;
+    const editBtnId = `edit-btn-${task.id}`;
+    const saveBtnId = `save-btn-${task.id}`;
+    const cancelBtnId = `cancel-btn-${task.id}`;
     
     return `
         <div class="bg-white border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
@@ -257,7 +271,27 @@ function renderTaskCard(task) {
                 </div>
             </div>
             
-            ${task.description ? `<p class="text-gray-600 text-sm mb-3">${escapeHtml(task.description)}</p>` : ''}
+            ${hasContent ? `
+                <div class="mb-3">
+                    <div class="flex justify-between items-center mb-2">
+                        <span class="text-xs font-semibold text-gray-500">CONTENT / NOTES</span>
+                        <button id="${editBtnId}" onclick="editTaskContent('${task.id}')" 
+                                class="text-xs text-blue-600 hover:text-blue-800">✏️ Edit</button>
+                    </div>
+                    <div id="${contentId}" class="text-sm text-gray-700 whitespace-pre-wrap bg-gray-50 p-3 rounded border border-gray-200 max-h-32 overflow-y-auto">
+                        ${escapeHtml(task.content || task.description || '')}
+                    </div>
+                    <textarea id="${contentId}-edit" 
+                              class="hidden w-full text-sm p-3 border border-gray-300 rounded resize-vertical" 
+                              rows="6">${task.content || task.description || ''}</textarea>
+                    <div id="${contentId}-actions" class="hidden flex gap-2 mt-2">
+                        <button id="${saveBtnId}" onclick="saveTaskContent('${task.id}')" 
+                                class="text-xs bg-green-600 text-white px-3 py-1 rounded hover:bg-green-700">Save</button>
+                        <button id="${cancelBtnId}" onclick="cancelEditTaskContent('${task.id}')" 
+                                class="text-xs bg-gray-300 text-gray-700 px-3 py-1 rounded hover:bg-gray-400">Cancel</button>
+                    </div>
+                </div>
+            ` : ''}
             
             <div class="flex justify-between items-center text-sm text-gray-500 mb-3">
                 <div class="flex items-center gap-4">
@@ -265,7 +299,7 @@ function renderTaskCard(task) {
                     <span>📂 ${task.category}</span>
                     <span>🔗 ${task.source}</span>
                 </div>
-                ${emailLink}
+                ${sourceLink}
             </div>
             
             <div class="flex justify-between items-center">
@@ -484,6 +518,84 @@ function showTaskLoadingState() {
     }
 }
 
+// Task content editing functions
+function editTaskContent(taskId) {
+    const contentDiv = document.getElementById(`task-content-${taskId}`);
+    const editTextarea = document.getElementById(`task-content-${taskId}-edit`);
+    const actionsDiv = document.getElementById(`task-content-${taskId}-actions`);
+    const editBtn = document.getElementById(`edit-btn-${taskId}`);
+    
+    if (contentDiv && editTextarea && actionsDiv && editBtn) {
+        contentDiv.classList.add('hidden');
+        editTextarea.classList.remove('hidden');
+        actionsDiv.classList.remove('hidden');
+        editBtn.classList.add('hidden');
+        editTextarea.focus();
+    }
+}
+
+function cancelEditTaskContent(taskId) {
+    const contentDiv = document.getElementById(`task-content-${taskId}`);
+    const editTextarea = document.getElementById(`task-content-${taskId}-edit`);
+    const actionsDiv = document.getElementById(`task-content-${taskId}-actions`);
+    const editBtn = document.getElementById(`edit-btn-${taskId}`);
+    
+    if (contentDiv && editTextarea && actionsDiv && editBtn) {
+        contentDiv.classList.remove('hidden');
+        editTextarea.classList.add('hidden');
+        actionsDiv.classList.add('hidden');
+        editBtn.classList.remove('hidden');
+        
+        // Reset textarea to original content
+        const originalContent = contentDiv.textContent;
+        editTextarea.value = originalContent;
+    }
+}
+
+async function saveTaskContent(taskId) {
+    const editTextarea = document.getElementById(`task-content-${taskId}-edit`);
+    const contentDiv = document.getElementById(`task-content-${taskId}`);
+    const actionsDiv = document.getElementById(`task-content-${taskId}-actions`);
+    const editBtn = document.getElementById(`edit-btn-${taskId}`);
+    
+    if (!editTextarea) return;
+    
+    const newContent = editTextarea.value;
+    
+    try {
+        // Update task content via API
+        const response = await fetch(`/api/tasks/${taskId}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                content: newContent
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            // Update the displayed content
+            if (contentDiv) {
+                contentDiv.textContent = newContent;
+                contentDiv.classList.remove('hidden');
+            }
+            if (editTextarea) editTextarea.classList.add('hidden');
+            if (actionsDiv) actionsDiv.classList.add('hidden');
+            if (editBtn) editBtn.classList.remove('hidden');
+            
+            showTaskSuccess('Task content updated successfully');
+        } else {
+            showTaskError(`Failed to update task content: ${result.error || 'Unknown error'}`);
+        }
+    } catch (error) {
+        console.error('Error updating task content:', error);
+        showTaskError('Error updating task content');
+    }
+}
+
 function showTaskError(message) {
     console.error('Task error:', message);
     showNotification(message, 'error');
@@ -527,6 +639,11 @@ window.taskManagement = {
     deleteTask,
     syncWithTickTick
 };
+
+// Make edit functions globally available
+window.editTaskContent = editTaskContent;
+window.cancelEditTaskContent = cancelEditTaskContent;
+window.saveTaskContent = saveTaskContent;
 
 // Auto-initialize if DOM is already loaded
 if (document.readyState === 'loading') {

@@ -234,20 +234,68 @@ class EmailAnalyzer:
                         logger.info(f"Skipping task from {sender} - sender domain in user's disliked list")
                         return []
             
-            # SPAM/NEWSLETTER DETECTION - exclude these immediately
+            # ENHANCED SPAM/NEWSLETTER DETECTION - exclude these immediately
             spam_indicators = [
-                'unsubscribe', 'click here', 'buy now', 'limited time', 'offer expires',
-                'newsletter', 'promo', 'discount', 'sale', 'save up to', '%off',
-                'free shipping', 'act now', 'order now', 'shop now', 'view in browser',
-                'noreply@', 'no-reply@', 'donotreply@', 'marketing@', 'news@',
-                'subscribe now', 'join our', 'follow us', 'download now',
-                'update your preferences', 'manage subscriptions', 'email preferences'
+                # Unsubscribe and list management
+                'unsubscribe', 'click here to unsubscribe', 'update your preferences', 
+                'manage subscriptions', 'email preferences', 'opt out', 'remove me',
+                
+                # Marketing language
+                'buy now', 'limited time', 'offer expires', 'act now', 'order now', 
+                'shop now', 'don\'t miss', 'last chance', 'hurry', 'expires soon',
+                
+                # Sales and promotions
+                'newsletter', 'promo', 'promotional', 'discount', 'sale', 'save up to', 
+                '%off', 'percent off', 'free shipping', 'special offer', 'exclusive offer',
+                'deal of the day', 'flash sale', 'clearance', 'save now', 'limited offer',
+                
+                # Email marketing patterns
+                'view in browser', 'view online', 'see full message', 'read online',
+                'subscribe now', 'join our', 'follow us', 'download now', 'get started',
+                
+                # Marketing sender patterns
+                'noreply@', 'no-reply@', 'donotreply@', 'marketing@', 'news@', 
+                'newsletter@', 'notifications@', 'updates@', 'info@', 'hello@',
+                'support@' + ' (automated)', 'team@' + ' (bulk)',
+                
+                # Content patterns
+                'this email was sent to', 'you received this email', 'sent to you by',
+                'if you no longer wish', 'add us to your address book', 'whitelist',
+                
+                # Call-to-action spam
+                'click to view', 'tap to open', 'open in app', 'get the app',
+                'download our app', 'join thousands', 'millions of users'
             ]
             
-            # Check if this looks like spam/newsletter
-            spam_score = sum(1 for indicator in spam_indicators if indicator in combined_text or indicator in sender.lower())
-            if spam_score >= 2:
-                logger.info(f"Skipping email from {sender} - detected as newsletter/spam (score: {spam_score})")
+            # Additional patterns to check in sender
+            spam_sender_patterns = [
+                'newsletter', 'marketing', 'promo', 'news', 'notifications',
+                'noreply', 'no-reply', 'donotreply', 'updates', 'alerts'
+            ]
+            
+            # Check for spam indicators in text
+            spam_score = sum(1 for indicator in spam_indicators if indicator in combined_text)
+            
+            # Check sender email for spam patterns
+            sender_spam_score = sum(1 for pattern in spam_sender_patterns if pattern in sender.lower())
+            
+            # Combined spam detection with lower threshold
+            total_spam_score = spam_score + (sender_spam_score * 2)  # Weight sender patterns more heavily
+            
+            if spam_score >= 3 or sender_spam_score >= 2 or total_spam_score >= 4:
+                logger.info(f"Skipping email from {sender} - detected as newsletter/marketing (text:{spam_score}, sender:{sender_spam_score})")
+                return []
+            
+            # Additional check: If subject looks like marketing
+            marketing_subject_patterns = [
+                r'\d+%\s*off', r'save\s*\$\d+', r'free\s*shipping', r'limited\s*time',
+                r'exclusive\s*offer', r'special\s*deal', r'flash\s*sale', r'new\s*arrival',
+                r'weekly\s*update', r'monthly\s*newsletter', r'\[.*\s*sale.*\]'
+            ]
+            
+            subject_lower = subject.lower()
+            if any(re.search(pattern, subject_lower) for pattern in marketing_subject_patterns):
+                logger.info(f"Skipping email - marketing subject pattern detected: {subject}")
                 return []
             
             # AUTOMATED EMAIL DETECTION - skip automated notifications

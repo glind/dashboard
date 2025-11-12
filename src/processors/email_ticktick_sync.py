@@ -101,8 +101,20 @@ class EmailTickTickSync:
                         # Default to 1 week from now for todos
                         due_date = datetime.now() + timedelta(days=7)
                     
-                    # Create task content with email link
-                    task_content = f"{todo_item.get('suggested_content', '')}\n\n📧 Open in Gmail: {todo_item.get('gmail_link', '')}"
+                    # Create comprehensive task content with email details and link
+                    email_snippet = todo_item.get('snippet', '')[:500]  # First 500 chars
+                    gmail_link = todo_item.get('gmail_link', '')
+                    
+                    task_content = f"""{todo_item.get('suggested_content', '')}
+
+📧 Email Details:
+From: {todo_item.get('sender', 'Unknown')}
+Subject: {todo_item.get('subject', 'No subject')}
+
+{email_snippet}
+
+🔗 Open in Gmail: {gmail_link}
+"""
                     
                     # Create task in TickTick
                     created_task = await self.ticktick_collector.create_task(
@@ -166,10 +178,23 @@ class EmailTickTickSync:
                     # Due date should be soon for unreplied emails
                     due_date = datetime.now() + timedelta(days=2)
                     
-                    # Create task content with email link
-                    task_content = f"{unreplied_item.get('suggested_content', '')}\n\n📧 Open in Gmail: {unreplied_item.get('gmail_link', '')}"
+                    # Create comprehensive task content with email details and link
+                    email_snippet = unreplied_item.get('snippet', '')[:500]  # First 500 chars
+                    gmail_link = unreplied_item.get('gmail_link', '')
                     
-                    # Create reply task in TickTick
+                    task_content = f"""{unreplied_item.get('suggested_content', '')}
+
+📧 Email Details:
+From: {unreplied_item.get('sender', 'Unknown')}
+Subject: {unreplied_item.get('subject', 'No subject')}
+Days waiting: {unreplied_item.get('days_waiting', 'Unknown')}
+
+{email_snippet}
+
+🔗 Open in Gmail: {gmail_link}
+"""
+                    
+                    # Create task in TickTick
                     created_task = await self.ticktick_collector.create_task(
                         title=unreplied_item.get('suggested_title', ''),
                         content=task_content,

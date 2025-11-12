@@ -386,20 +386,29 @@ def collect_all_notes(obsidian_path: Optional[str] = None,
     
     # Collect from Google Drive
     if gdrive_folder_id:
-        gdrive = GoogleDriveNotesCollector()
-        gdrive_notes = gdrive.get_meeting_notes(gdrive_folder_id, limit)
-        all_notes.extend(gdrive_notes)
-        
-        # Extract todos for auto-creation
-        for note in gdrive_notes:
-            for todo in note.get('todos', []):
-                todos_to_create.append({
-                    'text': todo['text'],
-                    'source': 'google_drive',
-                    'source_title': note['title'],
-                    'source_url': note.get('url'),
-                    'context': todo.get('context', '')
-                })
+        try:
+            logger.info(f"Attempting to collect Google Drive notes from folder: {gdrive_folder_id}")
+            gdrive = GoogleDriveNotesCollector()
+            gdrive_notes = gdrive.get_meeting_notes(gdrive_folder_id, limit)
+            
+            if gdrive_notes:
+                logger.info(f"Successfully collected {len(gdrive_notes)} notes from Google Drive")
+                all_notes.extend(gdrive_notes)
+                
+                # Extract todos for auto-creation
+                for note in gdrive_notes:
+                    for todo in note.get('todos', []):
+                        todos_to_create.append({
+                            'text': todo['text'],
+                            'source': 'google_drive',
+                            'source_title': note['title'],
+                            'source_url': note.get('url'),
+                            'context': todo.get('context', '')
+                        })
+            else:
+                logger.warning("No Google Drive notes found - check folder ID and permissions")
+        except Exception as e:
+            logger.error(f"Error collecting Google Drive notes: {e}", exc_info=True)
     
     # Sort all notes by modification time
     all_notes.sort(key=lambda x: x.get('modified_at', ''), reverse=True)

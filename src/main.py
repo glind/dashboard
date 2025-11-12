@@ -6563,6 +6563,22 @@ async def get_notes():
             limit=limit
         )
         
+        # Log results for debugging
+        logger.info(f"Notes collection complete: {len(result.get('notes', []))} notes, " +
+                   f"{len(result.get('todos_to_create', []))} TODOs found")
+        
+        # Add configuration status to result
+        result['config_status'] = {
+            'obsidian_configured': bool(obsidian_path),
+            'obsidian_path': obsidian_path or 'Not configured',
+            'gdrive_configured': bool(gdrive_folder_id and gdrive_folder_id.strip()),
+            'gdrive_folder_id': gdrive_folder_id or 'Not configured',
+            'notes_by_source': {
+                'obsidian': len([n for n in result.get('notes', []) if n.get('source') == 'obsidian']),
+                'google_drive': len([n for n in result.get('notes', []) if n.get('source') == 'google_drive'])
+            }
+        }
+        
         # Auto-create tasks from TODOs if enabled
         if auto_create and result['todos_to_create']:
             from database import DatabaseManager

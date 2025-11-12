@@ -1115,6 +1115,105 @@ async def dashboard(code: str = None, state: str = None, error: str = None):
             opacity: 0.7;
             text-align: center;
         }
+
+        /* ===================================================================
+           SERVER CONTROL PANEL STYLES
+           ================================================================= */
+        
+        .server-card {
+            transition: all 0.3s ease;
+        }
+        
+        .server-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        }
+        
+        .server-status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            display: inline-block;
+            position: relative;
+        }
+        
+        .status-running {
+            background: #10b981;
+            animation: pulse-green 2s infinite;
+        }
+        
+        .status-stopped {
+            background: #ef4444;
+            animation: pulse-red 2s infinite;
+        }
+        
+        @keyframes pulse-green {
+            0%, 100% {
+                opacity: 1;
+                transform: scale(1);
+                box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4);
+            }
+            50% {
+                opacity: 0.8;
+                transform: scale(1.1);
+                box-shadow: 0 0 0 8px rgba(16, 185, 129, 0);
+            }
+        }
+        
+        @keyframes pulse-red {
+            0%, 100% {
+                opacity: 1;
+                transform: scale(1);
+                box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4);
+            }
+            50% {
+                opacity: 0.8;
+                transform: scale(1.1);
+                box-shadow: 0 0 0 8px rgba(239, 68, 68, 0);
+            }
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .server-toggle-btn {
+            transition: all 0.2s ease;
+        }
+        
+        .server-toggle-btn:hover {
+            transform: scale(1.05);
+        }
+        
+        .server-toggle-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none !important;
+        }
+        
+        #servers-container {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        
+        #servers-container::-webkit-scrollbar {
+            width: 6px;
+        }
+        
+        #servers-container::-webkit-scrollbar-track {
+            background: rgba(255,255,255,0.1);
+            border-radius: 3px;
+        }
+        
+        #servers-container::-webkit-scrollbar-thumb {
+            background: rgba(255,255,255,0.3);
+            border-radius: 3px;
+        }
+        
+        #servers-container::-webkit-scrollbar-thumb:hover {
+            background: rgba(255,255,255,0.5);
+        }
     </style>
 </head>
 <body class="min-h-screen bg-gradient-to-br from-blue-900 via-blue-800 to-blue-900 text-white p-5 font-sans">
@@ -1452,6 +1551,22 @@ async def dashboard(code: str = None, state: str = None, error: str = None):
                 <div class="flex-1 overflow-y-auto overflow-x-hidden">
                     <div id="dashboard-overview"></div>
                     <div id="dashboards-grid" class="grid grid-cols-1 gap-3 mb-4"></div>
+                    
+                    <!-- Server Discovery Section -->
+                    <div class="mt-6 pt-4 border-t border-white border-opacity-20">
+                        <div class="flex items-center justify-between mb-3">
+                            <h3 class="text-white text-sm font-semibold flex items-center gap-2">
+                                🔍 Discovered Python Servers
+                            </h3>
+                            <button onclick="refreshDiscoveredServers()" 
+                                    class="bg-blue-500 hover:bg-blue-600 text-white px-2 py-1 rounded text-xs flex items-center gap-1">
+                                <span id="refresh-discovered-icon">🔄</span> Scan
+                            </button>
+                        </div>
+                        <div id="discovered-servers-container" class="space-y-2">
+                            <div class="text-gray-400 text-xs">Click Scan to discover running Python servers...</div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -1975,7 +2090,8 @@ async def dashboard(code: str = None, state: str = None, error: str = None):
                 loadData('/api/music', 'music-content'),
                 loadData('/api/vanity', 'vanity-content'),
                 loadData('/api/liked-items', 'liked-items-content'),
-                loadDashboardProjects()
+                loadDashboardProjects(),
+                refreshDiscoveredServers()
             ]);
             
             // Make items clickable after all data is loaded
@@ -2539,6 +2655,285 @@ async def dashboard(code: str = None, state: str = None, error: str = None):
 
         async function viewWebsiteLogs(siteName) {
             console.log(`Viewing logs for website: ${siteName}`);
+        }
+        
+        // ===================================================================
+        // SERVER DISCOVERY FUNCTIONS
+        // ===================================================================
+        
+        async function refreshDiscoveredServers() {
+            const container = document.getElementById('discovered-servers-container');
+            const refreshIcon = document.getElementById('refresh-discovered-icon');
+            
+            if (!container) return;
+            
+            // Animate refresh icon
+            if (refreshIcon) {
+                refreshIcon.style.animation = 'spin 1s linear infinite';
+            }
+            
+            container.innerHTML = '<div class="text-gray-400 text-xs">🔍 Scanning for Python servers...</div>';
+            
+            try {
+                // Get all running servers
+                const serversResponse = await fetch('/api/servers');
+                const serversData = await serversResponse.json();
+                
+                // Get known dashboards
+                const dashboardsResponse = await fetch('/api/dashboards');
+                const dashboardsData = await dashboardsResponse.json();
+                
+                if (!serversData.success) {
+                    container.innerHTML = `<div class="text-red-400 text-xs">❌ ${serversData.error || 'Failed to discover servers'}</div>`;
+                    return;
+                }
+                
+                const servers = serversData.servers || [];
+                const knownDashboards = dashboardsData.projects || [];
+                
+                // Filter out servers that are already mapped to dashboards
+                const knownPorts = new Set(knownDashboards.map(d => d.port).filter(p => p));
+                const unmappedServers = servers.filter(server => !knownPorts.has(server.port));
+                
+                if (unmappedServers.length === 0) {
+                    container.innerHTML = '<div class="text-gray-400 text-xs">✅ No unmapped servers found. All servers are tracked.</div>';
+                    return;
+                }
+                
+                // Display unmapped servers
+                container.innerHTML = unmappedServers.map(server => {
+                    const statusColor = server.status === 'running' ? 'bg-green-500' : 'bg-red-500';
+                    const canControl = server.can_control;
+                    const uptime = server.start_time ? formatUptime(Date.now() / 1000 - server.start_time) : 'Unknown';
+                    
+                    return `
+                        <div class="bg-white bg-opacity-5 rounded-lg p-3 border border-white border-opacity-10">
+                            <div class="flex items-start justify-between gap-2">
+                                <div class="flex-1 min-w-0">
+                                    <div class="flex items-center gap-2 mb-1">
+                                        <span class="${statusColor} w-2 h-2 rounded-full animate-pulse"></span>
+                                        <span class="text-white text-xs font-semibold">${server.name}</span>
+                                        <span class="text-gray-400 text-xs">${server.type}</span>
+                                    </div>
+                                    
+                                    <div class="text-xs text-gray-400 mb-2 space-y-1">
+                                        <div class="flex items-center gap-2">
+                                            <span class="text-gray-500">Port:</span>
+                                            <span class="text-blue-300 font-mono">${server.port}</span>
+                                        </div>
+                                        ${server.cmdline ? `
+                                        <div class="flex items-start gap-2">
+                                            <span class="text-gray-500 shrink-0">Path:</span>
+                                            <span class="text-gray-300 font-mono text-xs break-all">${extractPath(server.cmdline)}</span>
+                                        </div>
+                                        ` : ''}
+                                        ${server.pid ? `
+                                        <div class="flex items-center gap-2">
+                                            <span class="text-gray-500">PID:</span>
+                                            <span class="text-gray-300 font-mono">${server.pid}</span>
+                                        </div>
+                                        ` : ''}
+                                        <div class="flex items-center gap-2">
+                                            <span class="text-gray-500">Uptime:</span>
+                                            <span class="text-gray-300">${uptime}</span>
+                                        </div>
+                                        <div class="flex items-center gap-2">
+                                            <span class="text-gray-500">Memory:</span>
+                                            <span class="text-gray-300">${server.memory_mb.toFixed(1)} MB</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div class="flex flex-col gap-1 shrink-0">
+                                    <a href="${server.url}" target="_blank" 
+                                       class="px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded whitespace-nowrap flex items-center gap-1"
+                                       title="Open in browser">
+                                        🌐 Open
+                                    </a>
+                                    ${canControl ? `
+                                    <button onclick="stopDiscoveredServer(${server.port}, '${server.name}')" 
+                                            class="px-2 py-1 bg-red-600 hover:bg-red-700 text-white text-xs rounded whitespace-nowrap flex items-center gap-1"
+                                            title="Stop server">
+                                        ⏹️ Stop
+                                    </button>
+                                    ` : `
+                                    <button disabled 
+                                            class="px-2 py-1 bg-gray-600 text-gray-400 text-xs rounded whitespace-nowrap cursor-not-allowed"
+                                            title="Cannot control (no PID)">
+                                        🔒 Locked
+                                    </button>
+                                    `}
+                                    <button onclick="mapServerToDashboard(${server.port}, '${server.name}', '${extractPath(server.cmdline)}')" 
+                                            class="px-2 py-1 bg-green-600 hover:bg-green-700 text-white text-xs rounded whitespace-nowrap flex items-center gap-1"
+                                            title="Add to dashboards">
+                                        ➕ Map
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+                
+            } catch (error) {
+                console.error('Error discovering servers:', error);
+                container.innerHTML = `<div class="text-red-400 text-xs">❌ Error: ${error.message}</div>`;
+            } finally {
+                if (refreshIcon) {
+                    refreshIcon.style.animation = '';
+                }
+            }
+        }
+        
+        function extractPath(cmdline) {
+            if (!cmdline) return 'Unknown';
+            
+            // Try to find a .py file path
+            const pyMatch = cmdline.match(/([^\s]+\.py)/);
+            if (pyMatch) {
+                const fullPath = pyMatch[1];
+                // Get the directory containing the .py file
+                const parts = fullPath.split('/');
+                if (parts.length > 1) {
+                    return parts.slice(0, -1).join('/') || '/';
+                }
+                return fullPath;
+            }
+            
+            // Try to find a directory path
+            const pathMatch = cmdline.match(/(?:cd\s+)?([/~][^\s]+)/);
+            if (pathMatch) {
+                return pathMatch[1];
+            }
+            
+            return cmdline.substring(0, 60) + (cmdline.length > 60 ? '...' : '');
+        }
+        
+        function formatUptime(seconds) {
+            if (seconds < 60) return `${Math.floor(seconds)}s`;
+            if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
+            if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
+            return `${Math.floor(seconds / 86400)}d ${Math.floor((seconds % 86400) / 3600)}h`;
+        }
+        
+        async function stopDiscoveredServer(port, name) {
+            if (!confirm(`Stop server "${name}" on port ${port}?`)) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`/api/servers/${port}/stop`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    alert(`✅ Server stopped successfully!`);
+                    // Refresh the list
+                    await refreshDiscoveredServers();
+                } else {
+                    alert(`❌ Failed to stop server: ${data.error || 'Unknown error'}`);
+                }
+            } catch (error) {
+                console.error('Error stopping server:', error);
+                alert(`❌ Error: ${error.message}`);
+            }
+        }
+        
+        async function mapServerToDashboard(port, name, path) {
+            // Create a modal to map the server
+            const modal = document.createElement('div');
+            modal.className = 'modal-overlay';
+            modal.innerHTML = `
+                <div class="modal-content max-w-md">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-lg font-semibold text-white">Map Server to Dashboard</h3>
+                        <button onclick="this.closest('.modal-overlay').remove()" class="text-white hover:text-red-400">✕</button>
+                    </div>
+                    <form id="map-server-form" class="space-y-3">
+                        <div>
+                            <label class="block text-white text-sm mb-1">Dashboard Name:</label>
+                            <input type="text" id="map-name" value="${name}" 
+                                   class="w-full px-3 py-2 bg-gray-800 text-white rounded border border-gray-600 focus:border-blue-500" required>
+                        </div>
+                        <div>
+                            <label class="block text-white text-sm mb-1">Port:</label>
+                            <input type="number" id="map-port" value="${port}" 
+                                   class="w-full px-3 py-2 bg-gray-800 text-white rounded border border-gray-600 focus:border-blue-500" required>
+                        </div>
+                        <div>
+                            <label class="block text-white text-sm mb-1">Path:</label>
+                            <input type="text" id="map-path" value="${path}" 
+                                   class="w-full px-3 py-2 bg-gray-800 text-white rounded border border-gray-600 focus:border-blue-500" required>
+                        </div>
+                        <div>
+                            <label class="block text-white text-sm mb-1">Type:</label>
+                            <select id="map-type" class="w-full px-3 py-2 bg-gray-800 text-white rounded border border-gray-600 focus:border-blue-500">
+                                <option value="dashboard">Regular Dashboard</option>
+                                <option value="api">API Server</option>
+                                <option value="web_app">Web Application</option>
+                                <option value="microservice">Microservice</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-white text-sm mb-1">Description (optional):</label>
+                            <textarea id="map-description" rows="2"
+                                      class="w-full px-3 py-2 bg-gray-800 text-white rounded border border-gray-600 focus:border-blue-500"
+                                      placeholder="Brief description of this server..."></textarea>
+                        </div>
+                        <div class="flex gap-2 pt-2">
+                            <button type="submit" class="flex-1 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded">
+                                ➕ Add to Dashboards
+                            </button>
+                            <button type="button" onclick="this.closest('.modal-overlay').remove()" 
+                                    class="px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded">
+                                Cancel
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            `;
+            
+            document.body.appendChild(modal);
+            
+            // Handle form submission
+            document.getElementById('map-server-form').addEventListener('submit', async (e) => {
+                e.preventDefault();
+                
+                const formData = {
+                    name: document.getElementById('map-name').value,
+                    port: parseInt(document.getElementById('map-port').value),
+                    path: document.getElementById('map-path').value,
+                    type: document.getElementById('map-type').value,
+                    description: document.getElementById('map-description').value,
+                    url: `http://localhost:${document.getElementById('map-port').value}`,
+                    is_active: true
+                };
+                
+                try {
+                    const response = await fetch('/api/dashboards/add', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(formData)
+                    });
+                    
+                    const data = await response.json();
+                    
+                    if (data.success) {
+                        alert(`✅ Server mapped to dashboard successfully!`);
+                        modal.remove();
+                        // Refresh both lists
+                        await refreshDiscoveredServers();
+                        await loadDashboardProjects();
+                    } else {
+                        alert(`❌ Failed to map server: ${data.error || 'Unknown error'}`);
+                    }
+                } catch (error) {
+                    console.error('Error mapping server:', error);
+                    alert(`❌ Error: ${error.message}`);
+                }
+            });
         }
         
         // Start a dashboard and monitor its status

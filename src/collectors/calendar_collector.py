@@ -4,6 +4,7 @@ Google Calendar data collector using Google Calendar API.
 
 import os
 import logging
+import re
 from datetime import datetime
 from typing import List, Dict, Any
 from pathlib import Path
@@ -175,7 +176,8 @@ class CalendarCollector:
                 'is_all_day': 'date' in event['start'],
                 'duration_minutes': self._calculate_duration(start_dt, end_dt),
                 'is_meeting': self._is_meeting(event),
-                'is_important': self._is_important_event(event)
+                'is_important': self._is_important_event(event),
+                'todos': self._extract_todos(event)
             }
             
             return event_data
@@ -223,6 +225,52 @@ class CalendarCollector:
         
         text_to_check = f"{summary} {description}"
         return any(keyword in text_to_check for keyword in important_keywords)
+
+    def _extract_todos(self, event: Dict[str, Any]) -> List[Dict[str, str]]:
+        """
+        Extract TODO items from calendar event description.
+        
+        Args:
+            event: Calendar event dictionary
+            
+        Returns:
+            List of TODO items with context
+        """
+        todos = []
+        description = event.get('description', '')
+        
+        if not description:
+            return todos
+        
+        # Match various TODO patterns
+        patterns = [
+            r'- \[ \]\s+(.+)',  # - [ ] Task
+            r'TODO:\s+(.+)',     # TODO: Task
+            r'@todo\s+(.+)',     # @todo Task
+            r'Action\s*Item:\s+(.+)',   # Action Item: Task
+            r'Action:\s+(.+)',   # Action: Task
+            r'Follow\s*up:\s+(.+)',  # Follow up: Task
+        ]
+        
+        for pattern in patterns:
+            matches = re.finditer(pattern, description, re.IGNORECASE | re.MULTILINE)
+            for match in matches:
+                task_text = match.group(1).strip()
+                
+                # Get surrounding context (line before and after)
+                start = max(0, match.start() - 50)
+                end = min(len(description), match.end() + 50)
+                context = description[start:end].strip()
+                
+                todos.append({
+                    'text': task_text,
+                    'context': context,
+                    'pattern': pattern,
+                    'event_id': event.get('id'),
+                    'event_summary': event.get('summary', 'No Title')
+                })
+        
+        return todos
 
     async def get_upcoming_events(self, days: int = 7) -> List[Dict[str, Any]]:
         """Get upcoming calendar events for the next specified number of days."""

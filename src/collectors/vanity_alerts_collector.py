@@ -485,6 +485,7 @@ class VanityAlertsCollector:
                            confidence_score, is_liked, is_validated, snippet
                     FROM vanity_alerts 
                     WHERE timestamp > ? 
+                    AND (is_dismissed IS NULL OR is_dismissed = 0)
                     ORDER BY confidence_score DESC, timestamp DESC
                 ''', (cutoff_date,))
                 

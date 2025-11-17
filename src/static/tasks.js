@@ -19,14 +19,20 @@ let taskData = {
 async function initializeTaskManagement() {
     console.log('Initializing Task Management...');
     
-    // Load tasks on startup
-    await loadTasks();
+    // Load tasks and suggested todos on startup
+    await Promise.all([
+        loadTasks(),
+        loadSuggestedTodos()
+    ]);
     
     // Set up event listeners
     setupTaskEventListeners();
     
     // Auto-refresh every 30 seconds
-    setInterval(loadTasks, 30000);
+    setInterval(() => {
+        loadTasks();
+        loadSuggestedTodos();
+    }, 30000);
 }
 
 // Load tasks from API
@@ -630,6 +636,128 @@ function showNotification(message, type = 'info') {
     }, 5000);
 }
 
+// Suggested Todos Functions
+async function loadSuggestedTodos() {
+    try {
+        const response = await fetch('/api/suggested-todos?status=pending');
+        const data = await response.json();
+        
+        if (data.success && data.suggestions && data.suggestions.length > 0) {
+            renderSuggestedTodos(data.suggestions);
+            document.getElementById('suggested-todos-section').style.display = 'block';
+        } else {
+            document.getElementById('suggested-todos-section').style.display = 'none';
+        }
+    } catch (error) {
+        console.error('Error loading suggested todos:', error);
+    }
+}
+
+function renderSuggestedTodos(suggestions) {
+    const container = document.getElementById('suggested-todos-list');
+    const countBadge = document.getElementById('suggested-count');
+    
+    countBadge.textContent = suggestions.length;
+    
+    container.innerHTML = suggestions.map(suggestion => `
+        <div class="bg-black bg-opacity-30 rounded p-2 text-sm">
+            <div class="flex justify-between items-start gap-2">
+                <div class="flex-1 min-w-0">
+                    <div class="text-white font-medium text-xs mb-1">${escapeHtml(suggestion.title)}</div>
+                    <div class="text-gray-300 text-xs mb-1">${escapeHtml(suggestion.source_title || suggestion.source)}</div>
+                    ${suggestion.context ? `<div class="text-gray-400 text-xs truncate">${escapeHtml(suggestion.context).substring(0, 80)}...</div>` : ''}
+                </div>
+                <div class="flex gap-1 shrink-0">
+                    <button onclick="approveSuggestedTodo('${suggestion.id}')" 
+                            class="px-2 py-1 bg-green-600 hover:bg-green-700 text-white rounded text-xs"
+                            title="Approve and add to tasks">
+                        ✓
+                    </button>
+                    <button onclick="rejectSuggestedTodo('${suggestion.id}')" 
+                            class="px-2 py-1 bg-red-600 hover:bg-red-700 text-white rounded text-xs"
+                            title="Reject suggestion">
+                        ✗
+                    </button>
+                </div>
+            </div>
+        </div>
+    `).join('');
+}
+
+async function approveSuggestedTodo(suggestionId) {
+    try {
+        const response = await fetch(`/api/suggested-todos/${suggestionId}/approve`, {
+            method: 'POST'
+        });
+        const data = await response.json();
+        
+        if (data.success) {
+            // Reload both suggested todos and regular tasks
+            await Promise.all([
+                loadSuggestedTodos(),
+                loadTasks()
+            ]);
+            
+            // Show success message
+            showTaskNotification('Task approved and added to your list', 'success');
+        } else {
+            showTaskNotification('Failed to approve task', 'error');
+        }
+    } catch (error) {
+        console.error('Error approving suggestion:', error);
+        showTaskNotification('Error approving task', 'error');
+    }
+}
+
+async function rejectSuggestedTodo(suggestionId) {
+    try {
+        const response = await fetch(`/api/suggested-todos/${suggestionId}/reject`, {
+            method: 'POST'
+        });
+        const data = await response.json();
+        
+        if (data.success) {
+            // Reload suggested todos
+            await loadSuggestedTodos();
+            showTaskNotification('Suggestion rejected', 'info');
+        } else {
+            showTaskNotification('Failed to reject suggestion', 'error');
+        }
+    } catch (error) {
+        console.error('Error rejecting suggestion:', error);
+        showTaskNotification('Error rejecting suggestion', 'error');
+    }
+}
+
+function showTaskNotification(message, type = 'info') {
+    // Simple notification - you can enhance this
+    const colors = {
+        success: 'bg-green-600',
+        error: 'bg-red-600',
+        info: 'bg-blue-600'
+    };
+    
+    const notification = document.createElement('div');
+    notification.className = `fixed top-4 right-4 ${colors[type]} text-white px-4 py-2 rounded shadow-lg z-50`;
+    notification.textContent = message;
+    document.body.appendChild(notification);
+    
+    setTimeout(() => {
+        notification.remove();
+    }, 3000);
+}
+
+function escapeHtml(unsafe) {
+    if (!unsafe) return '';
+    return unsafe
+        .toString()
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+}
+
 // Export functions for global use
 window.taskManagement = {
     initializeTaskManagement,
@@ -637,13 +765,16 @@ window.taskManagement = {
     createTask,
     updateTaskStatus,
     deleteTask,
-    syncWithTickTick
+    syncWithTickTick,
+    loadSuggestedTodos
 };
 
 // Make edit functions globally available
 window.editTaskContent = editTaskContent;
 window.cancelEditTaskContent = cancelEditTaskContent;
 window.saveTaskContent = saveTaskContent;
+window.approveSuggestedTodo = approveSuggestedTodo;
+window.rejectSuggestedTodo = rejectSuggestedTodo;
 
 // Auto-initialize if DOM is already loaded
 if (document.readyState === 'loading') {

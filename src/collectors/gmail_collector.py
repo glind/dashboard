@@ -373,26 +373,26 @@ class GmailCollector:
             # Get inbox summary
             profile = self.service.users().getProfile(userId='me').execute()
             
-            # Get unread messages count
+            # Get unread messages count (exclude drafts)
             unread_results = self.service.users().messages().list(
                 userId='me',
-                q='is:unread',
+                q='is:unread -in:drafts',
                 maxResults=500
             ).execute()
             unread_count = len(unread_results.get('messages', []))
             
-            # Get important/starred messages
+            # Get important/starred messages (exclude drafts)
             important_results = self.service.users().messages().list(
                 userId='me',
-                q='is:starred OR is:important',
+                q='(is:starred OR is:important) -in:drafts',
                 maxResults=100
             ).execute()
             important_count = len(important_results.get('messages', []))
             
-            # Get recent messages (last 7 days)
+            # Get recent messages (last 7 days, exclude drafts)
             recent_results = self.service.users().messages().list(
                 userId='me',
-                q='newer_than:7d',
+                q='newer_than:7d -in:drafts',
                 maxResults=500
             ).execute()
             recent_count = len(recent_results.get('messages', []))

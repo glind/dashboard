@@ -198,8 +198,10 @@ class GoogleDriveNotesCollector:
             from googleapiclient.discovery import build
             from pathlib import Path
             
-            # Try to load existing token
+            # Try to load existing token (try both names)
             token_path = Path(__file__).parent.parent.parent / 'tokens' / 'google_token.json'
+            if not token_path.exists():
+                token_path = Path(__file__).parent.parent.parent / 'tokens' / 'google_credentials.json'
             
             if not token_path.exists():
                 logger.error("Google token not found. Please authenticate first.")
@@ -302,10 +304,17 @@ class GoogleDriveNotesCollector:
                 mimeType='text/plain'
             ).execute()
             
-            return content.decode('utf-8')
+            # Content is already bytes from the API
+            if isinstance(content, bytes):
+                return content.decode('utf-8')
+            elif isinstance(content, str):
+                return content
+            else:
+                logger.warning(f"Unexpected content type: {type(content)}")
+                return str(content)
             
         except Exception as e:
-            logger.error(f"Error getting document content: {e}")
+            logger.error(f"Error getting document content for {doc_id}: {e}", exc_info=True)
             return ""
     
     def _extract_todos_from_gdoc(self, content: str) -> List[Dict[str, str]]:

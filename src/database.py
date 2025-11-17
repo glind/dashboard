@@ -144,6 +144,26 @@ class DatabaseManager:
                 )
             """)
             
+            # Suggested todos table (awaiting user approval)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS suggested_todos (
+                    id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    description TEXT,
+                    context TEXT,
+                    source TEXT NOT NULL,
+                    source_id TEXT,
+                    source_title TEXT,
+                    source_url TEXT,
+                    priority TEXT DEFAULT 'medium',
+                    due_date TIMESTAMP,
+                    status TEXT DEFAULT 'pending',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    reviewed_at TIMESTAMP,
+                    auto_extracted INTEGER DEFAULT 1
+                )
+            """)
+            
             # News articles table
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS news_articles (
@@ -1138,6 +1158,141 @@ class DatabaseManager:
                 
         except Exception as e:
             logger.error(f"Error updating todo source_id: {e}")
+            return False
+
+    # Suggested todos methods
+    
+    def add_suggested_todo(self, todo_data: Dict[str, Any]) -> str:
+        """Add a new suggested todo awaiting user approval."""
+        import uuid
+        
+        try:
+            todo_id = todo_data.get('id', str(uuid.uuid4()))
+            
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT OR REPLACE INTO suggested_todos 
+                    (id, title, description, context, source, source_id, source_title, source_url, priority, due_date, status)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    todo_id,
+                    todo_data.get('title'),
+                    todo_data.get('description', ''),
+                    todo_data.get('context', ''),
+                    todo_data.get('source'),
+                    todo_data.get('source_id'),
+                    todo_data.get('source_title'),
+                    todo_data.get('source_url'),
+                    todo_data.get('priority', 'medium'),
+                    todo_data.get('due_date'),
+                    'pending'
+                ))
+                conn.commit()
+                return todo_id
+                
+        except Exception as e:
+            logger.error(f"Error adding suggested todo: {e}")
+            return None
+
+    def get_suggested_todos(self, status: str = 'pending') -> List[Dict[str, Any]]:
+        """Get suggested todos by status."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT id, title, description, context, source, source_id, source_title, 
+                           source_url, priority, due_date, status, created_at, reviewed_at
+                    FROM suggested_todos
+                    WHERE status = ?
+                    ORDER BY created_at DESC
+                """, (status,))
+                
+                rows = cursor.fetchall()
+                todos = []
+                for row in rows:
+                    todos.append({
+                        'id': row[0],
+                        'title': row[1],
+                        'description': row[2],
+                        'context': row[3],
+                        'source': row[4],
+                        'source_id': row[5],
+                        'source_title': row[6],
+                        'source_url': row[7],
+                        'priority': row[8],
+                        'due_date': row[9],
+                        'status': row[10],
+                        'created_at': row[11],
+                        'reviewed_at': row[12]
+                    })
+                
+                return todos
+                
+        except Exception as e:
+            logger.error(f"Error getting suggested todos: {e}")
+            return []
+
+    def approve_suggested_todo(self, suggestion_id: str) -> bool:
+        """Approve a suggested todo and move it to the main todos list."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Get the suggestion
+                cursor.execute("SELECT * FROM suggested_todos WHERE id = ?", (suggestion_id,))
+                row = cursor.fetchone()
+                
+                if not row:
+                    logger.error(f"Suggested todo {suggestion_id} not found")
+                    return False
+                
+                # Create the actual todo
+                import uuid
+                todo_id = str(uuid.uuid4())
+                cursor.execute("""
+                    INSERT INTO universal_todos 
+                    (id, title, description, source, source_id, priority, due_date, status)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')
+                """, (
+                    todo_id,
+                    row[1],  # title
+                    row[2] or row[3],  # description or context
+                    row[4],  # source
+                    row[5],  # source_id
+                    row[8],  # priority
+                    row[9]   # due_date
+                ))
+                
+                # Mark suggestion as approved
+                cursor.execute("""
+                    UPDATE suggested_todos 
+                    SET status = 'approved', reviewed_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                """, (suggestion_id,))
+                
+                conn.commit()
+                return True
+                
+        except Exception as e:
+            logger.error(f"Error approving suggested todo: {e}")
+            return False
+
+    def reject_suggested_todo(self, suggestion_id: str) -> bool:
+        """Reject a suggested todo."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    UPDATE suggested_todos 
+                    SET status = 'rejected', reviewed_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                """, (suggestion_id,))
+                conn.commit()
+                return cursor.rowcount > 0
+                
+        except Exception as e:
+            logger.error(f"Error rejecting suggested todo: {e}")
             return False
 
     # Content lifecycle management methods

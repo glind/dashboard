@@ -3165,7 +3165,10 @@ Then ask me: "What would you like to do with this email?"`,
         const html = this.vanityAlerts.map(alert => {
             const feedback = this.feedbackData[`vanity-${alert.id}`] || null;
             return `
-            <div class="bg-gray-800 rounded-xl p-6 border border-gray-700">
+            <div class="bg-gray-800 rounded-xl p-6 border border-gray-700 relative">
+                <button onclick="dismissAlert('${alert.id}')" 
+                        class="absolute top-2 right-2 text-gray-400 hover:text-white px-2 py-1 rounded hover:bg-gray-700" 
+                        title="Dismiss">✕</button>
                 <div class="flex items-start gap-3 mb-3">
                     <span class="text-3xl">${this.getAlertIcon(alert.type)}</span>
                     <div class="flex-1">
@@ -4382,12 +4385,31 @@ Then ask me: "What would you like to do with this email?"`,
     applyBackground() {
         if (this.backgroundImages.length === 0) return;
         
+        const image = this.backgroundImages[this.currentBackgroundIndex];
+        
+        // Apply to ALL visible sections if full-page background is enabled
+        if (this.fullPageBackground) {
+            const allSections = document.querySelectorAll('.section-content:not(.hidden)');
+            allSections.forEach(section => {
+                section.style.backgroundImage = `linear-gradient(rgba(0,0,0,0.7), rgba(0,0,0,0.85)), url(${image.url}?w=1920&q=85)`;
+                section.style.backgroundSize = 'cover';
+                section.style.backgroundPosition = 'center';
+                section.style.backgroundAttachment = 'fixed';
+                
+                // Make all cards semi-transparent
+                const cards = section.querySelectorAll('.bg-gray-800, .bg-gray-700');
+                cards.forEach(card => {
+                    card.style.backgroundColor = 'rgba(31, 41, 55, 0.85)';
+                    card.style.webkitBackdropFilter = 'blur(10px)';
+                    card.style.backdropFilter = 'blur(10px)';
+                });
+            });
+        }
+        
+        // Apply header image to overview section specifically
         const section = document.getElementById('section-overview');
         if (!section) return;
         
-        const image = this.backgroundImages[this.currentBackgroundIndex];
-        
-        // ALWAYS apply header image first
         const header = section.querySelector('.max-w-7xl');
         if (header) {
             // Create header image container if it doesn't exist
@@ -4437,7 +4459,7 @@ Then ask me: "What would you like to do with this email?"`,
             `;
         }
         
-        // THEN apply full-page background if enabled
+        // Apply full-page background to overview if enabled
         if (this.fullPageBackground) {
             // Apply full-page background
             section.style.backgroundImage = `linear-gradient(rgba(0,0,0,0.7), rgba(0,0,0,0.85)), url(${image.url}?w=1920&q=85)`;
@@ -5399,4 +5421,199 @@ function showNotification(message, type = 'info') {
         setTimeout(() => notification.remove(), 300);
     }, 3000);
 }
+
+// Google Authentication
+async function handleGoogleAuth() {
+    try {
+        const statusResponse = await fetch('/api/auth/google/status');
+        const status = await statusResponse.json();
+        
+        if (status.authenticated && !status.expired) {
+            showNotification('✅ Already connected to Google', 'success');
+            return;
+        }
+        
+        // Open OAuth flow in popup
+        const width = 500;
+        const height = 600;
+        const left = (screen.width - width) / 2;
+        const top = (screen.height - height) / 2;
+        
+        const popup = window.open(
+            '/auth/google',
+            'GoogleAuth',
+            `width=${width},height=${height},left=${left},top=${top}`
+        );
+        
+        // Poll for popup close and check auth status
+        const pollTimer = setInterval(async () => {
+            if (popup.closed) {
+                clearInterval(pollTimer);
+                await updateGoogleAuthButton();
+                showNotification('Google authentication completed!', 'success');
+            }
+        }, 1000);
+    } catch (error) {
+        console.error('Error with Google auth:', error);
+        showNotification('Error connecting to Google', 'error');
+    }
+}
+
+async function updateGoogleAuthButton() {
+    try {
+        const response = await fetch('/api/auth/google/status');
+        const status = await response.json();
+        
+        const btn = document.getElementById('google-auth-btn');
+        const text = document.getElementById('google-auth-text');
+        
+        if (!btn || !text) return;
+        
+        if (status.authenticated && !status.expired) {
+            btn.className = btn.className.replace('bg-blue-600 hover:bg-blue-700', 'bg-green-600 hover:bg-green-700');
+            text.textContent = '✓ Google Connected';
+        } else if (status.expired) {
+            btn.className = btn.className.replace('bg-blue-600 hover:bg-blue-700', 'bg-yellow-600 hover:bg-yellow-700');
+            text.textContent = '⚠️ Reconnect Google';
+        } else {
+            btn.className = btn.className.replace('bg-green-600 hover:bg-green-700', 'bg-blue-600 hover:bg-blue-700');
+            btn.className = btn.className.replace('bg-yellow-600 hover:bg-yellow-700', 'bg-blue-600 hover:bg-blue-700');
+            text.textContent = 'Connect Google';
+        }
+    } catch (error) {
+        console.error('Error updating Google auth button:', error);
+    }
+}
+
+// Dismiss Vanity Alert
+async function dismissAlert(alertId) {
+    try {
+        const response = await fetch(`/api/vanity-alerts/${alertId}/dismiss`, {
+            method: 'POST'
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            showNotification('Alert dismissed', 'success');
+            // Reload vanity alerts
+            if (window.dataLoader) {
+                await dataLoader.loadVanityAlerts();
+            }
+        } else {
+            showNotification('Failed to dismiss alert', 'error');
+        }
+    } catch (error) {
+        console.error('Error dismissing alert:', error);
+        showNotification('Error dismissing alert', 'error');
+    }
+}
+
+// Suggested Todos Management
+async function loadSuggestedTodos() {
+    try {
+        const response = await fetch('/api/suggested-todos');
+        const data = await response.json();
+        
+        if (data.success && data.suggestions && data.suggestions.length > 0) {
+            renderSuggestedTodos(data.suggestions);
+        } else {
+            document.getElementById('suggested-todos-section').style.display = 'none';
+        }
+    } catch (error) {
+        console.error('Error loading suggested todos:', error);
+    }
+}
+
+function renderSuggestedTodos(suggestions) {
+    const section = document.getElementById('suggested-todos-section');
+    const list = document.getElementById('suggested-todos-list');
+    
+    if (!section || !list) return;
+    
+    const html = suggestions.map(suggestion => `
+        <div class="bg-gray-800 bg-opacity-50 rounded-lg p-3 flex items-start justify-between gap-3">
+            <div class="flex-1">
+                <h4 class="font-semibold text-white">${escapeHtml(suggestion.title)}</h4>
+                ${suggestion.description ? `<p class="text-sm text-gray-400 mt-1">${escapeHtml(suggestion.description)}</p>` : ''}
+                ${suggestion.context ? `<p class="text-xs text-gray-500 mt-1">From: ${escapeHtml(suggestion.context)}</p>` : ''}
+            </div>
+            <div class="flex gap-2">
+                <button onclick="approveSuggestedTodo('${suggestion.id}')" 
+                        class="px-3 py-1 bg-green-600 hover:bg-green-700 text-white text-sm rounded"
+                        title="Add to tasks">
+                    ✓
+                </button>
+                <button onclick="rejectSuggestedTodo('${suggestion.id}')" 
+                        class="px-3 py-1 bg-gray-600 hover:bg-gray-700 text-white text-sm rounded"
+                        title="Dismiss">
+                    ✕
+                </button>
+            </div>
+        </div>
+    `).join('');
+    
+    list.innerHTML = html;
+    section.style.display = 'block';
+}
+
+async function approveSuggestedTodo(suggestionId) {
+    try {
+        const response = await fetch(`/api/suggested-todos/${suggestionId}/approve`, {
+            method: 'POST'
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            showNotification('✅ Task added!', 'success');
+            await loadSuggestedTodos();
+            // Reload tasks if on that section
+            if (window.dataLoader) {
+                await dataLoader.loadTodos();
+            }
+        } else {
+            showNotification('Failed to add task', 'error');
+        }
+    } catch (error) {
+        console.error('Error approving suggestion:', error);
+        showNotification('Error adding task', 'error');
+    }
+}
+
+async function rejectSuggestedTodo(suggestionId) {
+    try {
+        const response = await fetch(`/api/suggested-todos/${suggestionId}/reject`, {
+            method: 'POST'
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            showNotification('Suggestion dismissed', 'success');
+            await loadSuggestedTodos();
+        } else {
+            showNotification('Failed to dismiss suggestion', 'error');
+        }
+    } catch (error) {
+        console.error('Error rejecting suggestion:', error);
+        showNotification('Error dismissing suggestion', 'error');
+    }
+}
+
+function escapeHtml(unsafe) {
+    if (!unsafe) return '';
+    return unsafe
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+}
+
+// Initialize on page load
+document.addEventListener('DOMContentLoaded', async () => {
+    await updateGoogleAuthButton();
+    await loadSuggestedTodos();
+});
 

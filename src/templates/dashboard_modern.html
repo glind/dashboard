@@ -192,6 +192,19 @@
             <div class="p-6 border-b border-gray-700">
                 <h1 class="text-2xl font-bold text-white">📊 Dashboard</h1>
                 <p class="text-sm text-gray-400 mt-1">Personal Hub</p>
+                
+                <!-- Google Auth Button -->
+                <button id="google-auth-btn" onclick="handleGoogleAuth()" class="
+                    mt-3 w-full flex items-center justify-center gap-2 
+                    px-4 py-2 bg-blue-600 hover:bg-blue-700 
+                    text-white text-sm font-medium rounded-lg 
+                    transition-colors shadow-lg
+                ">
+                    <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 488 512">
+                        <path d="M488 261.8C488 403.3 391.1 504 248 504 110.8 504 0 393.2 0 256S110.8 8 248 8c66.8 0 123 24.5 166.3 64.9l-67.5 64.9C258.5 52.6 94.3 116.6 94.3 256c0 86.5 69.1 156.6 153.7 156.6 98.2 0 135-70.4 140.8-106.9H248v-85.3h236.1c2.3 12.7 3.9 24.9 3.9 41.4z"/>
+                    </svg>
+                    <span id="google-auth-text">Connect Google</span>
+                </button>
             </div>
             
             <!-- Navigation -->
@@ -453,6 +466,20 @@
             <section id="section-todos" class="section-content hidden p-8">
                 <div class="max-w-7xl mx-auto">
                     <h2 class="text-3xl font-bold mb-6">Tasks</h2>
+                    
+                    <!-- Suggested Todos Section -->
+                    <div id="suggested-todos-section" class="mb-4" style="display: none;">
+                        <div class="bg-yellow-900 bg-opacity-30 border border-yellow-600 rounded-lg p-4">
+                            <div class="flex items-start justify-between mb-3">
+                                <h3 class="text-lg font-semibold text-yellow-300 flex items-center gap-2">
+                                    <span>💡</span>
+                                    <span>Suggested Tasks</span>
+                                </h3>
+                            </div>
+                            <div id="suggested-todos-list" class="space-y-2 max-h-64 overflow-y-auto"></div>
+                        </div>
+                    </div>
+                    
                     <div id="todos-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
                 </div>
             </section>
@@ -1010,6 +1037,11 @@
             event.target.closest('.nav-link').classList.add('bg-gray-700', 'text-white');
             event.target.closest('.nav-link').classList.remove('text-gray-300');
             
+            // Re-apply background to visible sections
+            if (window.dataLoader && typeof dataLoader.applyBackground === 'function') {
+                dataLoader.applyBackground();
+            }
+            
             // Load section data if needed
             loadSectionData(sectionName);
         }
@@ -1031,6 +1063,10 @@
                     break;
                 case 'todos':
                     dataLoader.loadTodos();
+                    // Also load suggested todos
+                    if (typeof loadSuggestedTodos === 'function') {
+                        loadSuggestedTodos();
+                    }
                     break;
                 case 'calendar':
                     dataLoader.loadCalendar();

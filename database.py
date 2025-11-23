@@ -2524,16 +2524,16 @@ class DatabaseManager:
     def is_safe_sender(self, sender_email: str) -> bool:
         """Check if an email sender is in the safe senders whitelist."""
         try:
-            conn = self.get_connection()
-            cursor = conn.cursor()
-            
-            cursor.execute("""
-                SELECT id FROM safe_email_senders
-                WHERE sender_email = ? COLLATE NOCASE
-            """, (sender_email.lower(),))
-            
-            result = cursor.fetchone()
-            return result is not None
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                cursor.execute("""
+                    SELECT id FROM safe_email_senders
+                    WHERE sender_email = ? COLLATE NOCASE
+                """, (sender_email.lower(),))
+                
+                result = cursor.fetchone()
+                return result is not None
             
         except Exception as e:
             logger.error(f"Error checking safe sender {sender_email}: {e}")
@@ -2542,17 +2542,17 @@ class DatabaseManager:
     def is_safe_domain(self, domain: str) -> bool:
         """Check if a domain has any safe senders."""
         try:
-            conn = self.get_connection()
-            cursor = conn.cursor()
-            
-            cursor.execute("""
-                SELECT id FROM safe_email_senders
-                WHERE sender_domain = ? COLLATE NOCASE
-                LIMIT 1
-            """, (domain.lower(),))
-            
-            result = cursor.fetchone()
-            return result is not None
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                cursor.execute("""
+                    SELECT id FROM safe_email_senders
+                    WHERE sender_domain = ? COLLATE NOCASE
+                    LIMIT 1
+                """, (domain.lower(),))
+                
+                result = cursor.fetchone()
+                return result is not None
             
         except Exception as e:
             logger.error(f"Error checking safe domain {domain}: {e}")

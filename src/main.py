@@ -1015,6 +1015,12 @@ async def get_github():
     except Exception as e:
         return {"error": str(e)}
 
+@app.get("/api/health")
+async def health_check():
+    """Health check endpoint for monitoring"""
+    return {"status": "healthy", "timestamp": datetime.now().isoformat()}
+
+
 @app.get("/api/ticktick")
 async def get_ticktick():
     """Get TickTick tasks"""

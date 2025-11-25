@@ -1,0 +1,18 @@
+#!/bin/bash
+
+# Get the directory where this app bundle is located
+APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../" && pwd)"
+
+# Check if already running
+if pgrep -f "forge_controller_app.py" > /dev/null; then
+    osascript -e 'display notification "Forge Controller is already running. Check your menu bar." with title "Forge Controller"'
+    exit 0
+fi
+
+# Open a terminal and run the installer
+osascript <<-APPLESCRIPT
+    tell application "Terminal"
+        activate
+        do script "cd '$APP_DIR' && ./install.sh && echo '' && echo '🚀 Launching Forge Controller...' && nohup python3 forge_controller_app.py > /dev/null 2>&1 & echo 'Forge Controller is running in the menu bar.' && echo 'You can close this window - the app will keep running.' && sleep 2"
+    end tell
+APPLESCRIPT

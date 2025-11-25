@@ -326,7 +326,8 @@ class DashboardDataLoader {
                         <div class="flex flex-wrap gap-2 text-xs mb-3">
                             ${todo.priority ? `<span class="bg-${this.getPriorityColor(todo.priority)}-600 px-2 py-1 rounded">${todo.priority}</span>` : ''}
                             ${todo.due_date ? `<span class="bg-gray-700 px-2 py-1 rounded">📅 ${this.formatDate(todo.due_date)}</span>` : ''}
-                            ${todo.source ? `<span class="bg-blue-700 px-2 py-1 rounded">${todo.source}</span>` : ''}
+                            ${todo.source ? `<span class="bg-blue-700 px-2 py-1 rounded">${this.escapeHtml(todo.source)}</span>` : ''}
+                            ${todo.source_url ? `<span class="bg-purple-700 px-2 py-1 rounded">🔗 Linked</span>` : ''}
                         </div>
                         <div class="flex gap-1 pt-2 border-t border-gray-700" onclick="event.stopPropagation()">
                             <button onclick="dataLoader.deleteTodo('${this.escapeHtml(todo.id)}')" 
@@ -2135,12 +2136,56 @@ class DashboardDataLoader {
         const todo = this.todos.find(t => t.id === id);
         if (!todo) return;
         
+        // Determine source icon
+        const sourceIcon = {
+            'email': '📧',
+            'calendar': '📅',
+            'note': '📝',
+            'ticktick': '✓',
+            'default': '📌'
+        }[todo.source?.toLowerCase()] || '📌';
+        
+        const sourceButton = todo.source_url ? `
+            <button onclick="openSourceContent('${this.escapeHtml(todo.id)}', '${this.escapeHtml(todo.source_url)}')" 
+                    class="w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-semibold">
+                🔗 View Original ${this.escapeHtml(todo.source_title || todo.source || 'Source')}
+            </button>
+        ` : '';
+        
         const content = `
             <div class="space-y-4">
-                <h1 class="text-2xl font-bold">${this.escapeHtml(todo.title)}</h1>
-                ${todo.description ? `<p class="text-gray-300">${this.escapeHtml(todo.description)}</p>` : ''}
-                ${todo.due_date ? `<p class="text-gray-400">Due: ${this.formatDate(todo.due_date)}</p>` : ''}
-                ${todo.source ? `<p class="text-gray-400">Source: ${this.escapeHtml(todo.source)}</p>` : ''}
+                <div class="flex items-center gap-3 mb-4">
+                    <span class="text-3xl">${sourceIcon}</span>
+                    <div>
+                        <p class="text-xs font-semibold text-gray-400 uppercase">${this.escapeHtml(todo.source || 'Task')}</p>
+                        <h1 class="text-2xl font-bold">${this.escapeHtml(todo.title)}</h1>
+                    </div>
+                </div>
+                
+                ${todo.description ? `<p class="text-gray-300 bg-gray-700 rounded-lg p-4">${this.escapeHtml(todo.description)}</p>` : ''}
+                
+                <div class="grid grid-cols-2 gap-3">
+                    ${todo.priority ? `
+                        <div class="bg-gray-700 rounded-lg p-3">
+                            <p class="text-xs text-gray-400">Priority</p>
+                            <p class="text-lg font-semibold">⚡ ${this.escapeHtml(todo.priority)}</p>
+                        </div>
+                    ` : ''}
+                    ${todo.due_date ? `
+                        <div class="bg-gray-700 rounded-lg p-3">
+                            <p class="text-xs text-gray-400">Due Date</p>
+                            <p class="text-lg font-semibold">📅 ${this.formatDate(todo.due_date)}</p>
+                        </div>
+                    ` : ''}
+                </div>
+                
+                ${sourceButton}
+                
+                ${todo.source ? `
+                    <div class="text-sm text-gray-400 border-t border-gray-700 pt-4">
+                        <p>📌 Source: <span class="text-gray-300">${this.escapeHtml(todo.source_title || todo.source)}</span></p>
+                    </div>
+                ` : ''}
             </div>
         `;
         
@@ -3391,7 +3436,7 @@ Then ask me: "What would you like to do with this email?"`,
                 if (data.band_mentions && data.band_mentions.length > 0) {
                     allMusic.push(...data.band_mentions.slice(0, 5).map(mention => ({
                         id: `band-${mention.url}`,
-                        title: `My Evil Robot Army mentioned on ${mention.platform}`,
+                        title: `Artist mentioned on ${mention.platform}`,
                         artist: mention.source || mention.platform,
                         description: mention.text,
                         type: 'mention',
@@ -5317,10 +5362,10 @@ function updateProjectTypeDefaults() {
 function browseDirectory() {
     // Provide helpful path suggestions
     const pathInput = document.getElementById('dashboard-path');
-    const homeDir = '/Users/greglind';
+    const homeDir = process.env.HOME || '~';
     const suggestions = [
-        `${homeDir}/Projects/me/marketing/websites/`,
-        `${homeDir}/Projects/me/marketing/`,
+        `${homeDir}/Projects/marketing/websites/`,
+        `${homeDir}/Projects/marketing/`,
         `${homeDir}/Projects/`,
         `${homeDir}/`
     ];
@@ -5531,27 +5576,56 @@ function renderSuggestedTodos(suggestions) {
     
     if (!section || !list) return;
     
-    const html = suggestions.map(suggestion => `
-        <div class="bg-gray-800 bg-opacity-50 rounded-lg p-3 flex items-start justify-between gap-3">
-            <div class="flex-1">
-                <h4 class="font-semibold text-white">${escapeHtml(suggestion.title)}</h4>
-                ${suggestion.description ? `<p class="text-sm text-gray-400 mt-1">${escapeHtml(suggestion.description)}</p>` : ''}
-                ${suggestion.context ? `<p class="text-xs text-gray-500 mt-1">From: ${escapeHtml(suggestion.context)}</p>` : ''}
+    const html = suggestions.map(suggestion => {
+        const sourceIcon = {
+            'email': '📧',
+            'calendar': '📅',
+            'note': '📝',
+            'default': '📌'
+        }[suggestion.source] || '📌';
+        
+        return `
+            <div class="bg-gradient-to-r from-yellow-900 to-yellow-800 rounded-lg p-4 mb-3 border border-yellow-700">
+                <!-- Header with source info -->
+                <div class="flex items-start justify-between gap-3 mb-3">
+                    <div class="flex-1">
+                        <div class="flex items-center gap-2 mb-2">
+                            <span class="text-lg">${sourceIcon}</span>
+                            <span class="text-xs font-semibold text-yellow-200 uppercase">${escapeHtml(suggestion.source)}</span>
+                            ${suggestion.priority ? `<span class="text-xs px-2 py-1 bg-yellow-700 rounded text-yellow-100">⚡ ${suggestion.priority}</span>` : ''}
+                        </div>
+                        <h4 class="font-bold text-white text-lg">${escapeHtml(suggestion.title)}</h4>
+                        ${suggestion.description ? `<p class="text-sm text-yellow-100 mt-2">${escapeHtml(suggestion.description)}</p>` : ''}
+                    </div>
+                </div>
+                
+                <!-- Source link button -->
+                ${suggestion.source_url ? `
+                    <div class="mb-3">
+                        <button onclick="openSourceContent('${suggestion.id}', '${suggestion.source_url}')" 
+                                class="w-full px-3 py-2 bg-yellow-700 hover:bg-yellow-600 text-white text-sm rounded transition-colors"
+                                title="View original source">
+                            🔗 View Original ${escapeHtml(suggestion.source_title || suggestion.source)}
+                        </button>
+                    </div>
+                ` : ''}
+                
+                <!-- Action buttons -->
+                <div class="flex gap-2">
+                    <button onclick="approveSuggestedTodo('${suggestion.id}')" 
+                            class="flex-1 px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-semibold rounded transition-colors"
+                            title="Add to your tasks">
+                        ✓ Accept Task
+                    </button>
+                    <button onclick="rejectSuggestedTodo('${suggestion.id}')" 
+                            class="flex-1 px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white font-semibold rounded transition-colors"
+                            title="Dismiss this suggestion">
+                        ✕ Dismiss
+                    </button>
+                </div>
             </div>
-            <div class="flex gap-2">
-                <button onclick="approveSuggestedTodo('${suggestion.id}')" 
-                        class="px-3 py-1 bg-green-600 hover:bg-green-700 text-white text-sm rounded"
-                        title="Add to tasks">
-                    ✓
-                </button>
-                <button onclick="rejectSuggestedTodo('${suggestion.id}')" 
-                        class="px-3 py-1 bg-gray-600 hover:bg-gray-700 text-white text-sm rounded"
-                        title="Dismiss">
-                    ✕
-                </button>
-            </div>
-        </div>
-    `).join('');
+        `;
+    }).join('');
     
     list.innerHTML = html;
     section.style.display = 'block';
@@ -5566,18 +5640,18 @@ async function approveSuggestedTodo(suggestionId) {
         const result = await response.json();
         
         if (result.success) {
-            showNotification('✅ Task added!', 'success');
+            showNotification('✅ Task approved and added!', 'success');
             await loadSuggestedTodos();
             // Reload tasks if on that section
             if (window.dataLoader) {
                 await dataLoader.loadTodos();
             }
         } else {
-            showNotification('Failed to add task', 'error');
+            showNotification('Failed to approve task', 'error');
         }
     } catch (error) {
         console.error('Error approving suggestion:', error);
-        showNotification('Error adding task', 'error');
+        showNotification('Error approving task', 'error');
     }
 }
 
@@ -5590,7 +5664,7 @@ async function rejectSuggestedTodo(suggestionId) {
         const result = await response.json();
         
         if (result.success) {
-            showNotification('Suggestion dismissed', 'success');
+            showNotification('✅ Suggestion dismissed', 'success');
             await loadSuggestedTodos();
         } else {
             showNotification('Failed to dismiss suggestion', 'error');
@@ -5598,6 +5672,38 @@ async function rejectSuggestedTodo(suggestionId) {
     } catch (error) {
         console.error('Error rejecting suggestion:', error);
         showNotification('Error dismissing suggestion', 'error');
+    }
+}
+
+async function openSourceContent(suggestionId, sourceUrl) {
+    try {
+        // Create a modal to show the source content
+        const modal = document.createElement('div');
+        modal.className = 'fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center modal-backdrop';
+        modal.id = 'source-modal-' + suggestionId;
+        
+        modal.innerHTML = `
+            <div class="bg-gray-900 rounded-lg w-11/12 h-5/6 flex flex-col modal-content shadow-2xl">
+                <!-- Header -->
+                <div class="flex items-center justify-between p-4 border-b border-gray-700">
+                    <h3 class="text-xl font-bold text-white">Original Source</h3>
+                    <button onclick="document.getElementById('source-modal-${suggestionId}').remove()" 
+                            class="text-gray-400 hover:text-white text-2xl">✕</button>
+                </div>
+                <!-- Content -->
+                <div class="flex-1 overflow-auto p-4 bg-gray-800">
+                    <iframe src="${sourceUrl}" class="w-full h-full border-0" frameborder="0" sandbox="allow-same-origin"></iframe>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(modal);
+        modal.onclick = (e) => {
+            if (e.target === modal) modal.remove();
+        };
+    } catch (error) {
+        console.error('Error opening source:', error);
+        showNotification('Could not open source content', 'error');
     }
 }
 

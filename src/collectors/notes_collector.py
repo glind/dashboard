@@ -208,8 +208,14 @@ class GoogleDriveNotesCollector:
                 return None
             
             import json
+            logger.info(f"Loading Google Drive token from: {token_path}")
+            
             with open(token_path, 'r') as f:
-                token_data = json.load(f)
+                try:
+                    token_data = json.load(f)
+                except json.JSONDecodeError as json_err:
+                    logger.error(f"JSON decode error in token file: {json_err}")
+                    return None
             
             creds = Credentials(
                 token=token_data.get('token'),
@@ -220,11 +226,13 @@ class GoogleDriveNotesCollector:
                 scopes=token_data.get('scopes')
             )
             
+            logger.info("Building Google Drive service...")
             self.service = build('drive', 'v3', credentials=creds)
+            logger.info("Google Drive service created successfully")
             return self.service
             
         except Exception as e:
-            logger.error(f"Error creating Google Drive service: {e}")
+            logger.error(f"Error creating Google Drive service: {e}", exc_info=True)
             return None
     
     def get_meeting_notes(self, folder_id: str, limit: int = 10) -> List[Dict[str, Any]]:
@@ -298,20 +306,25 @@ class GoogleDriveNotesCollector:
             Document content as plain text
         """
         try:
-            # Export as plain text
-            content = service.files().export(
+            logger.info(f"Fetching content for doc: {doc_id}")
+            
+            # Use export (not export_media) and specify mimeType
+            # This returns bytes directly
+            content_bytes = service.files().export(
                 fileId=doc_id,
                 mimeType='text/plain'
             ).execute()
             
-            # Content is already bytes from the API
-            if isinstance(content, bytes):
-                return content.decode('utf-8')
-            elif isinstance(content, str):
-                return content
+            logger.info(f"Received content type: {type(content_bytes)}, length: {len(content_bytes) if content_bytes else 0}")
+            
+            # Decode bytes to string
+            if isinstance(content_bytes, bytes):
+                return content_bytes.decode('utf-8', errors='ignore')
+            elif isinstance(content_bytes, str):
+                return content_bytes
             else:
-                logger.warning(f"Unexpected content type: {type(content)}")
-                return str(content)
+                logger.warning(f"Unexpected content type: {type(content_bytes)}")
+                return str(content_bytes)
             
         except Exception as e:
             logger.error(f"Error getting document content for {doc_id}: {e}", exc_info=True)
@@ -398,7 +411,13 @@ def collect_all_notes(obsidian_path: Optional[str] = None,
         try:
             logger.info(f"Attempting to collect Google Drive notes from folder: {gdrive_folder_id}")
             gdrive = GoogleDriveNotesCollector()
-            gdrive_notes = gdrive.get_meeting_notes(gdrive_folder_id, limit)
+            
+            # Catch the specific error here
+            try:
+                gdrive_notes = gdrive.get_meeting_notes(gdrive_folder_id, limit)
+            except Exception as gdrive_err:
+                logger.error(f"Error in get_meeting_notes: {gdrive_err}", exc_info=True)
+                gdrive_notes = []
             
             if gdrive_notes:
                 logger.info(f"Successfully collected {len(gdrive_notes)} notes from Google Drive")
@@ -417,7 +436,7 @@ def collect_all_notes(obsidian_path: Optional[str] = None,
             else:
                 logger.warning("No Google Drive notes found - check folder ID and permissions")
         except Exception as e:
-            logger.error(f"Error collecting Google Drive notes: {e}", exc_info=True)
+            logger.error(f"Error collecting Google Drive notes (outer): {e}", exc_info=True)
     
     # Sort all notes by modification time
     all_notes.sort(key=lambda x: x.get('modified_at', ''), reverse=True)

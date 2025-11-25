@@ -809,7 +809,12 @@ class DatabaseManager:
             
             row = cursor.fetchone()
             if row:
-                return json.loads(row['setting_value'])
+                try:
+                    # Try to parse as JSON first
+                    return json.loads(row['setting_value'])
+                except (json.JSONDecodeError, TypeError):
+                    # If it fails, return the raw value (plain string)
+                    return row['setting_value']
             return default
     
     # Dashboard sessions
@@ -1002,20 +1007,22 @@ class DatabaseManager:
                 todos = []
                 for row in rows:
                     todos.append({
-                        'id': row[0],
-                        'title': row[1],
-                        'description': row[2],
-                        'due_date': row[3],
-                        'priority': row[4],
-                        'category': row[5],
-                        'source': row[6],
-                        'source_id': row[7],
-                        'status': row[8],
-                        'assigned_to_service': row[9],
-                        'requires_response': bool(row[10]),
-                        'email_id': row[11],
-                        'created_at': row[12],
-                        'completed_at': row[13]
+                        'id': row['id'],
+                        'title': row['title'],
+                        'description': row['description'],
+                        'due_date': row['due_date'],
+                        'priority': row['priority'],
+                        'category': row['category'],
+                        'source': row['source'],
+                        'source_id': row['source_id'],
+                        'source_title': row['source_title'],
+                        'source_url': row['source_url'],
+                        'status': row['status'],
+                        'assigned_to_service': row['assigned_to_service'],
+                        'requires_response': bool(row['requires_response']),
+                        'email_id': row['email_id'],
+                        'created_at': row['created_at'],
+                        'completed_at': row['completed_at']
                     })
                 
                 return todos
@@ -1064,20 +1071,22 @@ class DatabaseManager:
                 todos = []
                 for row in rows:
                     todos.append({
-                        'id': row[0],
-                        'title': row[1],
-                        'description': row[2],
-                        'due_date': row[3],
-                        'priority': row[4],
-                        'category': row[5],
-                        'source': row[6],
-                        'source_id': row[7],
-                        'status': row[8],
-                        'assigned_to_service': row[9],
-                        'requires_response': bool(row[10]),
-                        'email_id': row[11],
-                        'created_at': row[12],
-                        'completed_at': row[13]
+                        'id': row['id'],
+                        'title': row['title'],
+                        'description': row['description'],
+                        'due_date': row['due_date'],
+                        'priority': row['priority'],
+                        'category': row['category'],
+                        'source': row['source'],
+                        'source_id': row['source_id'],
+                        'source_title': row['source_title'],
+                        'source_url': row['source_url'],
+                        'status': row['status'],
+                        'assigned_to_service': row['assigned_to_service'],
+                        'requires_response': bool(row['requires_response']),
+                        'email_id': row['email_id'],
+                        'created_at': row['created_at'],
+                        'completed_at': row['completed_at']
                     })
                 
                 return todos
@@ -1232,6 +1241,44 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Error getting suggested todos: {e}")
             return []
+    
+    def get_suggested_todos_by_source(self, source: str, source_id: str) -> List[Dict[str, Any]]:
+        """Get suggested todos by source and source_id."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT id, title, description, context, source, source_id, source_title, 
+                           source_url, priority, due_date, status, created_at, reviewed_at
+                    FROM suggested_todos
+                    WHERE source = ? AND source_id = ?
+                    ORDER BY created_at DESC
+                """, (source, source_id))
+                
+                rows = cursor.fetchall()
+                todos = []
+                for row in rows:
+                    todos.append({
+                        'id': row[0],
+                        'title': row[1],
+                        'description': row[2],
+                        'context': row[3],
+                        'source': row[4],
+                        'source_id': row[5],
+                        'source_title': row[6],
+                        'source_url': row[7],
+                        'priority': row[8],
+                        'due_date': row[9],
+                        'status': row[10],
+                        'created_at': row[11],
+                        'reviewed_at': row[12]
+                    })
+                
+                return todos
+                
+        except Exception as e:
+            logger.error(f"Error getting suggested todos by source: {e}")
+            return []
 
     def approve_suggested_todo(self, suggestion_id: str) -> bool:
         """Approve a suggested todo and move it to the main todos list."""
@@ -1252,14 +1299,16 @@ class DatabaseManager:
                 todo_id = str(uuid.uuid4())
                 cursor.execute("""
                     INSERT INTO universal_todos 
-                    (id, title, description, source, source_id, priority, due_date, status)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')
+                    (id, title, description, source, source_id, source_title, source_url, priority, due_date, status)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
                 """, (
                     todo_id,
                     row[1],  # title
                     row[2] or row[3],  # description or context
                     row[4],  # source
                     row[5],  # source_id
+                    row[6],  # source_title
+                    row[7],  # source_url
                     row[8],  # priority
                     row[9]   # due_date
                 ))
@@ -1272,6 +1321,61 @@ class DatabaseManager:
                 """, (suggestion_id,))
                 
                 conn.commit()
+                
+                # Try to sync to TickTick (async, non-blocking)
+                try:
+                    import asyncio
+                    from collectors.ticktick_collector import TickTickCollector
+                    
+                    # Create sync task in background
+                    async def sync_to_ticktick():
+                        try:
+                            ticktick = TickTickCollector()
+                            
+                            # Map priority: 0=None, 1=Low, 3=Medium, 5=High
+                            priority_map = {'low': 1, 'medium': 3, 'high': 5}
+                            ticktick_priority = priority_map.get(row[8], 0) if row[8] else 0
+                            
+                            # Parse due date if present
+                            due_date = None
+                            if row[9]:  # due_date
+                                from datetime import datetime
+                                try:
+                                    due_date = datetime.fromisoformat(row[9])
+                                except:
+                                    pass
+                            
+                            # Create task in TickTick
+                            result = await ticktick.create_task(
+                                title=row[1],  # title
+                                content=row[2] or row[3] or "",  # description or context
+                                due_date=due_date,
+                                priority=ticktick_priority,
+                                tags=['dashboard']
+                            )
+                            
+                            if result:
+                                logger.info(f"Synced todo '{row[1]}' to TickTick")
+                            else:
+                                logger.warning(f"Failed to sync todo '{row[1]}' to TickTick")
+                                
+                        except Exception as e:
+                            logger.error(f"Error syncing to TickTick: {e}")
+                    
+                    # Run sync in background (don't wait)
+                    try:
+                        loop = asyncio.get_event_loop()
+                        if loop.is_running():
+                            asyncio.create_task(sync_to_ticktick())
+                        else:
+                            asyncio.run(sync_to_ticktick())
+                    except:
+                        # If we can't get event loop, skip sync
+                        logger.warning("Could not sync to TickTick - no event loop")
+                        
+                except Exception as e:
+                    logger.warning(f"TickTick sync skipped: {e}")
+                
                 return True
                 
         except Exception as e:
@@ -2531,7 +2635,10 @@ class DatabaseManager:
             cursor.execute("""
                 SELECT full_name, preferred_name, occupation, company, role, 
                        work_focus, interests, communication_style, timezone, 
-                       work_hours, priorities, bio, updated_at
+                       work_hours, priorities, bio, updated_at,
+                       github_username, soundcloud_url, bandcamp_url,
+                       music_artist_name, music_label_name, book_title,
+                       project_paths, vanity_search_terms
                 FROM user_profile
                 WHERE id = 1
             """)
@@ -2553,7 +2660,15 @@ class DatabaseManager:
                     'work_hours': row[9],
                     'priorities': row[10],
                     'bio': row[11],
-                    'updated_at': row[12]
+                    'updated_at': row[12],
+                    'github_username': row[13] or '',
+                    'soundcloud_url': row[14] or '',
+                    'bandcamp_url': row[15] or '',
+                    'music_artist_name': row[16] or '',
+                    'music_label_name': row[17] or '',
+                    'book_title': row[18] or '',
+                    'project_paths': row[19] or '[]',
+                    'vanity_search_terms': row[20] or '{}'
                 }
             return {}
             
@@ -2571,8 +2686,12 @@ class DatabaseManager:
                 INSERT OR REPLACE INTO user_profile (
                     id, full_name, preferred_name, occupation, company, role,
                     work_focus, interests, communication_style, timezone,
-                    work_hours, priorities, bio, updated_at
-                ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    work_hours, priorities, bio, updated_at,
+                    github_username, soundcloud_url, bandcamp_url,
+                    music_artist_name, music_label_name, book_title,
+                    project_paths, vanity_search_terms
+                ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP,
+                          ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 profile.get('full_name'),
                 profile.get('preferred_name'),
@@ -2585,7 +2704,15 @@ class DatabaseManager:
                 profile.get('timezone'),
                 profile.get('work_hours'),
                 profile.get('priorities'),
-                profile.get('bio')
+                profile.get('bio'),
+                profile.get('github_username'),
+                profile.get('soundcloud_url'),
+                profile.get('bandcamp_url'),
+                profile.get('music_artist_name'),
+                profile.get('music_label_name'),
+                profile.get('book_title'),
+                profile.get('project_paths'),
+                profile.get('vanity_search_terms')
             ))
             
             conn.commit()

@@ -1,5 +1,5 @@
 """
-Vanity alerts collector for monitoring mentions of Buildly, Gregory Lind, music, and book.
+Vanity alerts collector for monitoring mentions of user's company, name, music, and book.
 """
 
 import asyncio
@@ -35,7 +35,7 @@ class VanityAlert:
 
 
 class VanityAlertsCollector:
-    """Collector for vanity alerts about Gregory Lind, Buildly, music, and book."""
+    """Collector for vanity alerts about user's name, company, music, and book."""
     
     def __init__(self):
         """Initialize the vanity alerts collector."""
@@ -44,32 +44,8 @@ class VanityAlertsCollector:
         self._cache_timestamp = None
         self._cache_duration = timedelta(minutes=30)
         
-        self.search_terms = {
-            'buildly': [
-                '"Buildly Labs"',
-                '"buildly.io"',
-                'site:buildly.io'
-            ],
-            'gregory_lind': [
-                '"Gregory Lind" CEO',
-                '"Gregory Lind" Buildly',
-                '"Gregory Lind" author',
-                '"Gregory A Lind"'
-            ],
-            'book': [
-                '"Radical Therapy for Software Teams"',
-                '"Radical Therapy for Software Teams" Gregory Lind',
-                'Radical Therapy Software Teams book',
-                'Gregory Lind "Radical Therapy for Software Teams"'
-            ],
-            'music': [
-                '"Gregory Lind" composer',
-                '"My Evil Robot Army" band',
-                '"Null Records" Gregory Lind',
-                'nullrecords Gregory Lind',
-                '"Gregory Lind" electronic music'
-            ]
-        }
+        # Load search terms from database
+        self.search_terms = self._load_search_terms_from_db()
         
         # Search engines and news sources to monitor
         self.sources = {
@@ -86,6 +62,60 @@ class VanityAlertsCollector:
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
         }
+    
+    def _load_search_terms_from_db(self) -> Dict[str, List[str]]:
+        """Load search terms from user profile in database."""
+        try:
+            from database import DatabaseManager
+            db = DatabaseManager()
+            profile = db.get_user_profile()
+            
+            # Try to get custom search terms from profile
+            vanity_terms_json = profile.get('vanity_search_terms', '{}')
+            import json
+            if isinstance(vanity_terms_json, str):
+                custom_terms = json.loads(vanity_terms_json) if vanity_terms_json else {}
+            else:
+                custom_terms = vanity_terms_json
+            
+            # If custom terms exist, use them
+            if custom_terms:
+                return custom_terms
+            
+            # Otherwise, build default terms from profile
+            full_name = profile.get('full_name', 'User')
+            company = profile.get('company', 'Company')
+            book_title = profile.get('book_title', '')
+            artist_name = profile.get('music_artist_name', '')
+            label_name = profile.get('music_label_name', '')
+            
+            return {
+                'company': [
+                    f'"{company}"',
+                    f'site:{company.lower().replace(" ", "")}.io' if company != 'Company' else ''
+                ],
+                'personal': [
+                    f'"{full_name}"',
+                    f'"{full_name}" CEO',
+                    f'"{full_name}" founder'
+                ],
+                'book': [
+                    f'"{book_title}"'
+                ] if book_title else [],
+                'music': [
+                    f'"{artist_name}"',
+                    f'"{label_name}"'
+                ] if artist_name or label_name else []
+            }
+        except Exception as e:
+            logger.error(f"Error loading search terms from database: {e}")
+            # Fallback to empty terms
+            return {
+                'company': [],
+                'personal': [],
+                'book': [],
+                'music': []
+            }
     
     def _generate_alert_id(self, title: str, url: str, source: str) -> str:
         """Generate unique ID for an alert."""

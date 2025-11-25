@@ -30,11 +30,25 @@ class TickTickCollector:
         self.settings = settings
         self.base_url = "https://api.ticktick.com/open/v1"
         self.auth_url = "https://ticktick.com/oauth"
-        self.client_id = os.getenv("TICKTICK_CLIENT_ID", "LWv12xUi59IkcCP5Gx")
-        self.client_secret = os.getenv("TICKTICK_CLIENT_SECRET")
+        
+        # Get credentials from database first, fallback to env vars
+        self.client_id = None
+        self.client_secret = None
         self.redirect_uri = "http://localhost:8008"
         
-        # Check for direct API token first (easier setup)
+        if DATABASE_AVAILABLE:
+            creds = get_credentials('ticktick')
+            if creds:
+                self.client_id = creds.get('client_id')
+                self.client_secret = creds.get('client_secret')
+        
+        # Fallback to environment variables if not in database
+        if not self.client_id:
+            self.client_id = os.getenv("TICKTICK_CLIENT_ID")
+        if not self.client_secret:
+            self.client_secret = os.getenv("TICKTICK_CLIENT_SECRET")
+        
+        # Check for direct API token
         self.api_token = os.getenv("TICKTICK_API_TOKEN")
         if DATABASE_AVAILABLE:
             creds = get_credentials('ticktick')
@@ -43,7 +57,7 @@ class TickTickCollector:
         
         # If no API token and no client_secret, warn user
         if not self.api_token and not self.client_secret:
-            logger.warning("TickTick: No API token or client credentials found. Set TICKTICK_API_TOKEN or add credentials to database.")
+            logger.warning("TickTick: No API token or client credentials found. Configure credentials in Settings or set TICKTICK_API_TOKEN environment variable.")
         
     def get_auth_url(self, state: str = None) -> str:
         """Generate OAuth authorization URL."""

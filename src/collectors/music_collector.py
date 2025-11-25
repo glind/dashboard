@@ -1,7 +1,7 @@
 """
 Music Collector for Personal Dashboard
 
-Collects data about Null Records and My Evil Robot Army from various streaming platforms,
+Collects data about user's music label and artist from various streaming platforms,
 music news sources, and learns from user preferences.
 """
 
@@ -64,17 +64,27 @@ class MusicCollector:
         self._cache_timestamp = None
         self._cache_duration = timedelta(minutes=25)
         
-        self.label_name = "NullRecords"
-        self.band_name = "My Evil Robot Army"
-        self.website = "www.nullrecords.com"
+        # Load from user profile instead of hardcoded values
+        try:
+            from database import DatabaseManager
+            db = DatabaseManager()
+            profile = db.get_user_profile()
+            self.label_name = profile.get('music_label_name', 'Your Label')
+            self.band_name = profile.get('music_artist_name', 'Your Band')
+            self.artist_name = profile.get('music_artist_name', 'Your Name')
+            self.website = profile.get('bandcamp_url', '').replace('https://', '').replace('http://', '')
+        except Exception as e:
+            # Fallback if database not available
+            self.label_name = "Your Label"
+            self.band_name = "Your Band"
+            self.artist_name = "Your Name"
+            self.website = "yourwebsite.com"
         
-        # Music search terms focused on indie electronic scene
+        # Music search terms - generic until profile is configured
         self.search_terms = [
-            "Null Records",
-            "My Evil Robot Army", 
-            "nullrecords.com",
-            "Gregory Lind electronic",
-            "Gregory Lind composer",
+            self.label_name,
+            self.band_name,
+            self.artist_name,
             
             # Genre-specific terms for better discovery
             "dark ambient",
@@ -432,11 +442,11 @@ class MusicCollector:
             
             # 3. SoundCloud underground labels
             soundcloud_underground = [
-                "Null Records - Void Transmission #12",
-                "My Evil Robot Army - Circuit Bent Sessions",
-                "Cryo Chamber - Arctic Drones",
-                "Ant-Zen - Rhythmic Noise Experiments",
-                "Hymen Records - Power Electronics"
+                "Your Label - Featured Release",
+                "Your Artist - Recent Sessions",
+                "Experimental Label - Arctic Drones",
+                "Electronic Collective - Rhythmic Noise",
+                "Underground Label - Power Electronics"
             ]
             
             netlabel_stats.append(StreamingStats(
@@ -593,13 +603,13 @@ class MusicCollector:
                 "Current Electronic Hits - Various Artists",
                 "Industrial Music Rising - Metal Collective", 
                 "Digital Soundscapes - Ambient Masters",
-                "Null Records Featured Track - My Evil Robot Army",
-                "Portland Electronic Scene - Local Artists"
+                "Your Label Featured Track - Your Artist",
+                "Local Electronic Scene - Local Artists"
             ]
         )]
 
     async def _collect_recent_releases(self) -> List[MusicRelease]:
-        """Collect recent releases from Gregory Lind's music projects."""
+        """Collect recent releases from user's music projects."""
         releases = []
         
         # Get real recent releases data
@@ -801,12 +811,21 @@ class MusicCollector:
         return tags
     
     async def _search_mentions(self) -> Dict[str, List[Dict]]:
-        """Search for mentions of Gregory Lind's music projects across platforms."""
+        """Search for mentions of user's music projects across platforms."""
         mentions = {'label': [], 'band': []}
         
-        # Search terms for your music projects
-        label_terms = ["Null Records", "nullrecords", "Gregory Lind label"]
-        band_terms = ["My Evil Robot Army", "Gregory Lind music", "Gregory Lind electronic"]
+        # Get search terms from user profile
+        try:
+            profile = self.db.get_user_profile()
+            label_name = profile.get('music_label_name', 'Your Label')
+            artist_name = profile.get('music_artist_name', 'Your Artist')
+            
+            label_terms = [label_name, label_name.replace(' ', '').lower(), f"{artist_name} label"]
+            band_terms = [artist_name, f"{artist_name} music", f"{artist_name} electronic"]
+        except:
+            # Fallback if profile unavailable
+            label_terms = ["Your Label", "yourlabel"]
+            band_terms = ["Your Artist", "Your Artist music"]
         
         try:
             # Search across multiple sources
@@ -1013,15 +1032,28 @@ class MusicCollector:
         """Search social media mentions (simulated with realistic data)."""
         mentions = []
         
-        # Simulate realistic social media mentions based on your music projects
-        if "Null Records" in term:
+        # Get profile data for realistic mentions
+        try:
+            profile = self.db.get_user_profile()
+            label_name = profile.get('music_label_name', 'Your Label')
+            artist_name = profile.get('music_artist_name', 'Your Artist')
+            bandcamp_url = profile.get('bandcamp_url', 'https://yourname.bandcamp.com')
+            soundcloud_url = profile.get('soundcloud_url', 'https://soundcloud.com/username')
+        except:
+            label_name = 'Your Label'
+            artist_name = 'Your Artist'
+            bandcamp_url = 'https://yourname.bandcamp.com'
+            soundcloud_url = 'https://soundcloud.com/username'
+        
+        # Simulate realistic social media mentions
+        if label_name.lower() in term.lower():
             mentions.extend([
                 {
                     'platform': 'Bandcamp',
                     'text': f'{term} releases showcase innovative electronic music',
                     'date': datetime.now() - timedelta(hours=6),
                     'engagement': 12,
-                    'url': 'https://nullrecords.bandcamp.com',
+                    'url': bandcamp_url,
                     'type': project_type
                 },
                 {
@@ -1034,14 +1066,14 @@ class MusicCollector:
                 }
             ])
         
-        if "My Evil Robot Army" in term:
+        if artist_name.lower() in term.lower():
             mentions.extend([
                 {
                     'platform': 'SoundCloud',
                     'text': f'{term} experimental electronic tracks gaining attention',
                     'date': datetime.now() - timedelta(hours=18),
                     'engagement': 23,
-                    'url': 'https://soundcloud.com/myevilrobotarmy',
+                    'url': soundcloud_url,
                     'type': project_type
                 },
                 {
@@ -1058,19 +1090,32 @@ class MusicCollector:
     
     async def _get_fallback_mentions(self) -> Dict[str, List[Dict]]:
         """Get fallback mentions if search fails."""
+        # Get profile data
+        try:
+            profile = self.db.get_user_profile()
+            label_name = profile.get('music_label_name', 'Your Label')
+            artist_name = profile.get('music_artist_name', 'Your Artist')
+            bandcamp_url = profile.get('bandcamp_url', 'https://yourname.bandcamp.com')
+            soundcloud_url = profile.get('soundcloud_url', 'https://soundcloud.com/username')
+        except:
+            label_name = 'Your Label'
+            artist_name = 'Your Artist'
+            bandcamp_url = 'https://yourname.bandcamp.com'
+            soundcloud_url = 'https://soundcloud.com/username'
+        
         return {
             'label': [
                 {
                     'platform': 'Bandcamp',
-                    'text': 'Null Records continues to push experimental electronic boundaries',
+                    'text': f'{label_name} continues to push experimental electronic boundaries',
                     'date': datetime.now() - timedelta(hours=4),
                     'engagement': 8,
-                    'url': 'https://nullrecords.bandcamp.com',
+                    'url': bandcamp_url,
                     'type': 'label'
                 },
                 {
                     'platform': 'Music Discovery',
-                    'text': 'Underground label Null Records featured in electronic compilation',
+                    'text': f'Underground label {label_name} featured in electronic compilation',
                     'date': datetime.now() - timedelta(days=2),
                     'engagement': 15,
                     'url': 'https://example.com/electronic-labels',
@@ -1080,15 +1125,15 @@ class MusicCollector:
             'band': [
                 {
                     'platform': 'SoundCloud',
-                    'text': 'My Evil Robot Army brings industrial electronic to new heights',
+                    'text': f'{artist_name} brings industrial electronic to new heights',
                     'date': datetime.now() - timedelta(hours=12),
                     'engagement': 15,
-                    'url': 'https://soundcloud.com/myevilrobotarmy',
+                    'url': soundcloud_url,
                     'type': 'band'
                 },
                 {
                     'platform': 'Electronic Music Blog',
-                    'text': 'My Evil Robot Army featured in "Artists to Watch" list',
+                    'text': f'{artist_name} featured in "Artists to Watch" list',
                     'date': datetime.now() - timedelta(days=1),
                     'engagement': 28,
                     'url': 'https://example.com/artists-to-watch',

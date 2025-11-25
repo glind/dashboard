@@ -277,7 +277,11 @@ class BackgroundDataManager:
             from database import get_credentials
             github_creds = get_credentials('github')
             if github_creds and github_creds.get('token'):
-                username = github_creds.get('username', 'glind')
+                username = github_creds.get('username')
+                if not username:
+                    # Fallback to user profile
+                    profile = db.get_user_profile()
+                    username = profile.get('github_username', 'unknown')
                 token = github_creds.get('token')
                 headers = {'Authorization': f'token {token}', 'Accept': 'application/vnd.github.v3+json'}
                 
@@ -410,6 +414,11 @@ static_dir = src_dir / "static"
 if static_dir.exists():
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
+# Mount assets (images, logos, etc.)
+assets_dir = project_root / "assets"
+if assets_dir.exists():
+    app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
+
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(code: str = None, state: str = None, error: str = None):
     """Serve the main dashboard page or handle OAuth callbacks"""
@@ -534,6 +543,7 @@ async def get_notes():
     try:
         from collectors.notes_collector import collect_all_notes
         from database import get_credentials, DatabaseManager
+        import traceback
         
         db = DatabaseManager()
         
@@ -560,12 +570,21 @@ async def get_notes():
         
         logger.info(f"Collecting notes - Obsidian: {obsidian_path}, GDrive: {gdrive_folder_id}")
         
+        # TEMPORARY DEBUG
+        logger.info(f"DEBUG - obsidian_path type: {type(obsidian_path)}, value: {repr(obsidian_path)}")
+        logger.info(f"DEBUG - gdrive_folder_id type: {type(gdrive_folder_id)}, value: {repr(gdrive_folder_id)}")
+        
         # Collect notes from all sources
-        result = collect_all_notes(
-            obsidian_path=obsidian_path,
-            gdrive_folder_id=gdrive_folder_id,
-            limit=limit
-        )
+        try:
+            result = collect_all_notes(
+                obsidian_path=obsidian_path,
+                gdrive_folder_id=gdrive_folder_id,
+                limit=limit
+            )
+        except Exception as collect_err:
+            logger.error(f"Error in collect_all_notes: {collect_err}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            raise
         
         # Log results for debugging
         logger.info(f"Notes collection complete: {len(result.get('notes', []))} notes, " +
@@ -740,6 +759,218 @@ async def update_notes_settings(settings: Dict[str, Any]):
         return {"success": False, "error": str(e)}
 
 
+@app.get("/api/user/profile")
+async def get_user_profile():
+    """Get user profile settings."""
+    try:
+        profile = db.get_user_profile()
+        
+        return {
+            "success": True,
+            "profile": profile
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting user profile: {e}")
+        return {"success": False, "error": str(e)}
+
+@app.post("/api/user/profile")
+async def save_user_profile(request: Request):
+    """Save user profile settings."""
+    try:
+        profile_data = await request.json()
+        
+        success = db.save_user_profile(profile_data)
+        
+        if success:
+            logger.info("User profile saved successfully")
+            return {
+                "success": True,
+                "message": "Profile saved successfully"
+            }
+        else:
+            return {"success": False, "error": "Failed to save profile"}
+            
+    except Exception as e:
+        logger.error(f"Error saving user profile: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/settings/ai")
+async def get_ai_settings():
+    """Get AI/Ollama configuration settings."""
+    try:
+        from database import DatabaseManager
+        db = DatabaseManager()
+        
+        settings = {
+            'ai_provider': db.get_setting('ai_provider', 'ollama'),
+            'ollama_host': db.get_setting('ollama_host', 'localhost'),
+            'ollama_port': db.get_setting('ollama_port', 11434),
+            'ollama_model': db.get_setting('ollama_model', 'llama3.2:1b'),
+            'openai_api_key': db.get_setting('openai_api_key', ''),
+            'openai_model': db.get_setting('openai_model', 'gpt-4o-mini'),
+            'gemini_api_key': db.get_setting('gemini_api_key', ''),
+            'gemini_model': db.get_setting('gemini_model', 'gemini-2.0-flash'),
+        }
+        
+        return {
+            "success": True,
+            "settings": settings
+        }
+    except Exception as e:
+        logger.error(f"Error getting AI settings: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/settings/ai")
+async def update_ai_settings(settings: Dict[str, Any]):
+    """Update AI/Ollama configuration settings."""
+    try:
+        from database import DatabaseManager
+        db = DatabaseManager()
+        
+        updated = []
+        
+        # Update AI provider
+        if 'ai_provider' in settings:
+            db.save_setting('ai_provider', settings['ai_provider'])
+            updated.append('ai_provider')
+        
+        # Update Ollama settings
+        if 'ollama_host' in settings:
+            db.save_setting('ollama_host', settings['ollama_host'])
+            updated.append('ollama_host')
+        
+        if 'ollama_port' in settings:
+            db.save_setting('ollama_port', int(settings['ollama_port']))
+            updated.append('ollama_port')
+        
+        if 'ollama_model' in settings:
+            db.save_setting('ollama_model', settings['ollama_model'])
+            updated.append('ollama_model')
+        
+        # Update OpenAI settings
+        if 'openai_api_key' in settings:
+            db.save_setting('openai_api_key', settings['openai_api_key'])
+            updated.append('openai_api_key')
+        
+        if 'openai_model' in settings:
+            db.save_setting('openai_model', settings['openai_model'])
+            updated.append('openai_model')
+        
+        # Update Gemini settings
+        if 'gemini_api_key' in settings:
+            db.save_setting('gemini_api_key', settings['gemini_api_key'])
+            updated.append('gemini_api_key')
+        
+        if 'gemini_model' in settings:
+            db.save_setting('gemini_model', settings['gemini_model'])
+            updated.append('gemini_model')
+        
+        logger.info(f"Updated AI settings: {updated}")
+        
+        return {
+            "success": True,
+            "message": f"Updated {len(updated)} AI settings",
+            "updated": updated
+        }
+        
+    except Exception as e:
+        logger.error(f"Error updating AI settings: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/ollama/models")
+async def get_ollama_models():
+    """Get list of available Ollama models."""
+    try:
+        from database import DatabaseManager
+        db = DatabaseManager()
+        
+        # Get Ollama host and port from settings
+        host = db.get_setting('ollama_host', 'localhost')
+        port = db.get_setting('ollama_port', 11434)
+        url = f"http://{host}:{port}/api/tags"
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, timeout=5.0)
+            
+            if response.status_code == 200:
+                data = response.json()
+                models = []
+                
+                if 'models' in data:
+                    for model in data['models']:
+                        models.append({
+                            'name': model.get('name'),
+                            'size': model.get('size', 0),
+                            'modified': model.get('modified_at', ''),
+                            'digest': model.get('digest', '')
+                        })
+                
+                return {
+                    "success": True,
+                    "models": models,
+                    "count": len(models),
+                    "server": f"{host}:{port}"
+                }
+            else:
+                return {
+                    "success": False,
+                    "error": f"Ollama server returned status {response.status_code}",
+                    "models": []
+                }
+                
+    except httpx.ConnectError:
+        return {
+            "success": False,
+            "error": "Cannot connect to Ollama server. Make sure it's running.",
+            "models": []
+        }
+    except Exception as e:
+        logger.error(f"Error getting Ollama models: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "models": []
+        }
+
+
+@app.post("/api/ollama/pull")
+async def pull_ollama_model(request: Dict[str, Any]):
+    """Pull a new Ollama model."""
+    try:
+        from database import DatabaseManager
+        db = DatabaseManager()
+        
+        model_name = request.get('model')
+        if not model_name:
+            return {"success": False, "error": "Model name is required"}
+        
+        host = db.get_setting('ollama_host', 'localhost')
+        port = db.get_setting('ollama_port', 11434)
+        url = f"http://{host}:{port}/api/pull"
+        
+        async with httpx.AsyncClient(timeout=300.0) as client:
+            response = await client.post(url, json={"name": model_name})
+            
+            if response.status_code == 200:
+                return {
+                    "success": True,
+                    "message": f"Successfully pulled model: {model_name}"
+                }
+            else:
+                return {
+                    "success": False,
+                    "error": f"Failed to pull model: {response.text}"
+                }
+                
+    except Exception as e:
+        logger.error(f"Error pulling Ollama model: {e}")
+        return {"success": False, "error": str(e)}
+
+
 @app.post("/api/notes/test-obsidian")
 async def test_obsidian_connection(request: Dict[str, Any]):
     """Test Obsidian vault connection."""
@@ -904,7 +1135,11 @@ async def get_github():
                 from database import get_credentials
                 github_creds = get_credentials('github')
                 if github_creds and github_creds.get('token'):
-                    username = github_creds.get('username', 'glind')
+                    username = github_creds.get('username')
+                    if not username:
+                        # Fallback to user profile
+                        profile = db.get_user_profile()
+                        username = profile.get('github_username', 'unknown')
                     token = github_creds.get('token')
                     headers = {'Authorization': f'token {token}', 'Accept': 'application/vnd.github.v3+json'}
                     
@@ -1399,6 +1634,30 @@ async def update_task_status(task_id: str, request: Request):
         logger.error(f"Error updating task status: {e}")
         return {"error": str(e), "success": False}
 
+@app.delete("/api/tasks/clear-all")
+async def clear_all_tasks():
+    """Delete all existing tasks (for fresh start)."""
+    try:
+        with db.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) as count FROM universal_todos")
+            count = cursor.fetchone()['count']
+            
+            cursor.execute("DELETE FROM universal_todos")
+            conn.commit()
+            
+        logger.info(f"Deleted {count} tasks from database")
+        
+        return {
+            "success": True,
+            "deleted_count": count,
+            "message": f"Deleted all {count} existing tasks"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error clearing tasks: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.delete("/api/tasks/{task_id}")
 async def delete_task(task_id: str):
     """Delete a task."""
@@ -1647,6 +1906,213 @@ async def reject_suggested_todo(suggestion_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/api/calendar/scan-for-tasks")
+async def scan_calendar_for_tasks():
+    """Scan last 2 weeks of calendar events for tasks."""
+    try:
+        if not COLLECTORS_AVAILABLE:
+            raise HTTPException(status_code=503, detail="Calendar collectors not available")
+        
+        from collectors.calendar_collector import CalendarCollector
+        from processors.ai_providers import OllamaProvider
+        
+        settings = Settings()
+        calendar_collector = CalendarCollector(settings)
+        
+        # Initialize AI provider with proper config
+        ai_config = {
+            'base_url': db.get_setting('ollama_url', 'http://localhost:11434'),
+            'model_name': db.get_setting('ollama_model', 'llama3.2:latest')
+        }
+        ai_provider = OllamaProvider('ollama', ai_config)
+        
+        # Scan last 2 weeks
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=14)
+        
+        logger.info(f"Scanning calendar events from {start_date} to {end_date}")
+        
+        events = await calendar_collector.collect_events(start_date, end_date)
+        logger.info(f"Found {len(events)} calendar events to analyze")
+        
+        tasks_suggested = 0
+        events_processed = 0
+        
+        for event in events:
+            try:
+                title = event.get('title', '')
+                description = event.get('description', '')
+                start_time = event.get('start', {}).get('dateTime', '')
+                event_id = event.get('event_id', '')
+                
+                # Skip if no meaningful content
+                if not title and not description:
+                    continue
+                
+                # Check if we already have suggestions from this event
+                existing = db.get_suggested_todos_by_source('calendar', event_id)
+                if existing:
+                    logger.info(f"Already have suggestions from event: {title[:50]}")
+                    continue
+                
+                # Ask AI to extract action items
+                messages = [{
+                    'role': 'user',
+                    'content': f"""Analyze this calendar event and extract any action items or tasks.
+Event: {title}
+Description: {description}
+Start: {start_time}
+
+Extract clear, actionable tasks. For each task respond with JSON:
+{{
+    "tasks": [
+        {{
+            "title": "clear task description",
+            "priority": "high|medium|low",
+            "due_date": "YYYY-MM-DD" or null
+        }}
+    ]
+}}
+
+Only include real tasks/action items. Skip if this is just an informational event."""
+                }]
+                
+                result = await ai_provider.chat(messages)
+                
+                # Parse AI response
+                import json
+                import re
+                json_match = re.search(r'\{.*\}', result, re.DOTALL)
+                if not json_match:
+                    events_processed += 1
+                    continue
+                
+                try:
+                    data = json.loads(json_match.group())
+                    tasks = data.get('tasks', [])
+                    
+                    for task in tasks:
+                        # Create suggested todo
+                        suggestion = {
+                            'title': task.get('title', title),
+                            'description': f"From calendar event: {title}",
+                            'context': description[:500] if description else '',
+                            'source': 'calendar',
+                            'source_id': event_id,
+                            'source_title': title,
+                            'source_url': event.get('htmlLink', ''),
+                            'priority': task.get('priority', 'medium'),
+                            'due_date': task.get('due_date')
+                        }
+                        
+                        db.add_suggested_todo(suggestion)
+                        tasks_suggested += 1
+                        logger.info(f"Suggested task from calendar: {task.get('title', '')[:50]}")
+                        
+                except json.JSONDecodeError:
+                    logger.warning(f"Could not parse AI response for event: {title}")
+                
+                events_processed += 1
+                
+            except Exception as e:
+                logger.error(f"Error processing calendar event {event.get('event_id', '')}: {e}")
+                continue
+        
+        return {
+            "success": True,
+            "events_scanned": len(events),
+            "events_processed": events_processed,
+            "tasks_suggested": tasks_suggested,
+            "date_range": {
+                "start": start_date.isoformat(),
+                "end": end_date.isoformat()
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Calendar scan error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/notes/scan-for-tasks")
+async def scan_notes_for_tasks():
+    """Scan recent notes for tasks and TODOs."""
+    try:
+        from collectors.notes_collector import collect_all_notes
+        from database import get_credentials
+        
+        notes_config = get_credentials('notes') or {}
+        
+        # Get configuration
+        obsidian_path = (
+            os.getenv('OBSIDIAN_VAULT_PATH') or
+            db.get_setting('obsidian_vault_path') or
+            notes_config.get('obsidian_vault_path')
+        )
+        
+        gdrive_folder_id = (
+            os.getenv('GOOGLE_DRIVE_NOTES_FOLDER_ID') or
+            db.get_setting('google_drive_notes_folder_id') or
+            notes_config.get('google_drive_folder_id')
+        )
+        
+        logger.info(f"Scanning notes - Obsidian: {obsidian_path}, GDrive: {gdrive_folder_id}")
+        
+        # Collect notes (last 30 days worth)
+        result = collect_all_notes(
+            obsidian_path=obsidian_path,
+            gdrive_folder_id=gdrive_folder_id,
+            limit=50
+        )
+        
+        tasks_suggested = 0
+        
+        # Process found TODOs
+        for todo_item in result.get('todos_to_create', []):
+            try:
+                todo_text = todo_item['text']
+                
+                # Check for duplicates
+                existing = db.get_suggested_todos(status='pending')
+                if any(s['title'].lower() == todo_text.lower() for s in existing):
+                    continue
+                
+                # Create suggested task
+                suggestion = {
+                    'title': todo_text,
+                    'description': f"From {todo_item['source']}: {todo_item['source_title']}",
+                    'context': todo_item.get('context', ''),
+                    'source': f"notes_{todo_item['source']}",
+                    'source_id': todo_item.get('source_path') or todo_item.get('source_url', ''),
+                    'source_title': todo_item['source_title'],
+                    'source_url': todo_item.get('source_url') or todo_item.get('source_path', ''),
+                    'priority': 'medium'
+                }
+                
+                db.add_suggested_todo(suggestion)
+                tasks_suggested += 1
+                logger.info(f"Suggested task from note: {todo_text[:50]}")
+                
+            except Exception as e:
+                logger.error(f"Error creating suggested todo: {e}")
+                continue
+        
+        return {
+            "success": True,
+            "notes_scanned": len(result.get('notes', [])),
+            "todos_found": len(result.get('todos_to_create', [])),
+            "tasks_suggested": tasks_suggested,
+            "sources": {
+                "obsidian": result.get('obsidian_count', 0),
+                "google_drive": result.get('gdrive_count', 0)
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Notes scan error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/news")
 async def get_news(filter: str = "all", include_read: bool = False):
     """Get filtered news headlines from database"""
@@ -1822,8 +2288,12 @@ async def get_hacker_news_articles():
 
 @app.get("/api/music")
 async def get_music():
-    """Get music trends for Null Records and My Evil Robot Army"""
+    """Get music trends for user's music projects"""
     try:
+        # Get profile for fallback values
+        profile = db.get_user_profile()
+        default_artist = profile.get('music_artist_name', 'Your Artist')
+        
         if COLLECTORS_AVAILABLE:
             try:
                 from collectors.music_collector import MusicCollector
@@ -1852,9 +2322,9 @@ async def get_music():
                         if hasattr(release, 'artist'):
                             track_data["artist"] = release.artist
                         elif isinstance(release, dict):
-                            track_data["artist"] = release.get('artist', 'My Evil Robot Army')
+                            track_data["artist"] = release.get('artist', default_artist)
                         else:
-                            track_data["artist"] = 'My Evil Robot Army'
+                            track_data["artist"] = default_artist
                             
                         if hasattr(release, 'platform'):
                             track_data["platform"] = release.platform
@@ -1938,29 +2408,35 @@ async def get_music():
                 logger.error(f"Error collecting music data: {e}")
                 pass
         
-        # Fallback data
+        # Fallback data using user profile
+        profile = db.get_user_profile()
+        artist_name = profile.get('music_artist_name', 'Your Artist Name')
+        label_name = profile.get('music_label_name', 'Your Label')
+        bandcamp_url = profile.get('bandcamp_url', 'https://yourname.bandcamp.com')
+        soundcloud_url = profile.get('soundcloud_url', 'https://soundcloud.com/username')
+        
         return {
             "tracks": [
                 {
-                    "title": "Electronic Synthesis Vol. 1", 
-                    "artist": "My Evil Robot Army", 
+                    "title": "Latest Release", 
+                    "artist": artist_name, 
                     "platform": "Bandcamp",
                     "type": "release",
-                    "stream_url": "https://nullrecords.bandcamp.com"
+                    "stream_url": bandcamp_url
                 },
                 {
-                    "title": "Ambient Experiments", 
-                    "artist": "Gregory Lind", 
+                    "title": "Recent Work", 
+                    "artist": artist_name, 
                     "platform": "SoundCloud",
                     "type": "release",
-                    "stream_url": "https://soundcloud.com/gregory-lind"
+                    "stream_url": soundcloud_url
                 },
                 {
-                    "title": "Null Records Update",
+                    "title": f"{label_name} Update",
                     "artist": "Label Stats",
                     "platform": "Analytics",
-                    "plays": 1250,
-                    "followers": 89,
+                    "plays": 0,
+                    "followers": 0,
                     "type": "stats"
                 }
             ]
@@ -1970,7 +2446,7 @@ async def get_music():
 
 @app.get("/api/vanity")
 async def get_vanity():
-    """Get vanity alerts about Buildly, Gregory Lind, music, and book"""
+    """Get vanity alerts about user's projects and interests"""
     try:
         # Try to get cached data first
         cached_data = background_manager.get_cached_data('vanity')
@@ -2804,19 +3280,22 @@ async def get_admin_settings():
             'tags': ['AI', 'Technology', 'Science']
         })
         
+        # Get user profile for vanity, music, and GitHub settings
+        profile = db.get_user_profile()
+        
         vanity_config = db.get_setting('vanity_config', {
-            'names': ['Gregory Lind'],
-            'companies': ['Buildly Labs'],
-            'terms': ['Radical Therapy for Software Teams']
+            'names': [profile.get('full_name', 'Your Name')],
+            'companies': [profile.get('company', 'Your Company')],
+            'terms': [profile.get('book_title', 'Your Book/Project')]
         })
         
         music_config = db.get_setting('music_config', {
-            'artists': ['My Evil Robot Army'],
-            'labels': ['Null Records']
+            'artists': [profile.get('music_artist_name', 'Your Artist Name')],
+            'labels': [profile.get('music_label_name', 'Your Label')]
         })
         
         github_config = db.get_setting('github_config', {
-            'username': 'glind'
+            'username': profile.get('github_username', 'your_username')
         })
         
         return {
@@ -4721,7 +5200,8 @@ async def start_dashboard(project_name: str):
         
         # Get project configuration
         start_command = project.get('start_command', './ops/startup.sh')
-        working_dir = project.get('path', '/Users/greglind/Projects/me/dashboard')
+        # Use current working directory as fallback instead of hardcoded path
+        working_dir = project.get('path', os.getcwd())
         local_port = project.get('port', 8008)
         
         # Check if already running on the port
@@ -4944,7 +5424,7 @@ async def get_dashboard_logs(project_name: str):
             raise HTTPException(status_code=404, detail=f"Dashboard project '{project_name}' not found")
         
         # Look for log files in common locations
-        working_dir = project.get('path', '/Users/greglind/Projects/me/dashboard')
+        working_dir = project.get('path', os.getcwd())
         log_paths = [
             os.path.join(working_dir, 'logs', f'{project_name.lower().replace(" ", "_")}.log'),
             os.path.join(working_dir, f'{project_name.lower().replace(" ", "_")}.log'),
@@ -5038,9 +5518,25 @@ async def get_dashboard_logs(project_name: str):
 async def get_cron_systems(dashboard_name: str):
     """Get cron systems for primary dashboard"""
     try:
-        # For Marketing Dashboard, scan the marketing directory for cron jobs
+        # For Marketing Dashboard, get path from user profile
         if dashboard_name == "Marketing Dashboard":
-            marketing_path = "/Users/greglind/Projects/me/marketing"
+            profile = db.get_user_profile()
+            project_paths = json.loads(profile.get('project_paths', '[]'))
+            
+            # Look for marketing path in profile
+            marketing_path = None
+            for path in project_paths:
+                if 'marketing' in path.lower():
+                    marketing_path = path
+                    break
+            
+            # Fallback to asking user to configure
+            if not marketing_path:
+                return {
+                    "success": False,
+                    "error": "Marketing path not configured. Please add your marketing project path to your User Profile in Settings."
+                }
+            
             cron_systems = []
             
             # Look for common cron/automation files
@@ -5143,7 +5639,24 @@ async def get_managed_websites(dashboard_name: str):
     """Get websites managed by primary dashboard"""
     try:
         if dashboard_name == "Marketing Dashboard":
-            marketing_path = "/Users/greglind/Projects/me/marketing"
+            profile = db.get_user_profile()
+            project_paths = json.loads(profile.get('project_paths', '[]'))
+            
+            # Look for marketing path in profile
+            marketing_path = None
+            for path in project_paths:
+                if 'marketing' in path.lower():
+                    marketing_path = path
+                    break
+            
+            # Fallback error if not configured
+            if not marketing_path:
+                return {
+                    "success": False,
+                    "error": "Marketing path not configured. Please add your marketing project path to your User Profile in Settings.",
+                    "websites": []
+                }
+            
             websites_path = os.path.join(marketing_path, "websites")
             websites = []
             

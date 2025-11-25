@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Personal Dashboard</title>
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📊</text></svg>">
+    <title>Personal Dashboard - Buildly</title>
+    <link rel="icon" href="/assets/images/forge-logo.png" type="image/png">
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         /* Custom scrollbar */
@@ -190,7 +190,10 @@
         <aside class="w-64 bg-gray-800 border-r border-gray-700 flex flex-col">
             <!-- Header -->
             <div class="p-6 border-b border-gray-700">
-                <h1 class="text-2xl font-bold text-white">📊 Dashboard</h1>
+                <div class="flex items-center gap-3 mb-2">
+                    <img src="/assets/images/forge-logo.png" alt="Buildly Logo" class="w-8 h-8 rounded">
+                    <h1 class="text-2xl font-bold text-white">Dashboard</h1>
+                </div>
                 <p class="text-sm text-gray-400 mt-1">Personal Hub</p>
                 
                 <!-- Google Auth Button -->
@@ -569,6 +572,231 @@
                 <div class="max-w-4xl mx-auto">
                     <h2 class="text-3xl font-bold mb-6">⚙️ Settings</h2>
                     
+                    <!-- AI Settings -->
+                    <div class="bg-gray-800 rounded-xl border border-gray-700 p-6 mb-6">
+                        <h3 class="text-xl font-semibold mb-4">🤖 AI & LLM Configuration</h3>
+                        <p class="text-gray-400 text-sm mb-6">Configure your AI provider (Ollama, OpenAI, or Google Gemini)</p>
+                        
+                        <div class="space-y-4">
+                            <!-- AI Provider Selection -->
+                            <div>
+                                <label class="block text-sm font-medium mb-2">AI Provider</label>
+                                <select id="setting-ai-provider" onchange="onAiProviderChange(this.value)"
+                                        class="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                                    <option value="ollama">🦙 Ollama (Local)</option>
+                                    <option value="openai">🔑 OpenAI (GPT)</option>
+                                    <option value="gemini">✨ Google Gemini</option>
+                                </select>
+                                <p class="text-xs text-gray-500 mt-1">Choose your preferred AI provider</p>
+                            </div>
+                            
+                            <!-- Ollama Settings (shown by default) -->
+                            <div id="ollama-settings" class="space-y-4 pt-4 border-t border-gray-700">
+                                <h4 class="font-semibold text-blue-400">🦙 Ollama Configuration</h4>
+                                
+                                <div class="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label class="block text-sm font-medium mb-2">Host</label>
+                                        <input type="text" id="setting-ollama-host" placeholder="localhost"
+                                               class="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                                        <p class="text-xs text-gray-500 mt-1">Ollama server hostname or IP</p>
+                                    </div>
+                                    
+                                    <div>
+                                        <label class="block text-sm font-medium mb-2">Port</label>
+                                        <input type="number" id="setting-ollama-port" placeholder="11434" min="1" max="65535"
+                                               class="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                                        <p class="text-xs text-gray-500 mt-1">Ollama server port</p>
+                                    </div>
+                                </div>
+                                
+                                <div>
+                                    <label class="block text-sm font-medium mb-2">Model</label>
+                                    <div class="flex gap-2 mb-2">
+                                        <select id="setting-ollama-model" class="flex-1 px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                                            <option value="">Select a model...</option>
+                                        </select>
+                                        <button onclick="refreshOllamaModels()" class="px-3 py-2 bg-gray-600 hover:bg-gray-500 rounded-lg transition-colors">
+                                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                            </svg>
+                                        </button>
+                                    </div>
+                                    <p class="text-xs text-gray-500 mb-2">Available models on your Ollama server</p>
+                                    
+                                    <div class="flex gap-2">
+                                        <input type="text" id="setting-ollama-pull-model" placeholder="e.g., llama3.2:3b, mistral, codellama" 
+                                               class="flex-1 px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                                        <button onclick="pullOllamaModel()" class="px-4 py-2 bg-green-600 hover:bg-green-500 rounded-lg transition-colors">
+                                            Pull Model
+                                        </button>
+                                    </div>
+                                    <p class="text-xs text-gray-500 mt-1">Download a new model from Ollama library</p>
+                                </div>
+                                
+                                <button onclick="testOllamaConnection()" 
+                                        class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm">
+                                    🔗 Test Connection
+                                </button>
+                            </div>
+                            
+                            <!-- OpenAI Settings (hidden by default) -->
+                            <div id="openai-settings" class="space-y-4 pt-4 border-t border-gray-700 hidden">
+                                <h4 class="font-semibold text-green-400">🔑 OpenAI Configuration</h4>
+                                
+                                <div>
+                                    <label class="block text-sm font-medium mb-2">API Key</label>
+                                    <input type="password" id="setting-openai-api-key" placeholder="sk-..."
+                                           class="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent">
+                                    <p class="text-xs text-gray-500 mt-1">Your OpenAI API key (stored securely)</p>
+                                </div>
+                                
+                                <div>
+                                    <label class="block text-sm font-medium mb-2">Model</label>
+                                    <select id="setting-openai-model"
+                                            class="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent">
+                                        <option value="gpt-4o">GPT-4o (Latest)</option>
+                                        <option value="gpt-4o-mini">GPT-4o Mini (Fast & Cheap)</option>
+                                        <option value="gpt-4-turbo">GPT-4 Turbo</option>
+                                        <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
+                                    </select>
+                                    <p class="text-xs text-gray-500 mt-1">Choose the GPT model to use</p>
+                                </div>
+                                
+                                <button onclick="testOpenaiConnection()" 
+                                        class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm">
+                                    🔗 Test Connection
+                                </button>
+                            </div>
+                            
+                            <!-- Gemini Settings (hidden by default) -->
+                            <div id="gemini-settings" class="space-y-4 pt-4 border-t border-gray-700 hidden">
+                                <h4 class="font-semibold text-purple-400">✨ Google Gemini Configuration</h4>
+                                
+                                <div>
+                                    <label class="block text-sm font-medium mb-2">API Key</label>
+                                    <input type="password" id="setting-gemini-api-key" placeholder="AIza..."
+                                           class="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent">
+                                    <p class="text-xs text-gray-500 mt-1">Your Google Gemini API key (stored securely)</p>
+                                </div>
+                                
+                                <div>
+                                    <label class="block text-sm font-medium mb-2">Model</label>
+                                    <select id="setting-gemini-model"
+                                            class="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent">
+                                        <option value="gemini-2.0-flash">Gemini 2.0 Flash (Latest)</option>
+                                        <option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
+                                        <option value="gemini-1.5-flash">Gemini 1.5 Flash</option>
+                                    </select>
+                                    <p class="text-xs text-gray-500 mt-1">Choose the Gemini model to use</p>
+                                </div>
+                                
+                                <button onclick="testGeminiConnection()" 
+                                        class="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-sm">
+                                    🔗 Test Connection
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <div class="flex gap-3 pt-4 mt-4 border-t border-gray-700">
+                            <button onclick="saveAiSettings()" 
+                                    class="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all duration-200 font-medium">
+                                💾 Save AI Settings
+                            </button>
+                            <button onclick="loadAiSettings()" 
+                                    class="px-6 py-3 bg-gray-700 text-white rounded-lg hover:bg-gray-600 transition-all duration-200">
+                                🔄 Reset to Current
+                            </button>
+                        </div>
+                        
+                        <div id="ai-settings-message" class="hidden mt-4 p-3 rounded-lg"></div>
+                    </div>
+                    
+                    <!-- User Profile Section -->
+                    <div class="bg-gray-800 rounded-xl border border-gray-700 p-6 mb-6">
+                        <h3 class="text-xl font-semibold mb-4">👤 User Profile</h3>
+                        <p class="text-gray-400 text-sm mb-6">Configure your personal information for dashboard personalization</p>
+                        
+                        <div class="space-y-4">
+                            <!-- Personal Info -->
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-sm font-medium mb-2">Full Name</label>
+                                    <input type="text" id="profile-full-name" placeholder="Your Full Name"
+                                           class="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                                    <p class="text-xs text-gray-500 mt-1">Used in vanity searches and personalization</p>
+                                </div>
+                                
+                                <div>
+                                    <label class="block text-sm font-medium mb-2">Company</label>
+                                    <input type="text" id="profile-company" placeholder="Your Company"
+                                           class="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                                    <p class="text-xs text-gray-500 mt-1">Your company or organization</p>
+                                </div>
+                            </div>
+                            
+                            <!-- Development Info -->
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-sm font-medium mb-2">GitHub Username</label>
+                                    <input type="text" id="profile-github-username" placeholder="username"
+                                           class="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                                    <p class="text-xs text-gray-500 mt-1">For GitHub activity tracking</p>
+                                </div>
+                                
+                                <div>
+                                    <label class="block text-sm font-medium mb-2">Book Title</label>
+                                    <input type="text" id="profile-book-title" placeholder="Your Book or Project"
+                                           class="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                                    <p class="text-xs text-gray-500 mt-1">Track mentions of your published work</p>
+                                </div>
+                            </div>
+                            
+                            <!-- Music Info -->
+                            <div class="border-t border-gray-700 pt-4 mt-4">
+                                <h4 class="font-semibold text-purple-400 mb-3">🎵 Music Information</h4>
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div>
+                                        <label class="block text-sm font-medium mb-2">Artist/Band Name</label>
+                                        <input type="text" id="profile-artist-name" placeholder="Your Artist Name"
+                                               class="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent">
+                                    </div>
+                                    
+                                    <div>
+                                        <label class="block text-sm font-medium mb-2">Record Label</label>
+                                        <input type="text" id="profile-label-name" placeholder="Your Label Name"
+                                               class="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent">
+                                    </div>
+                                    
+                                    <div>
+                                        <label class="block text-sm font-medium mb-2">SoundCloud URL</label>
+                                        <input type="url" id="profile-soundcloud-url" placeholder="https://soundcloud.com/username"
+                                               class="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent">
+                                    </div>
+                                    
+                                    <div>
+                                        <label class="block text-sm font-medium mb-2">Bandcamp URL</label>
+                                        <input type="url" id="profile-bandcamp-url" placeholder="https://yourname.bandcamp.com"
+                                               class="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="flex gap-3 pt-4 mt-4 border-t border-gray-700">
+                            <button onclick="saveUserProfile()" 
+                                    class="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-all duration-200 font-medium">
+                                💾 Save Profile
+                            </button>
+                            <button onclick="loadUserProfile()" 
+                                    class="px-6 py-3 bg-gray-700 text-white rounded-lg hover:bg-gray-600 transition-all duration-200">
+                                🔄 Reset to Current
+                            </button>
+                        </div>
+                        
+                        <div id="profile-message" class="hidden mt-4 p-3 rounded-lg"></div>
+                    </div>
+                    
                     <!-- Notes Settings -->
                     <div class="bg-gray-800 rounded-xl border border-gray-700 p-6 mb-6">
                         <h3 class="text-xl font-semibold mb-4">📝 Notes Configuration</h3>
@@ -927,7 +1155,7 @@
                         <label class="block text-sm font-medium mb-2">Project Path *</label>
                         <div class="flex gap-2">
                             <input type="text" id="dashboard-path" required
-                                   placeholder="/Users/greglind/marketing/websites/openbuild"
+                                   placeholder="/path/to/your/project"
                                    class="flex-1 px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent">
                             <button type="button" onclick="browseDirectory()" 
                                     class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg border border-gray-600">
@@ -1104,23 +1332,299 @@
         }
         
         // Settings management functions
-        async function loadNotesSettings() {
+        
+        // AI Provider change handler
+        function onAiProviderChange(provider) {
+            document.getElementById('ollama-settings').classList.toggle('hidden', provider !== 'ollama');
+            document.getElementById('openai-settings').classList.toggle('hidden', provider !== 'openai');
+            document.getElementById('gemini-settings').classList.toggle('hidden', provider !== 'gemini');
+        }
+        
+        // Load AI settings
+        async function loadAiSettings() {
             try {
-                const response = await fetch('/api/settings/notes');
+                const response = await fetch('/api/settings/ai');
                 const data = await response.json();
                 
                 if (data.success) {
                     const settings = data.settings;
                     
-                    document.getElementById('setting-obsidian-path').value = settings.obsidian_vault_path.value || '';
-                    document.getElementById('setting-gdrive-folder').value = settings.google_drive_notes_folder_id.value || '';
-                    document.getElementById('setting-notes-limit').value = settings.notes_limit.value || 10;
-                    document.getElementById('setting-auto-create').checked = settings.auto_create_tasks.value || false;
+                    // Set provider
+                    const provider = settings.ai_provider || 'ollama';
+                    document.getElementById('setting-ai-provider').value = provider;
+                    onAiProviderChange(provider);
                     
-                    console.log('Loaded notes settings:', settings);
+                    // Ollama settings
+                    document.getElementById('setting-ollama-host').value = settings.ollama_host || 'localhost';
+                    document.getElementById('setting-ollama-port').value = settings.ollama_port || 11434;
+                    
+                    // Load available Ollama models if provider is Ollama
+                    if (provider === 'ollama') {
+                        await refreshOllamaModels();
+                        // Set model after dropdown is populated
+                        setTimeout(() => {
+                            const select = document.getElementById('setting-ollama-model');
+                            const savedModel = settings.ollama_model || 'llama3.2:1b';
+                            if (Array.from(select.options).some(opt => opt.value === savedModel)) {
+                                select.value = savedModel;
+                            }
+                        }, 500);
+                    } else {
+                        // Just set the value directly if not Ollama
+                        document.getElementById('setting-ollama-model').value = settings.ollama_model || 'llama3.2:1b';
+                    }
+                    
+                    // OpenAI settings
+                    document.getElementById('setting-openai-api-key').value = settings.openai_api_key ? '••••' + settings.openai_api_key.slice(-4) : '';
+                    document.getElementById('setting-openai-model').value = settings.openai_model || 'gpt-4o-mini';
+                    
+                    // Gemini settings
+                    document.getElementById('setting-gemini-api-key').value = settings.gemini_api_key ? '••••' + settings.gemini_api_key.slice(-4) : '';
+                    document.getElementById('setting-gemini-model').value = settings.gemini_model || 'gemini-2.0-flash';
+                    
+                    console.log('Loaded AI settings');
                 }
             } catch (error) {
-                console.error('Error loading settings:', error);
+                console.error('Error loading AI settings:', error);
+            }
+        }
+        
+        // Save AI settings
+        async function saveAiSettings() {
+            const messageEl = document.getElementById('ai-settings-message');
+            
+            try {
+                const provider = document.getElementById('setting-ai-provider').value;
+                const settings = {
+                    ai_provider: provider,
+                    ollama_host: document.getElementById('setting-ollama-host').value.trim(),
+                    ollama_port: parseInt(document.getElementById('setting-ollama-port').value) || 11434,
+                    ollama_model: document.getElementById('setting-ollama-model').value.trim(),
+                    openai_api_key: document.getElementById('setting-openai-api-key').value.trim(),
+                    openai_model: document.getElementById('setting-openai-model').value,
+                    gemini_api_key: document.getElementById('setting-gemini-api-key').value.trim(),
+                    gemini_model: document.getElementById('setting-gemini-model').value
+                };
+                
+                const response = await fetch('/api/settings/ai', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(settings)
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    messageEl.className = 'mt-4 p-3 rounded-lg bg-green-900/20 border border-green-700 text-green-400';
+                    messageEl.textContent = `✓ AI settings saved! Provider: ${provider}`;
+                    messageEl.classList.remove('hidden');
+                } else {
+                    messageEl.className = 'mt-4 p-3 rounded-lg bg-red-900/20 border border-red-700 text-red-400';
+                    messageEl.textContent = `✗ Error: ${data.error}`;
+                    messageEl.classList.remove('hidden');
+                }
+            } catch (error) {
+                messageEl.className = 'mt-4 p-3 rounded-lg bg-red-900/20 border border-red-700 text-red-400';
+                messageEl.textContent = `✗ Error saving settings: ${error.message}`;
+                messageEl.classList.remove('hidden');
+            }
+        }
+        
+        // Test connections
+        async function testOllamaConnection() {
+            const host = document.getElementById('setting-ollama-host').value.trim();
+            const port = document.getElementById('setting-ollama-port').value.trim();
+            const model = document.getElementById('setting-ollama-model').value.trim();
+            const url = `http://${host}:${port}`;
+            
+            try {
+                const response = await fetch(`${url}/api/tags`);
+                if (response.ok) {
+                    const data = await response.json();
+                    const models = data.models ? data.models.map(m => m.name).join(', ') : 'None';
+                    showNotification(`✓ Ollama connected! Available models: ${models}`, 'success');
+                    // Auto-refresh models on successful connection
+                    await refreshOllamaModels();
+                } else {
+                    showNotification('✗ Ollama returned an error', 'error');
+                }
+            } catch (error) {
+                showNotification(`✗ Cannot connect to Ollama at ${url}`, 'error');
+            }
+        }
+        
+        async function refreshOllamaModels() {
+            try {
+                const response = await fetch('/api/ollama/models');
+                const data = await response.json();
+                
+                const select = document.getElementById('setting-ollama-model');
+                const currentValue = select.value;
+                
+                // Clear existing options
+                select.innerHTML = '<option value="">Select a model...</option>';
+                
+                if (data.success && data.models && data.models.length > 0) {
+                    data.models.forEach(model => {
+                        const option = document.createElement('option');
+                        option.value = model.name;
+                        
+                        // Format size for display
+                        let sizeStr = '';
+                        if (model.size) {
+                            const gb = (model.size / (1024 * 1024 * 1024)).toFixed(2);
+                            sizeStr = ` (${gb} GB)`;
+                        }
+                        
+                        option.textContent = `${model.name}${sizeStr}`;
+                        select.appendChild(option);
+                    });
+                    
+                    // Restore previous selection if it exists
+                    if (currentValue && Array.from(select.options).some(opt => opt.value === currentValue)) {
+                        select.value = currentValue;
+                    }
+                    
+                    showNotification(`✓ Found ${data.models.length} models on ${data.server}`, 'success');
+                } else {
+                    showNotification(data.error || 'No models found. Try pulling a model first.', 'warning');
+                }
+            } catch (error) {
+                console.error('Error refreshing Ollama models:', error);
+                showNotification('✗ Failed to fetch models: ' + error.message, 'error');
+            }
+        }
+        
+        async function pullOllamaModel() {
+            const modelName = document.getElementById('setting-ollama-pull-model').value.trim();
+            
+            if (!modelName) {
+                showNotification('Please enter a model name', 'warning');
+                return;
+            }
+            
+            const button = event.target;
+            button.disabled = true;
+            button.textContent = 'Pulling...';
+            
+            try {
+                showNotification(`⏳ Pulling model ${modelName}... This may take several minutes.`, 'info');
+                
+                const response = await fetch('/api/ollama/pull', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ model: modelName })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    showNotification(data.message, 'success');
+                    // Clear input and refresh model list
+                    document.getElementById('setting-ollama-pull-model').value = '';
+                    await refreshOllamaModels();
+                } else {
+                    showNotification('✗ ' + data.error, 'error');
+                }
+            } catch (error) {
+                console.error('Error pulling Ollama model:', error);
+                showNotification('✗ Failed to pull model: ' + error.message, 'error');
+            } finally {
+                button.disabled = false;
+                button.textContent = 'Pull Model';
+            }
+        }
+        
+        async function testOpenaiConnection() {
+            const apiKey = document.getElementById('setting-openai-api-key').value.trim();
+            if (!apiKey || apiKey.startsWith('••••')) {
+                showNotification('Please enter your OpenAI API key', 'error');
+                return;
+            }
+            
+            try {
+                const response = await fetch('https://api.openai.com/v1/models', {
+                    headers: { 'Authorization': `Bearer ${apiKey}` }
+                });
+                if (response.ok) {
+                    showNotification('✓ OpenAI API connection successful!', 'success');
+                } else {
+                    showNotification('✗ Invalid OpenAI API key', 'error');
+                }
+            } catch (error) {
+                showNotification(`✗ Error connecting to OpenAI: ${error.message}`, 'error');
+            }
+        }
+        
+        async function testGeminiConnection() {
+            const apiKey = document.getElementById('setting-gemini-api-key').value.trim();
+            if (!apiKey || apiKey.startsWith('••••')) {
+                showNotification('Please enter your Gemini API key', 'error');
+                return;
+            }
+            
+            try {
+                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ contents: [{ parts: [{ text: 'test' }] }] })
+                });
+                if (response.ok) {
+                    showNotification('✓ Google Gemini API connection successful!', 'success');
+                } else {
+                    showNotification('✗ Invalid Gemini API key', 'error');
+                }
+            } catch (error) {
+                showNotification(`✗ Error connecting to Gemini: ${error.message}`, 'error');
+            }
+        }
+        
+        // Settings section load handler
+        document.addEventListener('DOMContentLoaded', function() {
+            const origShowSection = window.showSection;
+            window.showSection = function(sectionId) {
+                if (sectionId === 'settings') {
+                    loadAiSettings();
+                    loadUserProfile();
+                }
+                return origShowSection(sectionId);
+            };
+        });
+        
+        async function loadNotesSettings() {
+            try {
+                const response = await fetch('/api/settings/notes');
+                const data = await response.json();
+                
+                if (data.success && data.settings) {
+                    const settings = data.settings;
+                    
+                    // Handle nested value structure
+                    const obsidianPath = settings.obsidian_vault_path?.value || settings.obsidian_vault_path || '';
+                    const gdriveFolderId = settings.google_drive_notes_folder_id?.value || settings.google_drive_notes_folder_id || '';
+                    const notesLimit = settings.notes_limit?.value || settings.notes_limit || 10;
+                    const autoCreate = settings.auto_create_tasks?.value !== undefined ? settings.auto_create_tasks.value : (settings.auto_create_tasks || false);
+                    
+                    document.getElementById('setting-obsidian-path').value = obsidianPath;
+                    document.getElementById('setting-gdrive-folder').value = gdriveFolderId;
+                    document.getElementById('setting-notes-limit').value = notesLimit;
+                    document.getElementById('setting-auto-create').checked = autoCreate;
+                    
+                    console.log('✓ Loaded notes settings:', {
+                        obsidian: obsidianPath,
+                        gdrive: gdriveFolderId,
+                        limit: notesLimit,
+                        autoCreate: autoCreate
+                    });
+                    
+                    // Show notification if paths are configured
+                    if (obsidianPath || gdriveFolderId) {
+                        showNotification('✓ Notes settings loaded', 'success');
+                    }
+                }
+            } catch (error) {
+                console.error('Error loading notes settings:', error);
+                showNotification('✗ Failed to load notes settings', 'error');
             }
         }
         
@@ -1156,6 +1660,78 @@
                     }
                 } else {
                     throw new Error(data.error || 'Failed to save settings');
+                }
+            } catch (error) {
+                messageEl.className = 'mt-4 p-3 rounded-lg bg-red-900/20 border border-red-700 text-red-400';
+                messageEl.textContent = `✗ Error: ${error.message}`;
+                messageEl.classList.remove('hidden');
+            }
+            
+            // Hide message after 5 seconds
+            setTimeout(() => {
+                messageEl.classList.add('hidden');
+            }, 5000);
+        }
+        
+        // User Profile Functions
+        async function loadUserProfile() {
+            try {
+                const response = await fetch('/api/user/profile');
+                const data = await response.json();
+                
+                if (data.success && data.profile) {
+                    const profile = data.profile;
+                    
+                    document.getElementById('profile-full-name').value = profile.full_name || '';
+                    document.getElementById('profile-company').value = profile.company || '';
+                    document.getElementById('profile-github-username').value = profile.github_username || '';
+                    document.getElementById('profile-book-title').value = profile.book_title || '';
+                    document.getElementById('profile-artist-name').value = profile.music_artist_name || '';
+                    document.getElementById('profile-label-name').value = profile.music_label_name || '';
+                    document.getElementById('profile-soundcloud-url').value = profile.soundcloud_url || '';
+                    document.getElementById('profile-bandcamp-url').value = profile.bandcamp_url || '';
+                    
+                    console.log('✓ Loaded user profile');
+                }
+            } catch (error) {
+                console.error('Error loading user profile:', error);
+                showNotification('Failed to load user profile', 'error');
+            }
+        }
+        
+        async function saveUserProfile() {
+            const messageEl = document.getElementById('profile-message');
+            
+            try {
+                const profile = {
+                    full_name: document.getElementById('profile-full-name').value.trim(),
+                    company: document.getElementById('profile-company').value.trim(),
+                    github_username: document.getElementById('profile-github-username').value.trim(),
+                    book_title: document.getElementById('profile-book-title').value.trim(),
+                    music_artist_name: document.getElementById('profile-artist-name').value.trim(),
+                    music_label_name: document.getElementById('profile-label-name').value.trim(),
+                    soundcloud_url: document.getElementById('profile-soundcloud-url').value.trim(),
+                    bandcamp_url: document.getElementById('profile-bandcamp-url').value.trim()
+                };
+                
+                const response = await fetch('/api/user/profile', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(profile)
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    messageEl.className = 'mt-4 p-3 rounded-lg bg-green-900/20 border border-green-700 text-green-400';
+                    messageEl.textContent = '✓ Profile saved successfully!';
+                    messageEl.classList.remove('hidden');
+                    
+                    showNotification('Profile updated! Changes will reflect across the dashboard.', 'success');
+                } else {
+                    throw new Error(data.error || 'Failed to save profile');
                 }
             } catch (error) {
                 messageEl.className = 'mt-4 p-3 rounded-lg bg-red-900/20 border border-red-700 text-red-400';

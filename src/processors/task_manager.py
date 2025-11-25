@@ -95,6 +95,8 @@ class TaskManager:
                     'status': task.get('status', 'pending'),
                     'source': task.get('source', 'manual'),
                     'source_id': task.get('source_id', ''),
+                    'source_title': task.get('source_title', ''),
+                    'source_url': task.get('source_url', ''),
                     'due_date': task.get('due_date', ''),
                     'created_at': task.get('created_at', ''),
                     'completed_at': task.get('completed_at', ''),

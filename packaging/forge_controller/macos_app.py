@@ -4,6 +4,7 @@ Buildly Forge Controller - macOS Menu Bar Version
 Uses rumps for native macOS menu bar integration
 """
 
+import os
 import sys
 import subprocess
 from pathlib import Path
@@ -129,6 +130,12 @@ class MacOSForgeController(ForgeControllerBase):
             )
             service_menu.add(stop_item)
             
+            restart_item = rumps.MenuItem(
+                "🔄 Restart Service",
+                callback=lambda _, p=service.port: self._restart_service(p)
+            )
+            service_menu.add(restart_item)
+            
             # Option to save non-Forge services
             if not service.is_forge_service and not service.saved_by_user:
                 service_menu.add(None)  # Separator
@@ -144,8 +151,15 @@ class MacOSForgeController(ForgeControllerBase):
             # Stopped service
             service_menu.add(rumps.MenuItem("Service stopped", callback=None))
             
-            # Add remove option for stopped services
+            # Add start option for stopped services if we know how to start it
             service_menu.add(None)  # Separator
+            start_item = rumps.MenuItem(
+                "▶️ Start Service",
+                callback=lambda _, p=service.port: self._start_service(p)
+            )
+            service_menu.add(start_item)
+            
+            # Add remove option for stopped services
             remove_item = rumps.MenuItem(
                 "🗑️ Remove from List",
                 callback=lambda _, p=service.port: self._remove_service(p)
@@ -173,6 +187,49 @@ class MacOSForgeController(ForgeControllerBase):
         service = self.scanner.get_service(port)
         if service:
             subprocess.run(['open', service.base_url])
+    
+    def _start_service(self, port: int):
+        """Start a service"""
+        service = self.scanner.get_service(port)
+        
+        # Common Forge project locations
+        project_paths = [
+            "~/Projects/me/dashboard/src",
+            "~/Projects/me/dashboard",
+            "~/dashboard/src",
+            "~/dashboard",
+        ]
+        
+        # Try to find a good starting directory
+        start_dir = "~"
+        for path in project_paths:
+            expanded = os.path.expanduser(path)
+            if os.path.exists(expanded):
+                start_dir = expanded
+                break
+        
+        service_name = service.name if service else f"port {port}"
+        
+        # Open Terminal with helpful instructions
+        script = f'''
+tell application "Terminal"
+    activate
+    do script "cd '{start_dir}' && echo '=== Start {service_name} ===' && echo 'Run your start command here (e.g., python manage.py runserver {port})' && echo '' && pwd"
+end tell
+'''
+        subprocess.run(['osascript', '-e', script])
+    
+    def _restart_service(self, port: int):
+        """Restart a service"""
+        service = self.scanner.get_service(port)
+        if service:
+            # Stop first
+            if self._stop_service(port):
+                rumps.notification(
+                    "Forge Controller",
+                    "Service Restarted",
+                    f"Service on port {port} stopped.\nPlease restart it manually from its directory."
+                )
     
     def _stop_service(self, port: int):
         """Stop a service"""

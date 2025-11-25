@@ -2036,10 +2036,11 @@ Only include real tasks/action items. Skip if this is just an informational even
 
 @app.post("/api/notes/scan-for-tasks")
 async def scan_notes_for_tasks():
-    """Scan recent notes for tasks and TODOs."""
+    """Scan recent notes for tasks and TODOs using AI analysis."""
     try:
         from collectors.notes_collector import collect_all_notes
         from database import get_credentials
+        from processors.ai_providers import OllamaProvider
         
         notes_config = get_credentials('notes') or {}
         
@@ -2058,6 +2059,13 @@ async def scan_notes_for_tasks():
         
         logger.info(f"Scanning notes - Obsidian: {obsidian_path}, GDrive: {gdrive_folder_id}")
         
+        # Initialize AI provider
+        ai_config = {
+            'base_url': db.get_setting('ollama_url', 'http://localhost:11434'),
+            'model_name': db.get_setting('ollama_model', 'llama3.2:latest')
+        }
+        ai_provider = OllamaProvider('ollama', ai_config)
+        
         # Collect notes (last 30 days worth)
         result = collect_all_notes(
             obsidian_path=obsidian_path,
@@ -2066,8 +2074,9 @@ async def scan_notes_for_tasks():
         )
         
         tasks_suggested = 0
+        notes_processed = 0
         
-        # Process found TODOs
+        # First, process explicitly marked TODOs
         for todo_item in result.get('todos_to_create', []):
             try:
                 todo_text = todo_item['text']
@@ -2091,16 +2100,115 @@ async def scan_notes_for_tasks():
                 
                 db.add_suggested_todo(suggestion)
                 tasks_suggested += 1
-                logger.info(f"Suggested task from note: {todo_text[:50]}")
+                logger.info(f"Suggested task from note TODO: {todo_text[:50]}")
                 
             except Exception as e:
                 logger.error(f"Error creating suggested todo: {e}")
                 continue
         
+        # Now use AI to analyze note content for implicit tasks
+        notes = result.get('notes', [])
+        for note in notes:
+            try:
+                title = note.get('title', '')
+                preview = note.get('preview', '')
+                source = note.get('source', 'unknown')
+                source_id = note.get('path') or note.get('url', '')
+                
+                # Skip if no meaningful content
+                if not title and not preview:
+                    continue
+                
+                # Read full content for analysis
+                content = ''
+                if source == 'obsidian' and note.get('path'):
+                    try:
+                        with open(note['path'], 'r', encoding='utf-8') as f:
+                            content = f.read()[:2000]  # Limit to 2000 chars for AI
+                    except:
+                        content = preview
+                elif source == 'google_drive':
+                    content = note.get('content', preview)[:2000]
+                else:
+                    content = preview
+                
+                if not content:
+                    continue
+                
+                # Check if we already analyzed this note
+                existing = db.get_suggested_todos_by_source(f'notes_{source}', source_id)
+                if existing:
+                    logger.info(f"Already analyzed note: {title[:50]}")
+                    continue
+                
+                # Ask AI to extract action items
+                messages = [{
+                    'role': 'user',
+                    'content': f"""Analyze this note and extract any action items, tasks, or follow-ups.
+Note Title: {title}
+Content:
+{content}
+
+Extract clear, actionable tasks. For each task respond with JSON:
+{{
+    "tasks": [
+        {{
+            "title": "clear task description",
+            "priority": "high|medium|low",
+            "due_date": "YYYY-MM-DD" or null
+        }}
+    ]
+}}
+
+Only include real tasks/action items. Skip if this note is purely informational with no actions needed."""
+                }]
+                
+                result_ai = await ai_provider.chat(messages)
+                
+                # Parse AI response
+                import json
+                import re
+                json_match = re.search(r'\{.*\}', result_ai, re.DOTALL)
+                if not json_match:
+                    notes_processed += 1
+                    continue
+                
+                try:
+                    data = json.loads(json_match.group())
+                    tasks = data.get('tasks', [])
+                    
+                    for task in tasks:
+                        # Create suggested todo
+                        suggestion = {
+                            'title': task.get('title', title),
+                            'description': f"From {source} note: {title}",
+                            'context': preview[:500] if preview else '',
+                            'source': f'notes_{source}',
+                            'source_id': source_id,
+                            'source_title': title,
+                            'source_url': note.get('url') or note.get('path', ''),
+                            'priority': task.get('priority', 'medium'),
+                            'due_date': task.get('due_date')
+                        }
+                        
+                        db.add_suggested_todo(suggestion)
+                        tasks_suggested += 1
+                        logger.info(f"AI suggested task from note: {task.get('title', '')[:50]}")
+                        
+                except json.JSONDecodeError:
+                    logger.warning(f"Could not parse AI response for note: {title}")
+                
+                notes_processed += 1
+                
+            except Exception as e:
+                logger.error(f"Error processing note {note.get('title', '')}: {e}")
+                continue
+        
         return {
             "success": True,
-            "notes_scanned": len(result.get('notes', [])),
-            "todos_found": len(result.get('todos_to_create', [])),
+            "notes_scanned": len(notes),
+            "notes_processed": notes_processed,
+            "explicit_todos_found": len(result.get('todos_to_create', [])),
             "tasks_suggested": tasks_suggested,
             "sources": {
                 "obsidian": result.get('obsidian_count', 0),

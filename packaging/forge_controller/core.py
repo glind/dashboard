@@ -120,7 +120,8 @@ class ForgeServiceScanner:
     # Common Forge app identifiers found in responses
     FORGE_IDENTIFIERS = [
         'buildly',
-        'forge', 
+        'forge',
+        'forgeweb',
         'dashboard',
         'gateway',
         'workflow',
@@ -275,7 +276,12 @@ class ForgeServiceScanner:
             try:
                 response = requests.get(url, timeout=timeout)
                 return response.status_code, response.text
-            except requests.exceptions.RequestException:
+            except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+                # Connection refused or timeout - service might be websocket only
+                # or incompatible protocol
+                return 0, ""
+            except Exception as e:
+                # Any other error
                 return 0, ""
         else:
             try:
@@ -314,7 +320,7 @@ class ForgeServiceScanner:
                     data = json.loads(response_text)
                     
                     # Look for common fields that might contain the service name
-                    for field in ['name', 'service', 'app', 'application', 'title']:
+                    for field in ['name', 'service', 'app', 'application', 'title', 'service_name']:
                         if field in data and data[field]:
                             service_name = str(data[field])
                             break
@@ -323,6 +329,14 @@ class ForgeServiceScanner:
                     for field in ['version', 'api_version', 'app_version']:
                         if field in data and data[field]:
                             version = str(data[field])
+                            break
+                    
+                    # Check if entire response contains Forge identifiers
+                    response_str = json.dumps(data).lower()
+                    for identifier in self.FORGE_IDENTIFIERS:
+                        if identifier in response_str:
+                            if service_name == f"Service on port {port}":
+                                service_name = f"Buildly {identifier.title()}"
                             break
                             
                 except json.JSONDecodeError:
@@ -336,28 +350,52 @@ class ForgeServiceScanner:
                 break
         
         # If no health endpoint found, try to get service name from root
+        got_http_response = False
         if not health_endpoint:
             status_code, response_text = self._http_get(base_url)
             if status_code == 200:
+                got_http_response = True
+                # Check for Forge identifiers in the page
+                response_lower = response_text.lower()
+                for identifier in self.FORGE_IDENTIFIERS:
+                    if identifier in response_lower:
+                        if service_name == f"Service on port {port}":
+                            service_name = f"Buildly {identifier.title()}"
+                        break
+                
                 # Check for common title patterns
                 if '<title>' in response_text.lower():
                     import re
                     match = re.search(r'<title[^>]*>([^<]+)</title>', response_text, re.IGNORECASE)
                     if match:
-                        service_name = match.group(1).strip()
-        
-        # Determine status
-        if health_endpoint:
-            status = ServiceStatus.RUNNING
-        elif self.is_port_open(port):
-            status = ServiceStatus.STARTING
-        else:
-            status = ServiceStatus.STOPPED
+                        title = match.group(1).strip()
+                        # Only use title if it's not generic
+                        if title and title.lower() not in ['home', 'index', 'welcome']:
+                            service_name = title
         
         # Try to find the PID of the process using this port
         pid = self._get_pid_for_port(port)
         
-        return ForgeService(
+        # Determine status
+        # If we got any HTTP response (health endpoint or root page), it's running
+        if health_endpoint or got_http_response:
+            status = ServiceStatus.RUNNING
+        elif self.is_port_open(port):
+            # Port is open but not responding to HTTP
+            # If it has a PID, it's likely a running service (WebSocket, gRPC, etc.)
+            # Otherwise it might still be starting up
+            if pid:
+                status = ServiceStatus.RUNNING
+                # Add note to name if we couldn't identify it
+                if service_name == f"Service on port {port}":
+                    service_name = f"Service on port {port} (Non-HTTP)"
+            else:
+                status = ServiceStatus.STARTING
+        else:
+            status = ServiceStatus.STOPPED
+        
+        # Create the service
+        service = ForgeService(
             port=port,
             name=service_name,
             status=status,
@@ -365,6 +403,11 @@ class ForgeServiceScanner:
             health_endpoint=health_endpoint,
             version=version
         )
+        
+        # Determine if this is a Forge service
+        service.is_forge_service = self.is_forge_service(service)
+        
+        return service
     
     def _get_pid_for_port(self, port: int) -> Optional[int]:
         """Get the PID of the process listening on a port"""

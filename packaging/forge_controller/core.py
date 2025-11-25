@@ -51,6 +51,9 @@ class ForgeService:
     base_url: str = ""
     is_forge_service: bool = False  # True if confirmed as a Forge service
     saved_by_user: bool = False  # True if user explicitly saved this service
+    working_dir: Optional[str] = None  # Directory where the service runs from
+    start_script: Optional[str] = None  # Path to start script (e.g., ops/startup.sh)
+    custom_name: Optional[str] = None  # User-provided custom name
     
     def __post_init__(self):
         self.base_url = f"http://localhost:{self.port}"
@@ -64,6 +67,9 @@ class ForgeService:
             'version': self.version,
             'is_forge_service': self.is_forge_service,
             'saved_by_user': self.saved_by_user,
+            'working_dir': self.working_dir,
+            'start_script': self.start_script,
+            'custom_name': self.custom_name,
         }
     
     @classmethod
@@ -77,6 +83,9 @@ class ForgeService:
             version=data.get('version'),
             is_forge_service=data.get('is_forge_service', False),
             saved_by_user=data.get('saved_by_user', False),
+            working_dir=data.get('working_dir'),
+            start_script=data.get('start_script'),
+            custom_name=data.get('custom_name'),
         )
 
 
@@ -376,6 +385,21 @@ class ForgeServiceScanner:
         # Try to find the PID of the process using this port
         pid = self._get_pid_for_port(port)
         
+        # Get working directory and startup script if we have a PID
+        working_dir = None
+        start_script = None
+        project_name = None
+        
+        if pid:
+            working_dir = self._get_working_dir_for_pid(pid)
+            if working_dir:
+                start_script = self._find_startup_script(working_dir)
+                project_name = self._get_project_name_from_dir(working_dir)
+                
+                # If we found a project name and service name is still generic, use it
+                if project_name and service_name == f"Service on port {port}":
+                    service_name = f"{project_name} (port {port})"
+        
         # Determine status
         # If we got any HTTP response (health endpoint or root page), it's running
         if health_endpoint or got_http_response:
@@ -401,7 +425,9 @@ class ForgeServiceScanner:
             status=status,
             pid=pid,
             health_endpoint=health_endpoint,
-            version=version
+            version=version,
+            working_dir=working_dir,
+            start_script=start_script,
         )
         
         # Determine if this is a Forge service
@@ -447,6 +473,80 @@ class ForgeServiceScanner:
                     
         except Exception as e:
             print(f"Error getting PID for port {port}: {e}")
+        
+        return None
+    
+    def _get_working_dir_for_pid(self, pid: int) -> Optional[str]:
+        """Get the working directory of a process by PID"""
+        try:
+            if sys.platform == 'darwin':
+                # macOS - use lsof to get cwd
+                result = subprocess.run(
+                    ['lsof', '-p', str(pid)],
+                    capture_output=True,
+                    text=True,
+                    stderr=subprocess.DEVNULL
+                )
+                for line in result.stdout.split('\n'):
+                    if ' cwd ' in line or '\tcwd\t' in line:
+                        # Extract the path from the end of the line
+                        parts = line.split()
+                        if len(parts) >= 9:
+                            return parts[-1]
+            elif sys.platform == 'linux':
+                # Linux - read /proc/[pid]/cwd symlink
+                cwd_link = f'/proc/{pid}/cwd'
+                if os.path.exists(cwd_link):
+                    return os.readlink(cwd_link)
+        except Exception as e:
+            pass
+        
+        return None
+    
+    def _find_startup_script(self, working_dir: str) -> Optional[str]:
+        """
+        Find the startup script for a service.
+        Looks for ops/startup.sh relative to the working directory.
+        """
+        if not working_dir:
+            return None
+        
+        # Common patterns for Forge projects
+        patterns = [
+            os.path.join(working_dir, 'ops', 'startup.sh'),
+            os.path.join(working_dir, '..', 'ops', 'startup.sh'),
+            os.path.join(working_dir, 'startup.sh'),
+        ]
+        
+        for script_path in patterns:
+            normalized = os.path.normpath(script_path)
+            if os.path.exists(normalized) and os.path.isfile(normalized):
+                return normalized
+        
+        return None
+    
+    def _get_project_name_from_dir(self, working_dir: str) -> Optional[str]:
+        """
+        Extract a meaningful project name from the working directory.
+        For Forge projects, looks for the parent of 'ops' or 'src'.
+        """
+        if not working_dir:
+            return None
+        
+        try:
+            path_parts = os.path.normpath(working_dir).split(os.sep)
+            
+            # Look for 'ops' or 'src' in path and get parent
+            for i, part in enumerate(path_parts):
+                if part in ['ops', 'src', 'app']:
+                    if i > 0:
+                        return path_parts[i - 1]
+            
+            # Otherwise just use the last directory name
+            if path_parts:
+                return path_parts[-1]
+        except Exception:
+            pass
         
         return None
     

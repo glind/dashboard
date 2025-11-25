@@ -192,32 +192,58 @@ class MacOSForgeController(ForgeControllerBase):
         """Start a service"""
         service = self.scanner.get_service(port)
         
-        # Common Forge project locations
-        project_paths = [
-            "~/Projects/me/dashboard/src",
-            "~/Projects/me/dashboard",
-            "~/dashboard/src",
-            "~/dashboard",
-        ]
+        if not service:
+            return
         
-        # Try to find a good starting directory
-        start_dir = "~"
-        for path in project_paths:
-            expanded = os.path.expanduser(path)
-            if os.path.exists(expanded):
-                start_dir = expanded
-                break
-        
-        service_name = service.name if service else f"port {port}"
-        
-        # Open Terminal with helpful instructions
-        script = f'''
+        # Check if we have a known start script
+        if service.start_script and os.path.exists(service.start_script):
+            # Execute the startup script
+            script_dir = os.path.dirname(service.start_script)
+            script_name = os.path.basename(service.start_script)
+            
+            applescript = f'''
 tell application "Terminal"
     activate
-    do script "cd '{start_dir}' && echo '=== Start {service_name} ===' && echo 'Run your start command here (e.g., python manage.py runserver {port})' && echo '' && pwd"
+    do script "cd '{script_dir}' && echo '=== Starting {service.name} ===' && ./{script_name}"
 end tell
 '''
-        subprocess.run(['osascript', '-e', script])
+            subprocess.run(['osascript', '-e', applescript])
+            
+            # Show notification
+            rumps.notification(
+                "Forge Controller",
+                "Starting Service",
+                f"Running {script_name} for {service.name}"
+            )
+            return
+        
+        # No start script - open Terminal in working directory
+        start_dir = service.working_dir or os.path.expanduser("~/Projects/me/dashboard/src")
+        
+        # Fallback to common locations if working_dir not set
+        if not service.working_dir:
+            project_paths = [
+                "~/Projects/me/dashboard/src",
+                "~/Projects/me/dashboard",
+                "~/dashboard/src",
+                "~/dashboard",
+            ]
+            for path in project_paths:
+                expanded = os.path.expanduser(path)
+                if os.path.exists(expanded):
+                    start_dir = expanded
+                    break
+        
+        service_name = service.custom_name or service.name
+        
+        # Open Terminal with instructions
+        applescript = f'''
+tell application "Terminal"
+    activate
+    do script "cd '{start_dir}' && echo '=== Start {service_name} ===' && echo 'No ops/startup.sh found.' && echo 'Run your start command here (e.g., python manage.py runserver {port})' && echo '' && pwd"
+end tell
+'''
+        subprocess.run(['osascript', '-e', applescript])
     
     def _restart_service(self, port: int):
         """Restart a service"""

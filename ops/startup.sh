@@ -24,6 +24,52 @@ PID_FILE="$PROJECT_ROOT/dashboard.pid"
 echo -e "${BLUE}🚀 Personal Dashboard Startup${NC}"
 echo "=================================="
 
+# Function to check prerequisites
+check_prerequisites() {
+    echo -e "${BLUE}🔍 Checking prerequisites...${NC}"
+    
+    # Check Python 3
+    if ! command -v python3 &> /dev/null; then
+        echo -e "${RED}❌ Python 3 is not installed${NC}"
+        echo -e "${YELLOW}   Please install Python 3.8 or higher from https://python.org${NC}"
+        exit 1
+    fi
+    
+    # Check Python version
+    local python_version=$(python3 --version 2>&1 | awk '{print $2}')
+    local major=$(echo "$python_version" | cut -d. -f1)
+    local minor=$(echo "$python_version" | cut -d. -f2)
+    
+    if [ "$major" -lt 3 ] || ([ "$major" -eq 3 ] && [ "$minor" -lt 8 ]); then
+        echo -e "${RED}❌ Python $python_version is too old${NC}"
+        echo -e "${YELLOW}   Python 3.8 or higher is required${NC}"
+        exit 1
+    fi
+    
+    echo -e "${GREEN}   ✅ Python $python_version found${NC}"
+    
+    # Check pip
+    if ! python3 -m pip --version &> /dev/null; then
+        echo -e "${RED}❌ pip is not installed${NC}"
+        echo -e "${YELLOW}   Installing pip...${NC}"
+        python3 -m ensurepip --upgrade || {
+            echo -e "${RED}❌ Failed to install pip${NC}"
+            exit 1
+        }
+    fi
+    
+    echo -e "${GREEN}   ✅ pip is available${NC}"
+    
+    # Check for venv module
+    if ! python3 -m venv --help &> /dev/null; then
+        echo -e "${RED}❌ Python venv module is not available${NC}"
+        echo -e "${YELLOW}   On Ubuntu/Debian, install with: sudo apt-get install python3-venv${NC}"
+        exit 1
+    fi
+    
+    echo -e "${GREEN}   ✅ venv module available${NC}"
+}
+
 # Function to check if server is already running
 check_server_running() {
     if [ -f "$PID_FILE" ]; then
@@ -77,6 +123,21 @@ setup_venv() {
         exit 1
     fi
     
+    # Check if pip is working in the venv
+    if ! python -m pip --version &> /dev/null; then
+        echo -e "${YELLOW}⚠️  Virtual environment pip is corrupted, recreating...${NC}"
+        deactivate 2>/dev/null || true
+        rm -rf "$VENV_DIR"
+        echo "   Creating fresh virtual environment..."
+        $PYTHON_CMD -m venv "$VENV_DIR"
+        source "$VENV_DIR/bin/activate"
+        
+        if ! python -m pip --version &> /dev/null; then
+            echo -e "${RED}❌ Failed to create working virtual environment${NC}"
+            exit 1
+        fi
+    fi
+    
     echo -e "${GREEN}   ✅ Virtual environment active${NC}"
 }
 
@@ -84,16 +145,66 @@ setup_venv() {
 install_requirements() {
     echo -e "${BLUE}📦 Checking dependencies...${NC}"
     
-    if [ ! -f "requirements.txt" ]; then
-        echo -e "${RED}❌ requirements.txt not found${NC}"
+    if [ ! -f "$PROJECT_ROOT/requirements.txt" ]; then
+        echo -e "${RED}❌ requirements.txt not found at $PROJECT_ROOT/requirements.txt${NC}"
         exit 1
     fi
     
-    # Always install requirements to ensure they're up to date
-    echo "   Installing/updating dependencies..."
-    pip install --upgrade pip --quiet
-    pip install -r "$PROJECT_ROOT/requirements.txt" --quiet
-    echo -e "${GREEN}   ✅ Dependencies up to date${NC}"
+    # Check if we need to install/update
+    local requirements_hash=""
+    local installed_hash=""
+    
+    if [ -f "$PROJECT_ROOT/requirements.txt" ]; then
+        requirements_hash=$(md5sum "$PROJECT_ROOT/requirements.txt" 2>/dev/null | awk '{print $1}')
+    fi
+    
+    if [ -f "$VENV_DIR/.requirements_hash" ]; then
+        installed_hash=$(cat "$VENV_DIR/.requirements_hash")
+    fi
+    
+    if [ "$requirements_hash" != "$installed_hash" ] || [ -z "$installed_hash" ]; then
+        echo "   Installing/updating dependencies..."
+        
+        # Upgrade pip first (show output for transparency)
+        echo "   Upgrading pip..."
+        python -m pip install --upgrade pip || {
+            echo -e "${RED}❌ Failed to upgrade pip${NC}"
+            exit 1
+        }
+        
+        # Install requirements (show progress)
+        echo "   Installing requirements..."
+        python -m pip install -r "$PROJECT_ROOT/requirements.txt" || {
+            echo -e "${RED}❌ Failed to install dependencies${NC}"
+            echo -e "${YELLOW}   Check the error above and verify requirements.txt${NC}"
+            exit 1
+        }
+        
+        # Save hash to skip reinstall next time
+        echo "$requirements_hash" > "$VENV_DIR/.requirements_hash"
+        echo -e "${GREEN}   ✅ Dependencies installed successfully${NC}"
+    else
+        echo -e "${GREEN}   ✅ Dependencies already up to date${NC}"
+    fi
+    
+    # Verify critical dependencies are installed
+    echo -e "${BLUE}   Verifying critical packages...${NC}"
+    local critical_packages=("fastapi" "uvicorn" "pydantic" "requests" "pyyaml")
+    local missing_packages=()
+    
+    for package in "${critical_packages[@]}"; do
+        if ! python -m pip show "$package" &> /dev/null; then
+            missing_packages+=("$package")
+        fi
+    done
+    
+    if [ ${#missing_packages[@]} -gt 0 ]; then
+        echo -e "${RED}❌ Critical packages missing: ${missing_packages[*]}${NC}"
+        echo -e "${YELLOW}   Attempting to reinstall requirements...${NC}"
+        python -m pip install -r "$PROJECT_ROOT/requirements.txt" || exit 1
+    else
+        echo -e "${GREEN}   ✅ All critical packages verified${NC}"
+    fi
 }
 
 # Function to verify configuration
@@ -284,6 +395,7 @@ show_logs() {
 # Main execution logic
 case "${1:-start}" in
     "start")
+        check_prerequisites
         check_server_running
         setup_venv
         install_requirements
@@ -296,6 +408,7 @@ case "${1:-start}" in
         echo -e "${GREEN}✅ Dashboard stopped${NC}"
         ;;
     "restart")
+        check_prerequisites
         stop_server
         sleep 2
         setup_venv

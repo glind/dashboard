@@ -30,6 +30,9 @@ beautifulsoup4==4.13.5
 lxml==4.9.3
 feedparser==6.0.10
 
+# Desktop application
+pywebview>=4.4.1
+
 # Data analysis and visualization
 pandas==2.1.4
 numpy==1.26.2

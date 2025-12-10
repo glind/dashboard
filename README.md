@@ -10,7 +10,19 @@ A comprehensive dashboard that integrates email, calendar, tasks, GitHub, news, 
 
 ---
 
+## 📚 Documentation
+
+- 🚀 **Quick Start** (below) - Get running in 2 minutes
+- 🖥️ [Desktop App Quick Reference](DESKTOP_QUICK_START.md) - Commands and troubleshooting
+- 🔄 [Update Guide](UPDATE_GUIDE.md) - Visual guide to updating both modes
+- 🔧 [Desktop Workflow](DESKTOP_WORKFLOW.md) - Detailed development vs distribution
+- 📖 [Full Documentation](devdocs/) - Complete technical reference
+
+---
+
 ## 🚀 Quick Start
+
+### Web Version (Browser)
 
 ```bash
 # Clone repository
@@ -25,6 +37,85 @@ cd personal-dashboard
 ```
 
 🌐 **Dashboard URL**: http://localhost:8008
+
+### 🖥️ Desktop App (Native macOS)
+
+**Two ways to run as a native desktop app:**
+
+#### Option 1: Development Mode (Recommended for Daily Use)
+```bash
+./launch_desktop.sh
+```
+- ✅ **Auto-updates** - Just pull code and restart
+- ✅ Always runs your latest changes
+- ✅ No rebuild needed
+- 🚀 Fast startup
+
+**Updating with code changes:**
+```bash
+git pull origin main
+./launch_desktop.sh  # Restart - done!
+```
+
+#### Option 2: Standalone App (For Distribution)
+```bash
+./build_desktop.sh              # Build PersonalDashboard.app
+open dist/PersonalDashboard.app # Test it
+./build_installer.sh            # Create DMG installer (optional)
+```
+- 📦 Single self-contained `.app` file
+- ⚠️ **Frozen at build time** - doesn't auto-update
+- 🔄 Rebuild required after code changes
+
+**Updating the standalone app:**
+```bash
+git pull origin main
+./build_desktop.sh  # Rebuild with new code
+```
+
+**App Features:**
+- ✨ Native macOS window (no browser needed)
+- 🪶 Lightweight (uses native WebKit, not Chromium)  
+- 🔒 More secure (localhost only, no external access)
+- 🎯 Looks and feels like a real macOS app
+- 🐰 Custom Buildly logo icon
+
+**Quick Reference:**
+
+| Feature | Development Mode | Standalone App |
+|---------|-----------------|----------------|
+| **Command** | `./launch_desktop.sh` | `./build_desktop.sh` |
+| **Updates** | ✅ Auto (just restart) | ❌ Must rebuild |
+| **Use Case** | Daily development | Share with others |
+| **Startup** | 🚀 Fast (~2 sec) | 🚀 Fast (~2 sec) |
+| **Size** | Small (runs from source) | ~100MB (bundled) |
+
+**💡 Tip:** Use development mode for yourself, build standalone app only when sharing with others or deploying.
+
+---
+
+## 🔄 Updating the Dashboard
+
+### Web Version (Browser)
+```bash
+git pull origin main
+./ops/startup.sh restart  # Restart with new code
+```
+
+### Desktop App - Development Mode
+```bash
+git pull origin main
+./launch_desktop.sh  # Just restart - new code loads automatically
+```
+
+### Desktop App - Standalone Build
+```bash
+git pull origin main
+./build_desktop.sh  # Rebuild required to include changes
+open dist/PersonalDashboard.app
+```
+
+**That's it!** No complex update process. Pull code → restart or rebuild.
 
 ---
 

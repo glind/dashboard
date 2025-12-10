@@ -234,6 +234,15 @@ class GmailCollector:
             try:
                 creds.refresh(Request())
                 logger.info("Refreshed expired credentials")
+                
+                # Save refreshed credentials back to file
+                try:
+                    with open(token_file, 'w') as f:
+                        f.write(creds.to_json())
+                    logger.info(f"Saved refreshed credentials to {token_file}")
+                except Exception as save_error:
+                    logger.warning(f"Could not save refreshed credentials: {save_error}")
+                    
             except Exception as e:
                 logger.error(f"Failed to refresh credentials: {e}")
                 creds = None

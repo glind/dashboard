@@ -365,20 +365,22 @@ class AIService:
                 context_parts.append("(Calendar data not available)")
             
             # 5. Recent Emails (important/unread)
-            context_parts.append(f"\n=== RECENT IMPORTANT EMAILS ===")
+            context_parts.append(f"\n=== RECENT IMPORTANT EMAILS (You have full access to these) ===")
             try:
                 with self.db.get_connection() as conn:
                     cursor = conn.cursor()
+                    # Get both high priority and recent emails
                     cursor.execute("""
-                        SELECT subject, sender, snippet, priority, has_todos
+                        SELECT subject, sender, snippet, priority, has_todos, received_at
                         FROM emails
-                        WHERE priority = 'high' OR has_todos = 1
+                        WHERE priority = 'high' OR has_todos = 1 OR received_at >= date('now', '-2 days')
                         ORDER BY received_at DESC
-                        LIMIT 5
+                        LIMIT 10
                     """)
                     
                     emails = cursor.fetchall()
                     if emails:
+                        context_parts.append(f"You have access to {len(emails)} recent/important emails:")
                         for email in emails:
                             flags = []
                             if email.get('priority') == 'high':
@@ -393,9 +395,9 @@ class AIService:
                                 snippet = email['snippet'][:100]
                                 context_parts.append(f"    Preview: {snippet}...")
                     else:
-                        context_parts.append("No important emails")
-            except:
-                context_parts.append("(Email data not available)")
+                        context_parts.append("No recent emails found in database (may need to collect)")
+            except Exception as e:
+                context_parts.append(f"(Email data not available: {str(e)})")
             
             # 6. GitHub Activity
             context_parts.append(f"\n=== GITHUB ACTIVITY ===")
@@ -588,6 +590,14 @@ class AIService:
 - Update task status (complete, pending, etc.)
 - Suggest task priorities based on deadlines and importance
 
+**EMAIL & CALENDAR ACCESS:**
+- You HAVE FULL ACCESS to the user's emails shown in the context above
+- Review email subjects, senders, and snippets provided
+- Identify action items and follow-ups from emails
+- Suggest responses or actions based on email content
+- View calendar events and identify scheduling conflicts
+- ALL EMAIL AND CALENDAR DATA IS IN THE CONTEXT - USE IT!
+
 **NOTE & MEETING ANALYSIS:**
 - Summarize meeting transcripts and notes
 - Extract action items and decisions from notes
@@ -596,9 +606,12 @@ class AIService:
 
 **INSTRUCTIONS:**
 - Use the specific information provided in the context above
+- You have DIRECT ACCESS to emails, calendar, tasks, GitHub, and notes data
 - Reference actual task IDs like [task_123] when discussing tasks
+- Reference actual email subjects and senders when discussing emails
 - Be proactive: suggest priorities, identify conflicts, highlight important items
 - When asked about tasks/schedule/emails/github/news, use the actual data provided
+- NEVER say "I don't have access" - the data is in your context!
 
 === TASK OPERATIONS ===
 

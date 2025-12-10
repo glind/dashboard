@@ -147,19 +147,28 @@ class ObsidianNotesCollector:
             List of TODO items with context
         """
         todos = []
+        seen_tasks = set()
         
         # Match various TODO patterns
         patterns = [
-            r'- \[ \]\s+(.+)',  # - [ ] Task
-            r'TODO:\s+(.+)',     # TODO: Task
-            r'@todo\s+(.+)',     # @todo Task
-            r'Action:\s+(.+)',   # Action: Task
+            (r'- \[ \]\s+(.+)', 'checkbox'),  # - [ ] Task
+            (r'TODO:\s+(.+)', 'todo'),  # TODO: Task
+            (r'@todo\s+(.+)', 'todo_tag'),  # @todo Task
+            (r'Action:\s+(.+)', 'action'),  # Action: Task
+            (r'FIXME:\s+(.+)', 'fixme'),  # FIXME: Task
+            (r'NOTE:\s+(.+)', 'note'),  # NOTE: Task
         ]
         
-        for pattern in patterns:
+        for pattern, pattern_type in patterns:
             matches = re.finditer(pattern, content, re.IGNORECASE)
             for match in matches:
                 task_text = match.group(1).strip()
+                
+                # Skip if too short or already seen
+                if len(task_text) < 5 or task_text.lower() in seen_tasks:
+                    continue
+                
+                seen_tasks.add(task_text.lower())
                 
                 # Get surrounding context (line before and after)
                 start = max(0, match.start() - 100)
@@ -169,7 +178,7 @@ class ObsidianNotesCollector:
                 todos.append({
                     'text': task_text,
                     'context': context,
-                    'pattern': pattern
+                    'pattern_type': pattern_type
                 })
         
         return todos
@@ -272,11 +281,16 @@ class GoogleDriveNotesCollector:
                     # Extract TODOs from content
                     todos = self._extract_todos_from_gdoc(content)
                     
+                    # Clean up URL - remove usp parameter for better compatibility
+                    url = file.get('webViewLink', '')
+                    if '?usp=' in url:
+                        url = url.split('?usp=')[0]
+                    
                     notes.append({
                         'source': 'google_drive',
                         'title': file['name'],
                         'preview': content[:200] if content else '',
-                        'url': file['webViewLink'],
+                        'url': url,
                         'modified_at': file['modifiedTime'],
                         'created_at': file['createdTime'],
                         'todos': todos,
@@ -341,32 +355,53 @@ class GoogleDriveNotesCollector:
             List of TODO items
         """
         todos = []
+        seen_tasks = set()  # Avoid duplicates
         
-        # Match various TODO patterns
+        # Match various TODO patterns (order matters - more specific first)
         patterns = [
-            r'(?:^|\n)\s*[-•]\s*\[\s*\]\s+(.+)',  # - [ ] Task or • [ ] Task
-            r'(?:^|\n)\s*TODO:\s+(.+)',            # TODO: Task
-            r'(?:^|\n)\s*Action\s*Item:\s+(.+)',   # Action Item: Task
-            r'(?:^|\n)\s*@(\w+):\s+(.+)',          # @person: Task
+            (r'(?:^|\n)\s*[-•]\s*\[\s*\]\s+(.+)', 'checkbox'),  # - [ ] Task or • [ ] Task
+            (r'(?:^|\n)\s*Action\s*Items?:\s*\n\s*[-•]\s+(.+)', 'action_item'),  # Action Item:\n- Task
+            (r'(?:^|\n)\s*Next\s*Steps?:\s*\n\s*[-•]\s+(.+)', 'next_step'),  # Next Steps:\n- Task
+            (r'(?:^|\n)\s*Follow[- ]?up:\s*\n\s*[-•]\s+(.+)', 'follow_up'),  # Follow-up:\n- Task
+            (r'(?:^|\n)\s*TODO:\s+(.+)', 'todo'),  # TODO: Task
+            (r'(?:^|\n)\s*Action\s*Items?:\s+(.+)', 'action_item_inline'),  # Action Item: Task
+            (r'(?:^|\n)\s*[-•]\s+([A-Z][\w\s]*?)\s+(?:will|should|needs? to|to)\s+(.+?)(?:\.|$)', 'action_sentence'),  # - Person will do something
+            (r'\b(?:will|should|need to|must)\s+((?:follow up|reach out|send|create|update|review|schedule|prepare|contact|call|email)[\w\s]{10,80})(?:\.|,|\n)', 'commitment'),  # Natural language commitments
+            (r'@(\w+):\s+(.+)', 'mention'),  # @person: Task
         ]
         
-        for pattern in patterns:
+        for pattern, pattern_type in patterns:
             matches = re.finditer(pattern, content, re.IGNORECASE | re.MULTILINE)
             for match in matches:
-                if len(match.groups()) == 2:
-                    task_text = f"{match.group(1)}: {match.group(2)}"
+                # Extract task text based on pattern type
+                if pattern_type == 'action_sentence':
+                    task_text = f"{match.group(1)} will {match.group(2)}".strip()
+                elif pattern_type == 'commitment':
+                    task_text = match.group(1).strip()
+                elif pattern_type == 'mention' and len(match.groups()) == 2:
+                    task_text = f"{match.group(1)}: {match.group(2)}".strip()
                 else:
                     task_text = match.group(1).strip()
                 
+                # Clean up task text
+                task_text = task_text.strip('.,;:')
+                
+                # Skip if too short or already seen
+                if len(task_text) < 10 or task_text.lower() in seen_tasks:
+                    continue
+                
+                seen_tasks.add(task_text.lower())
+                
                 # Get surrounding context
-                start = max(0, match.start() - 100)
-                end = min(len(content), match.end() + 100)
+                start = max(0, match.start() - 150)
+                end = min(len(content), match.end() + 150)
                 context = content[start:end].strip()
                 
                 todos.append({
                     'text': task_text,
                     'context': context,
-                    'pattern': pattern
+                    'pattern_type': pattern_type,
+                    'confidence': 'high' if pattern_type in ['checkbox', 'action_item', 'todo'] else 'medium'
                 })
         
         return todos

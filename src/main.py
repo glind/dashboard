@@ -67,6 +67,7 @@ except ImportError as e:
 try:
     from processors.ai_providers import ai_manager, create_provider, OllamaProvider, OpenAIProvider, GeminiProvider
     from processors.ai_training_collector import training_collector
+    from services.ai_service import get_ai_service
     AI_ASSISTANT_AVAILABLE = True
 except ImportError as e:
     print(f"Note: Could not import AI Assistant modules: {e}")
@@ -76,6 +77,17 @@ except ImportError as e:
 logging.basicConfig(level=logging.INFO)
 
 app = FastAPI(title="Simple Personal Dashboard")
+
+# Register custom module routers
+try:
+    from modules.music_news.endpoints import router as music_news_router
+    from modules.vanity_alerts.endpoints import router as vanity_alerts_router
+    
+    app.include_router(music_news_router)
+    app.include_router(vanity_alerts_router)
+    logging.info("✅ Custom modules registered (music_news, vanity_alerts)")
+except ImportError as e:
+    logging.warning(f"Could not load custom modules: {e}")
 
 
 # Health check endpoint for monitoring
@@ -825,7 +837,7 @@ async def get_ai_settings():
 
 @app.post("/api/settings/ai")
 async def update_ai_settings(settings: Dict[str, Any]):
-    """Update AI/Ollama configuration settings."""
+    """Update AI/Ollama configuration settings and create/update provider."""
     try:
         from database import DatabaseManager
         db = DatabaseManager()
@@ -851,7 +863,7 @@ async def update_ai_settings(settings: Dict[str, Any]):
             updated.append('ollama_model')
         
         # Update OpenAI settings
-        if 'openai_api_key' in settings:
+        if 'openai_api_key' in settings and settings['openai_api_key']:
             db.save_setting('openai_api_key', settings['openai_api_key'])
             updated.append('openai_api_key')
         
@@ -860,7 +872,7 @@ async def update_ai_settings(settings: Dict[str, Any]):
             updated.append('openai_model')
         
         # Update Gemini settings
-        if 'gemini_api_key' in settings:
+        if 'gemini_api_key' in settings and settings['gemini_api_key']:
             db.save_setting('gemini_api_key', settings['gemini_api_key'])
             updated.append('gemini_api_key')
         
@@ -870,9 +882,125 @@ async def update_ai_settings(settings: Dict[str, Any]):
         
         logger.info(f"Updated AI settings: {updated}")
         
+        # Now create/update the actual AI provider based on the selected provider type
+        if AI_ASSISTANT_AVAILABLE and 'ai_provider' in settings:
+            try:
+                provider_type = settings['ai_provider']
+                
+                # First, set ALL providers to non-default (this ensures clean state)
+                with db.get_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("UPDATE ai_providers SET is_default = 0")
+                    conn.commit()
+                
+                if provider_type == 'ollama':
+                    # Create/update Ollama provider
+                    ollama_host = settings.get('ollama_host', db.get_setting('ollama_host', 'localhost'))
+                    ollama_port = settings.get('ollama_port', db.get_setting('ollama_port', 11434))
+                    ollama_model = settings.get('ollama_model', db.get_setting('ollama_model', 'llama3.2:latest'))
+                    
+                    config = {
+                        'base_url': f'http://{ollama_host}:{ollama_port}',
+                        'model_name': ollama_model,
+                        'is_default': True
+                    }
+                    
+                    provider_name = f'Ollama ({ollama_host})'
+                    
+                    # Create provider instance and test
+                    provider = create_provider('ollama', provider_name, config)
+                    health_ok = await provider.health_check()
+                    
+                    if health_ok:
+                        # Save to database (update if exists, create if not)
+                        provider_id = db.save_ai_provider(provider_name, 'ollama', config)
+                        
+                        # Clear ai_manager and register only this provider as default
+                        ai_manager.providers.clear()
+                        ai_manager.default_provider = None
+                        ai_manager.register_provider(provider, is_default=True)
+                        
+                        logger.info(f"Created/updated Ollama provider: {provider_name} as default")
+                    else:
+                        logger.warning(f"Ollama provider health check failed for {provider_name}")
+                
+                elif provider_type == 'openai':
+                    # Create/update OpenAI provider
+                    api_key = settings.get('openai_api_key', db.get_setting('openai_api_key', ''))
+                    model = settings.get('openai_model', db.get_setting('openai_model', 'gpt-4o-mini'))
+                    
+                    if api_key:
+                        config = {
+                            'api_key': api_key,
+                            'model_name': model,
+                            'is_default': True
+                        }
+                        
+                        provider_name = f'OpenAI ({model})'
+                        
+                        # Create provider instance and test
+                        provider = create_provider('openai', provider_name, config)
+                        health_ok = await provider.health_check()
+                        
+                        if health_ok:
+                            # Save to database
+                            provider_id = db.save_ai_provider(provider_name, 'openai', config)
+                            
+                            # Clear ai_manager and register only this provider as default
+                            ai_manager.providers.clear()
+                            ai_manager.default_provider = None
+                            ai_manager.register_provider(provider, is_default=True)
+                            
+                            logger.info(f"Created/updated OpenAI provider: {provider_name} as default")
+                        else:
+                            logger.warning(f"OpenAI provider health check failed")
+                
+                elif provider_type == 'gemini':
+                    # Create/update Gemini provider
+                    api_key = settings.get('gemini_api_key', db.get_setting('gemini_api_key', ''))
+                    model = settings.get('gemini_model', db.get_setting('gemini_model', 'gemini-pro'))
+                    
+                    if api_key:
+                        config = {
+                            'api_key': api_key,
+                            'model_name': model,
+                            'is_default': True
+                        }
+                        
+                        provider_name = f'Gemini ({model})'
+                        
+                        # Create provider instance and test
+                        provider = create_provider('gemini', provider_name, config)
+                        health_ok = await provider.health_check()
+                        
+                        if health_ok:
+                            # Save to database
+                            provider_id = db.save_ai_provider(provider_name, 'gemini', config)
+                            
+                            # Clear ai_manager and register only this provider as default
+                            ai_manager.providers.clear()
+                            ai_manager.default_provider = None
+                            ai_manager.register_provider(provider, is_default=True)
+                            
+                            logger.info(f"Created/updated Gemini provider: {provider_name} as default")
+                        else:
+                            logger.warning(f"Gemini provider health check failed")
+                
+            except Exception as e:
+                logger.error(f"Error creating/updating AI provider: {e}")
+                # Don't fail the whole request, just log the error
+        
+        # Reset the AI service singleton to pick up new provider
+        if AI_ASSISTANT_AVAILABLE:
+            try:
+                ai_service = get_ai_service(db, settings)
+                ai_service.reset_provider()
+            except:
+                pass
+        
         return {
             "success": True,
-            "message": f"Updated {len(updated)} AI settings",
+            "message": f"Updated {len(updated)} AI settings and initialized provider",
             "updated": updated
         }
         
@@ -1919,12 +2047,12 @@ async def scan_calendar_for_tasks():
         settings = Settings()
         calendar_collector = CalendarCollector(settings)
         
-        # Initialize AI provider with proper config
-        ai_config = {
-            'base_url': db.get_setting('ollama_url', 'http://localhost:11434'),
-            'model_name': db.get_setting('ollama_model', 'llama3.2:latest')
-        }
-        ai_provider = OllamaProvider('ollama', ai_config)
+        # Use centralized AI service
+        ai_service = get_ai_service(db, settings)
+        ai_provider = ai_service.get_provider()
+        
+        if not ai_provider:
+            return {"error": "AI provider not configured", "success": False}
         
         # Scan last 2 weeks
         end_date = datetime.now()
@@ -2059,12 +2187,12 @@ async def scan_notes_for_tasks():
         
         logger.info(f"Scanning notes - Obsidian: {obsidian_path}, GDrive: {gdrive_folder_id}")
         
-        # Initialize AI provider
-        ai_config = {
-            'base_url': db.get_setting('ollama_url', 'http://localhost:11434'),
-            'model_name': db.get_setting('ollama_model', 'llama3.2:latest')
-        }
-        ai_provider = OllamaProvider('ollama', ai_config)
+        # Use centralized AI service
+        ai_service = get_ai_service(db, settings)
+        ai_provider = ai_service.get_provider()
+        
+        if not ai_provider:
+            return {"error": "AI provider not configured", "success": False}
         
         # Collect notes (last 30 days worth)
         result = collect_all_notes(
@@ -2969,6 +3097,15 @@ async def save_feedback(request: Request):
                     # Update AI training data asynchronously
                     db.update_ai_training_from_feedback()
                     logger.info(f"Updated AI training data with new {feedback_type} feedback")
+                    
+                    # Learn from feedback using AI service
+                    ai_service = get_ai_service(db, settings)
+                    ai_service.learn_from_feedback(
+                        item_type=item_type,
+                        item_id=item_id,
+                        feedback=feedback_type,
+                        item_data={'title': item_title, 'content': item_content}
+                    )
                 except Exception as e:
                     logger.warning(f"Could not update AI training data: {e}")
             
@@ -3938,7 +4075,7 @@ async def build_ai_context(user_message: str) -> str:
 
 @app.post("/api/ai/chat")
 async def chat_with_ai(request: Request):
-    """Chat with AI assistant."""
+    """Chat with AI assistant using centralized AI service."""
     if not AI_ASSISTANT_AVAILABLE:
         return {"error": "AI Assistant not available"}
     
@@ -3946,105 +4083,609 @@ async def chat_with_ai(request: Request):
         data = await request.json()
         message = data.get('message', '')
         conversation_id = data.get('conversation_id')
-        provider_name = data.get('provider')
-        frontend_context = data.get('context', {})
+        stream = data.get('stream', False)
         
         if not message:
             return {"error": "Message is required"}
-        
-        # Get provider
-        provider = ai_manager.get_provider(provider_name)
-        if not provider:
-            return {"error": "No AI provider available"}
         
         # Create conversation if needed
         if not conversation_id:
             conversation_id = f"conv_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
             db.save_ai_conversation(conversation_id, 1, f"Chat {datetime.now().strftime('%H:%M')}")
         
-        # Get conversation history
-        messages = db.get_ai_conversation_history(conversation_id, limit=10)
+        # If streaming requested, use SSE endpoint
+        if stream:
+            return {"error": "Use /api/ai/chat/stream for streaming responses"}
         
-        # Get user profile for personalization
-        user_profile = db.get_user_profile()
+        # Use centralized AI service
+        ai_service = get_ai_service(db, settings)
+        result = await ai_service.chat(
+            message=message,
+            conversation_id=conversation_id,
+            include_context=True
+        )
         
-        # Build context from frontend data and database
-        context_data = await build_ai_context_with_frontend(message, frontend_context)
-        
-        # Build user profile context
-        profile_context = ""
-        if user_profile:
-            profile_context = f"""
-USER PROFILE:
-- Name: {user_profile.get('preferred_name') or user_profile.get('full_name', 'User')}
-- Role: {user_profile.get('role', 'N/A')} at {user_profile.get('company', 'N/A')}
-- Focus: {user_profile.get('work_focus', 'N/A')}
-- Interests: {user_profile.get('interests', 'N/A')}
-- Communication Style: {user_profile.get('communication_style', 'Professional and friendly')}
-- Work Hours: {user_profile.get('work_hours', 'N/A')}
-- Priorities: {user_profile.get('priorities', 'N/A')}
-"""
-        
-        # Convert to provider format with enhanced context
-        chat_messages = []
-        
-        # Add enhanced system message with current data context
-        system_message = f"""You are a personal AI assistant with DIRECT ACCESS to the user's dashboard data. 
-
-{profile_context}
-
-Current Context:
-{context_data}
-
-CRITICAL INSTRUCTIONS:
-1. You CAN SEE all the user's tasks, calendar events, and emails listed above - USE THEM!
-2. When asked about tasks, calendar, or emails, reference the SPECIFIC items shown above by title/subject
-3. Do NOT say "I need more information" or "tell me about your tasks" - you already have the data
-4. Be proactive: suggest priorities, identify conflicts, highlight important deadlines
-5. Reference specific task titles, event names, email subjects when answering
-6. If the context shows no data for something, then say "I don't see any [tasks/events/emails] in your dashboard"
-
-Provide helpful, accurate responses based on this real data. Always use the actual data shown above rather than asking for it."""
-        
-        chat_messages.append({
-            'role': 'system',
-            'content': system_message
-        })
-        
-        # Add conversation history
-        for msg in messages:
-            if msg['role'] != 'system':  # Avoid duplicate system messages
-                chat_messages.append({
-                    'role': msg['role'],
-                    'content': msg['content']
-                })
-        
-        # Add current message
-        chat_messages.append({
-            'role': 'user',
-            'content': message
-        })
-        
-        # Get AI response
-        response = await provider.chat(chat_messages)
-        
-        # Save messages
-        user_msg_id = f"msg_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}_user"
-        ai_msg_id = f"msg_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}_ai"
-        
-        db.save_ai_message(user_msg_id, conversation_id, 'user', message)
-        db.save_ai_message(ai_msg_id, conversation_id, 'assistant', response)
+        if not result.get('success'):
+            return {"error": result.get('error', 'Unknown error')}
         
         return {
-            "response": response,
+            "response": result['response'],
             "conversation_id": conversation_id,
-            "provider": provider.name
+            "provider": result['provider'],
+            "context_hash": result.get('context_hash'),
+            "success": True
         }
         
     except Exception as e:
         logger.error(f"Error in AI chat: {e}")
-        return {"error": f"Chat error: {str(e)}"}
-        return {"error": str(e)}
+        return {"error": str(e), "success": False}
+
+
+@app.get("/api/ai/chat/stream")
+async def chat_with_ai_stream(
+    message: str,
+    conversation_id: str = None,
+    quiet: bool = False
+):
+    """Chat with AI assistant using Server-Sent Events for real-time updates."""
+    if not AI_ASSISTANT_AVAILABLE:
+        return {"error": "AI Assistant not available"}
+    
+    try:
+        from fastapi.responses import StreamingResponse
+        import asyncio
+        import json
+        
+        quiet_mode = quiet
+        
+        if not message:
+            return {"error": "Message is required"}
+        
+        # Create conversation if needed
+        if not conversation_id:
+            conversation_id = f"conv_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            db.save_ai_conversation(conversation_id, 1, f"Chat {datetime.now().strftime('%H:%M')}")
+        
+        async def event_generator():
+            """Generate Server-Sent Events with progress updates."""
+            try:
+                # Send initial status
+                if not quiet_mode:
+                    yield f"data: {json.dumps({'type': 'status', 'message': '🤔 Analyzing your request...'})}\n\n"
+                    await asyncio.sleep(0.1)
+                
+                # Check if this is a complex task
+                message_lower = message.lower()
+                is_scan_task = any(word in message_lower for word in ['scan', 'analyze', 'extract', 'search', 'find', 'review'])
+                is_meeting_task = any(word in message_lower for word in ['meeting', 'summarize', 'notes'])
+                is_task_creation = any(word in message_lower for word in ['create task', 'add task', 'make task'])
+                
+                # Build context with progress updates
+                if not quiet_mode:
+                    yield f"data: {json.dumps({'type': 'status', 'message': '📊 Loading your dashboard data...'})}\n\n"
+                    await asyncio.sleep(0.1)
+                
+                ai_service = get_ai_service(db, settings)
+                
+                # Notify about data collection
+                if not quiet_mode and (is_scan_task or is_meeting_task):
+                    if 'task' in message_lower or 'todo' in message_lower:
+                        yield f"data: {json.dumps({'type': 'status', 'message': '✓ Loaded tasks from database'})}\n\n"
+                    if 'calendar' in message_lower or 'meeting' in message_lower or 'event' in message_lower:
+                        yield f"data: {json.dumps({'type': 'status', 'message': '✓ Loaded calendar events'})}\n\n"
+                    if 'email' in message_lower:
+                        yield f"data: {json.dumps({'type': 'status', 'message': '✓ Loaded recent emails'})}\n\n"
+                    if 'note' in message_lower or 'meeting' in message_lower:
+                        yield f"data: {json.dumps({'type': 'status', 'message': '📝 Scanning notes (Obsidian + Google Drive)...'})}\n\n"
+                        await asyncio.sleep(0.2)
+                    if 'github' in message_lower:
+                        yield f"data: {json.dumps({'type': 'status', 'message': '✓ Loaded GitHub issues'})}\n\n"
+                    
+                    await asyncio.sleep(0.1)
+                    yield f"data: {json.dumps({'type': 'status', 'message': '🧠 Thinking...'})}\n\n"
+                
+                # Get AI response
+                result = await ai_service.chat(
+                    message=message,
+                    conversation_id=conversation_id,
+                    include_context=True
+                )
+                
+                if not result.get('success'):
+                    yield f"data: {json.dumps({'type': 'error', 'message': result.get('error', 'Unknown error')})}\n\n"
+                    return
+                
+                # Send the response
+                response_text = result['response']
+                
+                # If it's a task creation request, notify about next steps
+                if not quiet_mode and is_task_creation and 'yes' in message_lower:
+                    yield f"data: {json.dumps({'type': 'status', 'message': '✓ Creating tasks...'})}\n\n"
+                    await asyncio.sleep(0.1)
+                
+                # Stream the response in chunks for better UX
+                chunk_size = 100
+                for i in range(0, len(response_text), chunk_size):
+                    chunk = response_text[i:i+chunk_size]
+                    yield f"data: {json.dumps({'type': 'response', 'content': chunk})}\n\n"
+                    await asyncio.sleep(0.05)  # Small delay for smooth streaming
+                
+                # Send completion signal
+                yield f"data: {json.dumps({'type': 'done', 'conversation_id': conversation_id, 'provider': result['provider']})}\n\n"
+                
+            except Exception as e:
+                logger.error(f"Error in streaming chat: {e}")
+                yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+        
+        return StreamingResponse(
+            event_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no"  # Disable nginx buffering
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"Error setting up streaming chat: {e}")
+        return {"error": str(e), "success": False}
+
+
+@app.get("/api/ai/anticipate")
+async def get_ai_anticipations():
+    """Get AI-powered anticipations and suggestions based on user patterns."""
+    if not AI_ASSISTANT_AVAILABLE:
+        return {"suggestions": [], "success": False, "error": "AI not available"}
+    
+    try:
+        ai_service = get_ai_service(db, settings)
+        suggestions = ai_service.anticipate_needs()
+        
+        return {
+            "success": True,
+            "suggestions": suggestions,
+            "count": len(suggestions)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting AI anticipations: {e}")
+        return {"suggestions": [], "success": False, "error": str(e)}
+
+
+@app.get("/api/ai/profile")
+async def get_ai_user_profile():
+    """Get AI-built user profile."""
+    if not AI_ASSISTANT_AVAILABLE:
+        return {"error": "AI not available", "success": False}
+    
+    try:
+        ai_service = get_ai_service(db, settings)
+        profile = ai_service.build_user_profile(force_refresh=True)
+        
+        return {
+            "success": True,
+            "profile": profile
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting AI profile: {e}")
+        return {"error": str(e), "success": False}
+
+
+@app.get("/api/ai/context")
+async def get_ai_context():
+    """Get current AI context (for debugging)."""
+    if not AI_ASSISTANT_AVAILABLE:
+        return {"error": "AI not available", "success": False}
+    
+    try:
+        ai_service = get_ai_service(db, settings)
+        context = ai_service.build_context(force_refresh=True)
+        context_hash = ai_service.get_context_hash(context)
+        
+        return {
+            "success": True,
+            "context": context,
+            "context_hash": context_hash,
+            "context_length": len(context)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting AI context: {e}")
+        return {"error": str(e), "success": False}
+
+
+
+
+@app.post("/api/ai/action/create-task")
+async def ai_create_task(request: Request):
+    """AI-initiated task creation (requires user approval)."""
+    if not AI_ASSISTANT_AVAILABLE:
+        return {"error": "AI not available", "success": False}
+    
+    try:
+        data = await request.json()
+        approved = data.get('approved', False)
+        
+        if not approved:
+            return {"error": "Action not approved by user", "success": False}
+        
+        title = data.get('title', '')
+        description = data.get('description', '')
+        priority = data.get('priority', 'medium')
+        due_date = data.get('due_date')
+        
+        if not title:
+            return {"error": "Task title required", "success": False}
+        
+        ai_service = get_ai_service(db, settings)
+        result = ai_service.create_task(title, description, priority, due_date)
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error in AI task creation: {e}")
+        return {"error": str(e), "success": False}
+
+
+@app.post("/api/ai/action/complete-task")
+async def ai_complete_task(request: Request):
+    """AI-initiated task completion (requires user approval)."""
+    if not AI_ASSISTANT_AVAILABLE:
+        return {"error": "AI not available", "success": False}
+    
+    try:
+        data = await request.json()
+        approved = data.get('approved', False)
+        task_id = data.get('task_id', '')
+        
+        if not approved:
+            return {"error": "Action not approved by user", "success": False}
+        
+        if not task_id:
+            return {"error": "Task ID required", "success": False}
+        
+        ai_service = get_ai_service(db, settings)
+        result = ai_service.complete_task(task_id)
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error in AI task completion: {e}")
+        return {"error": str(e), "success": False}
+
+
+@app.post("/api/ai/action/delete-task")
+async def ai_delete_task(request: Request):
+    """AI-initiated task deletion (requires user approval)."""
+    if not AI_ASSISTANT_AVAILABLE:
+        return {"error": "AI not available", "success": False}
+    
+    try:
+        data = await request.json()
+        approved = data.get('approved', False)
+        task_id = data.get('task_id', '')
+        
+        if not approved:
+            return {"error": "Action not approved by user", "success": False}
+        
+        if not task_id:
+            return {"error": "Task ID required", "success": False}
+        
+        ai_service = get_ai_service(db, settings)
+        result = ai_service.delete_task(task_id)
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error in AI task deletion: {e}")
+        return {"error": str(e), "success": False}
+
+
+@app.post("/api/ai/action/create-tasks-batch")
+async def ai_create_tasks_batch(request: Request):
+    """AI-initiated batch task creation (requires user approval)."""
+    if not AI_ASSISTANT_AVAILABLE:
+        return {"error": "AI not available", "success": False}
+    
+    try:
+        data = await request.json()
+        approved = data.get('approved', False)
+        tasks = data.get('tasks', [])
+        sync_to_ticktick = data.get('sync_to_ticktick', False)
+        
+        if not approved:
+            return {"error": "Action not approved by user", "success": False}
+        
+        if not tasks or not isinstance(tasks, list):
+            return {"error": "Tasks array required", "success": False}
+        
+        # Create tasks in batch
+        ai_service = get_ai_service(db, settings)
+        result = ai_service.create_tasks_batch(tasks)
+        
+        # Sync to TickTick if requested
+        if sync_to_ticktick and result.get('success') and result.get('created_count', 0) > 0:
+            try:
+                if COLLECTORS_AVAILABLE and TASK_MANAGER_AVAILABLE:
+                    from processors.task_manager import TaskManager
+                    from config.settings import Settings
+                    task_manager = TaskManager(Settings())
+                    sync_result = await task_manager.sync_with_ticktick(direction='to_ticktick')
+                    result['ticktick_sync'] = sync_result
+                    logger.info(f"Batch synced {result['created_count']} AI tasks to TickTick")
+                else:
+                    result['ticktick_sync'] = {"error": "TickTick sync not available"}
+            except Exception as sync_err:
+                logger.error(f"Error syncing AI tasks to TickTick: {sync_err}")
+                result['ticktick_sync'] = {"error": str(sync_err)}
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error in AI batch task creation: {e}")
+        return {"error": str(e), "success": False}
+
+
+@app.post("/api/ai/scan-for-tasks")
+async def ai_scan_for_tasks(request: Request):
+    """
+    AI-powered scan of calendar, emails, GitHub, and notes to find tasks.
+    Uses AI to analyze, write, review, and prioritize tasks.
+    """
+    if not AI_ASSISTANT_AVAILABLE:
+        return {"error": "AI not available", "success": False}
+    
+    try:
+        data = await request.json()
+        sources = data.get('sources', ['calendar', 'emails', 'github', 'notes'])
+        auto_create = data.get('auto_create', False)  # Auto-create without approval
+        
+        logger.info(f"AI scanning for tasks from sources: {sources}")
+        
+        # Collect data from requested sources
+        scan_results = {
+            'calendar_items': [],
+            'email_items': [],
+            'github_items': [],
+            'note_items': [],
+            'suggested_tasks': []
+        }
+        
+        # Scan Calendar
+        if 'calendar' in sources:
+            try:
+                with db.get_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("""
+                        SELECT summary, description, start_time, end_time, location
+                        FROM calendar_events
+                        WHERE date(start_time) >= date('now')
+                        AND date(start_time) <= date('now', '+14 days')
+                        ORDER BY start_time
+                        LIMIT 20
+                    """)
+                    events = cursor.fetchall()
+                    scan_results['calendar_items'] = [dict(e) for e in events]
+            except Exception as e:
+                logger.error(f"Error scanning calendar: {e}")
+        
+        # Scan Emails
+        if 'emails' in sources:
+            try:
+                with db.get_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("""
+                        SELECT subject, sender, snippet, priority, has_todos
+                        FROM emails
+                        WHERE has_todos = 1 OR priority = 'high'
+                        ORDER BY received_date DESC
+                        LIMIT 20
+                    """)
+                    emails = cursor.fetchall()
+                    scan_results['email_items'] = [dict(e) for e in emails]
+            except Exception as e:
+                logger.error(f"Error scanning emails: {e}")
+        
+        # Scan GitHub
+        if 'github' in sources:
+            try:
+                with db.get_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("""
+                        SELECT title, body, state, repo, labels, url
+                        FROM github_issues
+                        WHERE state = 'open'
+                        ORDER BY updated_at DESC
+                        LIMIT 20
+                    """)
+                    issues = cursor.fetchall()
+                    scan_results['github_items'] = [dict(i) for i in issues]
+            except Exception as e:
+                logger.error(f"Error scanning GitHub: {e}")
+        
+        # Scan Notes
+        if 'notes' in sources:
+            try:
+                from collectors.notes_collector import collect_all_notes
+                from database import get_credentials
+                
+                notes_config = get_credentials('notes') or {}
+                obsidian_path = (
+                    os.getenv('OBSIDIAN_VAULT_PATH') or
+                    db.get_setting('obsidian_vault_path') or
+                    notes_config.get('obsidian_vault_path')
+                )
+                gdrive_folder_id = (
+                    os.getenv('GOOGLE_DRIVE_NOTES_FOLDER_ID') or
+                    db.get_setting('google_drive_notes_folder_id') or
+                    notes_config.get('google_drive_folder_id')
+                )
+                
+                result = collect_all_notes(
+                    obsidian_path=obsidian_path,
+                    gdrive_folder_id=gdrive_folder_id,
+                    limit=20
+                )
+                scan_results['note_items'] = result.get('notes', [])
+            except Exception as e:
+                logger.error(f"Error scanning notes: {e}")
+        
+        # Use AI to analyze and create task suggestions
+        ai_service = get_ai_service(db, settings)
+        
+        # Build prompt for AI
+        prompt = f"""Analyze the following data and extract actionable tasks. For each task, provide:
+- Title (clear, actionable)
+- Description (context and details)
+- Priority (high, medium, low)
+- Due date (YYYY-MM-DD format, calculated from context)
+- Category (from source type)
+
+Today's date: {datetime.now().strftime('%Y-%m-%d')}
+
+CALENDAR EVENTS ({len(scan_results['calendar_items'])} items):
+{_format_calendar_for_ai(scan_results['calendar_items'])}
+
+EMAILS ({len(scan_results['email_items'])} items):
+{_format_emails_for_ai(scan_results['email_items'])}
+
+GITHUB ISSUES ({len(scan_results['github_items'])} items):
+{_format_github_for_ai(scan_results['github_items'])}
+
+NOTES ({len(scan_results['note_items'])} items):
+{_format_notes_for_ai(scan_results['note_items'])}
+
+Extract all actionable tasks. Format each as:
+TASK: [title]
+DESC: [description]
+PRIORITY: [high|medium|low]
+DUE: [YYYY-MM-DD]
+CATEGORY: [calendar|email|github|notes]
+---
+"""
+        
+        # Get AI analysis
+        ai_response = await ai_service.chat(prompt, include_context=False)
+        
+        if ai_response.get('success'):
+            # Parse AI response into tasks
+            tasks = _parse_ai_task_response(ai_response.get('response', ''))
+            scan_results['suggested_tasks'] = tasks
+            
+            # Auto-create if requested
+            if auto_create and tasks:
+                creation_result = ai_service.create_tasks_batch(tasks)
+                scan_results['creation_result'] = creation_result
+        
+        scan_results['success'] = True
+        scan_results['total_items_scanned'] = (
+            len(scan_results['calendar_items']) +
+            len(scan_results['email_items']) +
+            len(scan_results['github_items']) +
+            len(scan_results['note_items'])
+        )
+        scan_results['ai_response'] = ai_response.get('response', '') if ai_response.get('success') else None
+        
+        logger.info(f"AI scan complete: {len(scan_results['suggested_tasks'])} tasks suggested")
+        
+        return scan_results
+        
+    except Exception as e:
+        logger.error(f"Error in AI task scanning: {e}")
+        import traceback
+        traceback.print_exc()
+        return {"error": str(e), "success": False}
+
+
+def _format_calendar_for_ai(events):
+    """Format calendar events for AI analysis."""
+    if not events:
+        return "No calendar events"
+    
+    lines = []
+    for event in events[:10]:
+        lines.append(f"- {event.get('start_time', 'No date')}: {event.get('summary', 'Untitled')}")
+        if event.get('description'):
+            lines.append(f"  Details: {event.get('description')[:200]}")
+    return "\n".join(lines)
+
+
+def _format_emails_for_ai(emails):
+    """Format emails for AI analysis."""
+    if not emails:
+        return "No emails"
+    
+    lines = []
+    for email in emails[:10]:
+        priority_flag = "[HIGH] " if email.get('priority') == 'high' else ""
+        todo_flag = "[TODO] " if email.get('has_todos') else ""
+        lines.append(f"- {priority_flag}{todo_flag}From {email.get('sender', 'Unknown')}: {email.get('subject', 'No subject')}")
+        if email.get('snippet'):
+            lines.append(f"  Preview: {email.get('snippet')[:200]}")
+    return "\n".join(lines)
+
+
+def _format_github_for_ai(issues):
+    """Format GitHub issues for AI analysis."""
+    if not issues:
+        return "No GitHub issues"
+    
+    lines = []
+    for issue in issues[:10]:
+        lines.append(f"- [{issue.get('repo', 'unknown')}] {issue.get('title', 'Untitled')}")
+        if issue.get('body'):
+            lines.append(f"  Description: {issue.get('body')[:200]}")
+        if issue.get('labels'):
+            lines.append(f"  Labels: {issue.get('labels')}")
+    return "\n".join(lines)
+
+
+def _format_notes_for_ai(notes):
+    """Format notes for AI analysis."""
+    if not notes:
+        return "No notes"
+    
+    lines = []
+    for note in notes[:10]:
+        source_icon = "Obsidian" if note.get('source') == 'obsidian' else "Google Drive"
+        todo_count = len(note.get('todos', []))
+        lines.append(f"- [{source_icon}] {note.get('title', 'Untitled')} ({todo_count} TODOs)")
+        if note.get('preview'):
+            lines.append(f"  Preview: {note.get('preview')[:200]}")
+        for todo in note.get('todos', [])[:3]:
+            lines.append(f"    • {todo.get('text', '')}")
+    return "\n".join(lines)
+
+
+def _parse_ai_task_response(response: str):
+    """Parse AI response into structured task list."""
+    tasks = []
+    current_task = {}
+    
+    for line in response.split('\n'):
+        line = line.strip()
+        if line.startswith('TASK:'):
+            if current_task:
+                tasks.append(current_task)
+            current_task = {'title': line.replace('TASK:', '').strip()}
+        elif line.startswith('DESC:'):
+            current_task['description'] = line.replace('DESC:', '').strip()
+        elif line.startswith('PRIORITY:'):
+            current_task['priority'] = line.replace('PRIORITY:', '').strip().lower()
+        elif line.startswith('DUE:'):
+            current_task['due_date'] = line.replace('DUE:', '').strip()
+        elif line.startswith('CATEGORY:'):
+            current_task['category'] = line.replace('CATEGORY:', '').strip()
+        elif line == '---' and current_task:
+            tasks.append(current_task)
+            current_task = {}
+    
+    if current_task and current_task.get('title'):
+        tasks.append(current_task)
+    
+    return tasks
 
 
 @app.get("/api/ai/training/summary")
@@ -4397,11 +5038,18 @@ async def initialize_ai_providers():
         existing_providers = db.get_ai_providers()
         
         if not existing_providers:
-            # Try to create default Ollama providers (local and common network hosts)
+            # Get Ollama configuration from settings
+            ollama_host = db.get_setting('ollama_host', 'localhost')
+            ollama_port = db.get_setting('ollama_port', 11434)
+            ollama_model = db.get_setting('ollama_model', 'llama3.2:latest')
+            
+            # Build the URL from configured host and port
+            configured_url = f'http://{ollama_host}:{ollama_port}'
+            
+            # Try to create Ollama provider using configured settings
             ollama_hosts = [
-                {'name': 'Local Ollama', 'url': 'http://localhost:11434'},
-                {'name': 'Network Ollama (pop-os.local)', 'url': 'http://pop-os.local:11434'},
-                {'name': 'Network Ollama (ubuntu.local)', 'url': 'http://ubuntu.local:11434'}
+                {'name': f'Ollama ({ollama_host})', 'url': configured_url, 'model': ollama_model},
+                {'name': 'Local Ollama (fallback)', 'url': 'http://localhost:11434', 'model': 'llama3.2:latest'},
             ]
             
             default_set = False
@@ -4415,11 +5063,14 @@ async def initialize_ai_providers():
                                 data = await response.json()
                                 models = data.get('models', [])
                                 if models:
-                                    # Use the first available model
-                                    model_name = models[0]['name']
+                                    # Use the configured model if specified, otherwise use first available
+                                    if host_config.get('model'):
+                                        model_name = host_config['model']
+                                    else:
+                                        model_name = models[0]['name']
                                     logger.info(f"Found model {model_name} at {host_config['url']}")
                                 else:
-                                    model_name = 'llama2'  # fallback
+                                    model_name = host_config.get('model', 'llama2')  # use configured or fallback
                             else:
                                 continue
                 except:

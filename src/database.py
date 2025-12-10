@@ -2095,26 +2095,53 @@ class DatabaseManager:
 
     # AI Assistant methods
     def save_ai_provider(self, name: str, provider_type: str, config: Dict[str, Any]) -> str:
-        """Save AI provider configuration."""
+        """Save AI provider configuration - updates if exists, creates if new."""
         with self.get_connection() as conn:
             cursor = conn.cursor()
-            provider_id = f"provider_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
             
-            # If this is set as default, unset others
+            # Check if provider with this type and model already exists
+            base_url = config.get('base_url', '')
+            model_name = config.get('model_name', '')
+            
+            cursor.execute("""
+                SELECT id FROM ai_providers 
+                WHERE provider_type = ? AND model_name = ?
+            """, (provider_type, model_name))
+            
+            existing = cursor.fetchone()
+            
+            # If this is set as default, unset ALL others first
             if config.get('is_default', False):
                 cursor.execute("UPDATE ai_providers SET is_default = 0")
             
-            cursor.execute("""
-                INSERT INTO ai_providers (name, provider_type, base_url, api_key, model_name, 
-                                        config_data, is_active, is_default)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                name, provider_type, config.get('base_url'), config.get('api_key'),
-                config.get('model_name'), json.dumps(config), 
-                config.get('is_active', 1), config.get('is_default', 0)
-            ))
+            if existing:
+                # UPDATE existing provider
+                provider_id = existing['id']
+                cursor.execute("""
+                    UPDATE ai_providers 
+                    SET name = ?, base_url = ?, api_key = ?, config_data = ?, 
+                        is_active = ?, is_default = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                """, (
+                    name, base_url, config.get('api_key'),
+                    json.dumps(config), config.get('is_active', 1), 
+                    config.get('is_default', 0), provider_id
+                ))
+            else:
+                # INSERT new provider
+                cursor.execute("""
+                    INSERT INTO ai_providers (name, provider_type, base_url, api_key, model_name, 
+                                            config_data, is_active, is_default)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    name, provider_type, base_url, config.get('api_key'),
+                    model_name, json.dumps(config), 
+                    config.get('is_active', 1), config.get('is_default', 0)
+                ))
+                provider_id = cursor.lastrowid
+            
             conn.commit()
-            return provider_id
+            return str(provider_id)
 
     def get_ai_providers(self, active_only: bool = False) -> List[Dict[str, Any]]:
         """Get AI providers."""

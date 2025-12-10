@@ -22,7 +22,7 @@ class DashboardDataLoader {
         this.alertedEvents = new Set();
         this.feedbackData = {}; // Store feedback for AI training
         this.dismissedSuggestions = new Set(); // Track dismissed AI suggestions
-        this.aiVoiceEnabled = true; // AI voice responses enabled by default
+        this.aiVoiceEnabled = localStorage.getItem('aiVoiceEnabled') !== 'false'; // AI voice responses - persisted
         this.editMode = false;
         this.autoRefreshInterval = 5; // minutes
         this.autoRefreshTimer = null;
@@ -2719,6 +2719,20 @@ Then ask me: "What would you like to do with this email?"`,
         this.renderAIChat();
         input.value = '';
         
+        // IMMEDIATELY show "working" status
+        const statusMessageId = `status_${Date.now()}`;
+        this.aiMessages.push({
+            role: 'status',
+            content: '🤖 I\'m on it...',
+            id: statusMessageId
+        });
+        this.renderAIChat();
+        
+        // Speak immediate acknowledgment if voice enabled
+        if (this.aiVoiceEnabled && this.speechSynthesis) {
+            this.speakText("I'm on it");
+        }
+        
         try {
             // Build comprehensive context with actual data
             const context = {
@@ -2768,39 +2782,147 @@ Then ask me: "What would you like to do with this email?"`,
                 }
             };
             
-            const response = await fetch('/api/ai/chat', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    message: message,
-                    context: context,
-                    conversation_id: this.conversationId
-                })
+            // Use EventSource for streaming responses with real-time progress updates
+            const messageId = `msg_${Date.now()}`;
+            // Reuse the statusMessageId we already created above
+            let accumulatedResponse = '';
+            let hasSeenResponse = false;
+            
+            // Build URL with query parameters for GET-compatible EventSource
+            // Note: EventSource only supports GET, so we can't send large context in body
+            // The backend will build context server-side
+            const params = new URLSearchParams({
+                message: message,
+                conversation_id: this.conversationId || ''
             });
             
-            if (response.ok) {
-                const data = await response.json();
-                const aiResponse = data.response || data.message;
-                const messageId = `msg_${Date.now()}`;
+            const streamUrl = `/api/ai/chat/stream?${params.toString()}`;
+            console.log('🚀 Opening AI stream:', streamUrl);
+            
+            const eventSource = new EventSource(streamUrl);
+            
+            eventSource.onopen = () => {
+                console.log('✅ EventSource connection opened');
+            };
+            
+            eventSource.onmessage = (event) => {
+                console.log('📨 Received event:', event.data);
+                try {
+                    const data = JSON.parse(event.data);
+                    
+                    if (data.type === 'status') {
+                        console.log('📊 Status update:', data.message);
+                        // Show/update status message
+                        const existingStatusIndex = this.aiMessages.findIndex(m => m.id === statusMessageId);
+                        if (existingStatusIndex >= 0) {
+                            this.aiMessages[existingStatusIndex].content = data.message;
+                        } else {
+                            this.aiMessages.push({
+                                role: 'status',
+                                content: data.message,
+                                id: statusMessageId
+                            });
+                        }
+                        this.renderAIChat();
+                        
+                    } else if (data.type === 'response') {
+                        // Accumulate response chunks
+                        accumulatedResponse += data.content;
+                        
+                        // Remove status message if present
+                        if (!hasSeenResponse) {
+                            const statusIndex = this.aiMessages.findIndex(m => m.id === statusMessageId);
+                            if (statusIndex >= 0) {
+                                this.aiMessages.splice(statusIndex, 1);
+                            }
+                            hasSeenResponse = true;
+                        }
+                        
+                        // Update or create response message
+                        const existingIndex = this.aiMessages.findIndex(m => m.id === messageId);
+                        if (existingIndex >= 0) {
+                            this.aiMessages[existingIndex].content = accumulatedResponse;
+                        } else {
+                            this.aiMessages.push({
+                                role: 'assistant',
+                                content: accumulatedResponse,
+                                id: messageId,
+                                conversation_id: this.conversationId
+                            });
+                        }
+                        this.renderAIChat();
+                        
+                    } else if (data.type === 'done') {
+                        // Save conversation ID
+                        if (data.conversation_id) {
+                            this.conversationId = data.conversation_id;
+                            
+                            // Update conversation_id on the message
+                            const msgIndex = this.aiMessages.findIndex(m => m.id === messageId);
+                            if (msgIndex >= 0) {
+                                this.aiMessages[msgIndex].conversation_id = data.conversation_id;
+                            }
+                        }
+                        
+                        // Speak the complete response if voice is enabled
+                        if (this.aiVoiceEnabled && this.speechSynthesis && accumulatedResponse) {
+                            this.speakText(accumulatedResponse);
+                        }
+                        
+                        eventSource.close();
+                        
+                    } else if (data.type === 'error') {
+                        // Remove status message if present
+                        const statusIndex = this.aiMessages.findIndex(m => m.id === statusMessageId);
+                        if (statusIndex >= 0) {
+                            this.aiMessages.splice(statusIndex, 1);
+                        }
+                        
+                        const errorMsg = data.message || 'Sorry, I encountered an error. Please try again.';
+                        this.aiMessages.push({ 
+                            role: 'assistant', 
+                            content: errorMsg,
+                            id: messageId
+                        });
+                        this.renderAIChat();
+                        
+                        if (this.aiVoiceEnabled && this.speechSynthesis) {
+                            this.speakText(errorMsg);
+                        }
+                        
+                        eventSource.close();
+                    }
+                } catch (parseError) {
+                    console.error('Error parsing event data:', parseError, event.data);
+                }
+            };
+            
+            eventSource.onerror = (error) => {
+                console.error('❌ EventSource error:', error);
+                console.error('EventSource readyState:', eventSource.readyState);
+                eventSource.close();
                 
-                // Save conversation ID for future messages
-                if (data.conversation_id) {
-                    this.conversationId = data.conversation_id;
+                // Remove status message if present
+                const statusIndex = this.aiMessages.findIndex(m => m.id === statusMessageId);
+                if (statusIndex >= 0) {
+                    this.aiMessages.splice(statusIndex, 1);
                 }
                 
-                this.aiMessages.push({ 
-                    role: 'assistant', 
-                    content: aiResponse,
-                    id: messageId,
-                    conversation_id: this.conversationId
-                });
-                this.renderAIChat();
-                
-                // Speak the response if voice is enabled
-                if (this.aiVoiceEnabled && this.speechSynthesis) {
-                    this.speakText(aiResponse);
+                // Only show error if no response was received
+                if (!hasSeenResponse) {
+                    const errorMsg = 'Sorry, I encountered an error. Please try again.';
+                    this.aiMessages.push({ 
+                        role: 'assistant', 
+                        content: errorMsg,
+                        id: messageId
+                    });
+                    this.renderAIChat();
+                    
+                    if (this.aiVoiceEnabled && this.speechSynthesis) {
+                        this.speakText(errorMsg);
+                    }
                 }
-            }
+            };
         } catch (error) {
             console.error('Error sending AI message:', error);
             const errorMsg = 'Sorry, I encountered an error. Please try again.';
@@ -2932,6 +3054,15 @@ Then ask me: "What would you like to do with this email?"`,
                     <div class="text-right">
                         <div class="inline-block max-w-[80%] bg-blue-600 rounded-lg px-4 py-2">
                             <p class="text-sm">${this.escapeHtml(msg.content)}</p>
+                        </div>
+                    </div>
+                `;
+            } else if (msg.role === 'status') {
+                // Status messages: small, gray, italic with emoji
+                return `
+                    <div class="text-left">
+                        <div class="inline-block max-w-[80%] bg-gray-800/50 rounded-lg px-3 py-1.5 border border-gray-700/50">
+                            <p class="text-xs text-gray-400 italic">${this.escapeHtml(msg.content)}</p>
                         </div>
                     </div>
                 `;
@@ -3132,6 +3263,15 @@ Then ask me: "What would you like to do with this email?"`,
     
     toggleAIVoice() {
         this.aiVoiceEnabled = !this.aiVoiceEnabled;
+        
+        // Persist the setting
+        localStorage.setItem('aiVoiceEnabled', this.aiVoiceEnabled);
+        
+        // Stop any currently speaking text
+        if (!this.aiVoiceEnabled && this.speechSynthesis && this.speechSynthesis.speaking) {
+            this.speechSynthesis.cancel();
+        }
+        
         const btn = document.getElementById('ai-voice-toggle');
         if (btn) {
             btn.textContent = this.aiVoiceEnabled ? '🔊 Voice On' : '🔇 Voice Off';
@@ -3139,6 +3279,12 @@ Then ask me: "What would you like to do with this email?"`,
                 'bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded-lg text-sm' : 
                 'bg-gray-600 hover:bg-gray-700 px-4 py-2 rounded-lg text-sm';
         }
+        
+        // Show notification
+        this.showNotification(
+            this.aiVoiceEnabled ? 'Voice responses enabled' : 'Voice responses muted',
+            'info'
+        );
     }
     
     startVoicePrompt() {

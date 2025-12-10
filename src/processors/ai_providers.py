@@ -76,6 +76,7 @@ class OllamaProvider(AIProvider):
                 messages.insert(0, {'role': 'system', 'content': self.system_prompt})
             
             async with aiohttp.ClientSession() as session:
+                # Try /api/chat first (newer Ollama versions)
                 payload = {
                     'model': self.model_name,
                     'messages': messages,
@@ -83,7 +84,11 @@ class OllamaProvider(AIProvider):
                 }
                 
                 async with session.post(f"{self.base_url}/api/chat", json=payload) as response:
-                    if response.status == 200:
+                    # If we get a 404, fall back to /api/generate (older Ollama versions)
+                    if response.status == 404:
+                        logger.info("Ollama /api/chat not found, falling back to /api/generate")
+                        pass  # Will fall through to generate fallback below
+                    elif response.status == 200:
                         if stream:
                             # Handle streaming response
                             content = ""
@@ -110,10 +115,71 @@ class OllamaProvider(AIProvider):
                         error_msg = f"Ollama API error: {response.status}"
                         logger.error(error_msg)
                         return f"Error: {error_msg}"
+                
+                # Fallback to /api/generate if /api/chat returned 404
+                if response.status == 404:
+                    return await self._chat_with_generate(session, messages, stream)
                         
         except Exception as e:
             logger.error(f"Error communicating with Ollama: {e}")
             return f"Error: Could not connect to Ollama server"
+    
+    async def _chat_with_generate(self, session: aiohttp.ClientSession, messages: List[Dict[str, str]], stream: bool = False) -> str:
+        """Fallback method using /api/generate for older Ollama versions."""
+        try:
+            # Convert chat messages to a single prompt for /api/generate
+            prompt_parts = []
+            system_msg = None
+            
+            for msg in messages:
+                if msg['role'] == 'system':
+                    system_msg = msg['content']
+                elif msg['role'] == 'user':
+                    prompt_parts.append(f"User: {msg['content']}")
+                elif msg['role'] == 'assistant':
+                    prompt_parts.append(f"Assistant: {msg['content']}")
+            
+            # Build final prompt
+            if system_msg:
+                prompt = f"{system_msg}\n\n" + "\n\n".join(prompt_parts) + "\n\nAssistant:"
+            else:
+                prompt = "\n\n".join(prompt_parts) + "\n\nAssistant:"
+            
+            payload = {
+                'model': self.model_name,
+                'prompt': prompt,
+                'stream': stream
+            }
+            
+            async with session.post(f"{self.base_url}/api/generate", json=payload) as response:
+                if response.status == 200:
+                    if stream:
+                        content = ""
+                        async for line in response.content:
+                            if line:
+                                try:
+                                    line_text = line.decode().strip()
+                                    if line_text:
+                                        data = json.loads(line_text)
+                                        if 'response' in data:
+                                            content += data['response']
+                                except json.JSONDecodeError:
+                                    continue
+                        return content
+                    else:
+                        response_text = await response.text()
+                        data = json.loads(response_text)
+                        if 'response' in data:
+                            return data['response']
+                        else:
+                            return "No response received from Ollama"
+                else:
+                    error_msg = f"Ollama generate API error: {response.status}"
+                    logger.error(error_msg)
+                    return f"Error: {error_msg}"
+        except Exception as e:
+            logger.error(f"Error using Ollama generate API: {e}")
+            return f"Error: {str(e)}"
     
     async def train(self, training_data: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Train Ollama model with new data."""

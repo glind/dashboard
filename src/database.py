@@ -650,7 +650,7 @@ class DatabaseManager:
             expires_at = datetime.now() + timedelta(minutes=10)  # State expires in 10 minutes
             
             cursor.execute("""
-                INSERT INTO auth_tokens (service_name, token_data, expires_at, updated_at)
+                INSERT OR REPLACE INTO auth_tokens (service_name, token_data, expires_at, updated_at)
                 VALUES (?, ?, ?, CURRENT_TIMESTAMP)
             """, (f"{service_name}_oauth_state", json.dumps({"state": state}), expires_at))
             

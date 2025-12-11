@@ -82,10 +82,12 @@ app = FastAPI(title="Simple Personal Dashboard")
 try:
     from modules.music_news.endpoints import router as music_news_router
     from modules.vanity_alerts.endpoints import router as vanity_alerts_router
+    from modules.comms.endpoints import router as comms_router
     
     app.include_router(music_news_router)
     app.include_router(vanity_alerts_router)
-    logging.info("✅ Custom modules registered (music_news, vanity_alerts)")
+    app.include_router(comms_router)
+    logging.info("✅ Custom modules registered (music_news, vanity_alerts, comms)")
 except ImportError as e:
     logging.warning(f"Could not load custom modules: {e}")
 
@@ -3392,13 +3394,18 @@ async def spotify_oauth_callback(code: str = None, state: str = None, error: str
             response.raise_for_status()
             token_info = response.json()
         
-        # Save tokens to database
-        db.save_auth_token(
-            service_name="spotify",
-            access_token=token_info["access_token"],
-            refresh_token=token_info.get("refresh_token"),
-            expires_in=token_info.get("expires_in", 3600)
-        )
+        # Save tokens to database (INSERT OR REPLACE handles duplicates)
+        try:
+            db.save_auth_token(
+                service_name="spotify",
+                access_token=token_info["access_token"],
+                refresh_token=token_info.get("refresh_token"),
+                expires_in=token_info.get("expires_in", 3600)
+            )
+            logger.info("Spotify OAuth token saved successfully")
+        except Exception as token_error:
+            logger.error(f"Error saving Spotify token: {token_error}")
+            # Continue anyway - token exchange succeeded
         
         # Redirect back to dashboard
         return RedirectResponse(url="/?spotify=connected")
@@ -3441,13 +3448,18 @@ async def apple_music_oauth_callback(request: Request):
         if not user_token:
             raise HTTPException(status_code=400, detail="Missing user token")
         
-        # Save Apple Music user token
-        db.save_auth_token(
-            service_name="apple_music",
-            access_token=user_token,
-            refresh_token=None,
-            expires_in=None  # Apple Music tokens don't expire in the same way
-        )
+        # Save Apple Music user token (INSERT OR REPLACE handles duplicates)
+        try:
+            db.save_auth_token(
+                service_name="apple_music",
+                access_token=user_token,
+                refresh_token=None,
+                expires_in=None  # Apple Music tokens don't expire in the same way
+            )
+            logger.info("Apple Music token saved successfully")
+        except Exception as token_error:
+            logger.error(f"Error saving Apple Music token: {token_error}")
+            raise HTTPException(status_code=500, detail=f"Failed to save token: {token_error}")
         
         return {"success": True, "message": "Apple Music connected"}
     except Exception as e:

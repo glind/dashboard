@@ -179,6 +179,276 @@
             margin: 1em 0;
             font-style: italic;
         }
+        
+        /* Bootstrap Modal Override - Ensure modals are hidden by default */
+        .modal {
+            display: none;
+        }
+        .modal.show {
+            display: block;
+        }
+        
+        /* Communications Widget Styles */
+        .comms-widget {
+            background: rgb(31 41 55);
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .comms-stats {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+            margin: 20px 0;
+        }
+        .stat-card {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 15px;
+            background: rgb(17 24 39);
+            border-radius: 8px;
+            transition: transform 0.2s;
+            position: relative;
+        }
+        .stat-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        }
+        .stat-card i {
+            font-size: 2em;
+            margin-bottom: 10px;
+        }
+        #linkedin-stat i { color: #0077b5; }
+        #slack-stat i { color: #4A154B; }
+        #discord-stat i { color: #5865F2; }
+        .stat-count {
+            font-size: 1.5em;
+            font-weight: bold;
+        }
+        .stat-label {
+            font-size: 0.9em;
+            color: #9ca3af;
+        }
+        .priority-summary {
+            margin: 20px 0;
+        }
+        .priority-bar {
+            display: flex;
+            height: 40px;
+            border-radius: 8px;
+            overflow: hidden;
+            background: rgb(17 24 39);
+        }
+        .priority-segment {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+            font-size: 0.85em;
+            transition: width 0.3s;
+        }
+        .priority-segment.urgent { background: #dc3545; }
+        .priority-segment.high { background: #fd7e14; }
+        .priority-segment.medium { background: #ffc107; color: #333; }
+        .priority-segment.low { background: #6c757d; }
+        .comms-filters {
+            display: flex;
+            gap: 10px;
+            margin: 20px 0;
+            flex-wrap: wrap;
+        }
+        .filter-btn {
+            padding: 8px 16px;
+            border: 2px solid rgb(75 85 99);
+            background: rgb(31 41 55);
+            border-radius: 20px;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 0.9em;
+            color: rgb(209 213 219);
+        }
+        .filter-btn:hover {
+            border-color: #007bff;
+            color: #007bff;
+        }
+        .filter-btn.active {
+            background: #007bff;
+            border-color: #007bff;
+            color: white;
+        }
+        .comms-messages {
+            max-height: 600px;
+            overflow-y: auto;
+            margin: 20px 0;
+        }
+        .message-item {
+            display: flex;
+            padding: 15px;
+            border: 1px solid rgb(75 85 99);
+            border-radius: 8px;
+            margin-bottom: 10px;
+            background: rgb(31 41 55);
+            transition: all 0.2s;
+        }
+        .message-item:hover {
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            transform: translateX(5px);
+        }
+        .message-item.hidden {
+            display: none;
+        }
+        .message-priority {
+            width: 5px;
+            margin-right: 15px;
+            border-radius: 3px;
+        }
+        .message-priority.urgent { background: #dc3545; }
+        .message-priority.high { background: #fd7e14; }
+        .message-priority.medium { background: #ffc107; }
+        .message-priority.low { background: #6c757d; }
+        .message-content {
+            flex: 1;
+        }
+        .message-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+        .message-from {
+            font-weight: bold;
+        }
+        .message-platform {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 0.75em;
+            font-weight: bold;
+            color: white;
+        }
+        .message-platform.linkedin { background: #0077b5; }
+        .message-platform.slack { background: #4A154B; }
+        .message-platform.discord { background: #5865F2; }
+        .message-text {
+            color: rgb(156 163 175);
+            margin: 8px 0;
+            line-height: 1.5;
+        }
+        .message-meta {
+            display: flex;
+            gap: 15px;
+            font-size: 0.85em;
+            color: rgb(107 114 128);
+            margin-top: 8px;
+        }
+        .message-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        .btn-reply {
+            padding: 6px 12px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.85em;
+            text-decoration: none;
+            display: inline-block;
+        }
+        .btn-reply:hover {
+            background: #0056b3;
+        }
+        .priority-badge {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-size: 0.75em;
+            font-weight: bold;
+        }
+        .priority-badge.urgent { background: #dc3545; color: white; }
+        .priority-badge.high { background: #fd7e14; color: white; }
+        .priority-badge.medium { background: #ffc107; color: #333; }
+        .priority-badge.low { background: #6c757d; color: white; }
+        .comms-actions {
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 2px solid rgb(75 85 99);
+        }
+        .action-item {
+            padding: 12px;
+            background: rgb(17 24 39);
+            border-left: 4px solid #007bff;
+            border-radius: 4px;
+            margin-bottom: 10px;
+        }
+        .loading-spinner {
+            text-align: center;
+            padding: 40px;
+            color: rgb(156 163 175);
+        }
+        .connection-indicator {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            font-size: 12px;
+            color: #ef4444;
+        }
+        .connection-card {
+            border: 1px solid rgb(75 85 99);
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin-bottom: 1rem;
+            background: rgb(31 41 55);
+        }
+        .connection-header {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+        .connection-header i {
+            color: #6366f1;
+        }
+        .connection-header h6 {
+            margin: 0;
+            font-weight: 600;
+        }
+        .connection-status {
+            font-size: 0.875rem;
+            padding: 2px 8px;
+            border-radius: 12px;
+        }
+        .connection-status.connected {
+            background: #d1fae5;
+            color: #065f46;
+        }
+        .connection-status.disconnected {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+        .connection-actions {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+        .connection-info {
+            margin-top: 0.5rem;
+            padding-top: 0.5rem;
+            border-top: 1px solid rgb(75 85 99);
+        }
+        
+        /* Communications Widget - Minimal overrides (using Tailwind) */
+        .message-item.hidden {
+            display: none;
+        }
+        .bg-gray-750 {
+            background-color: rgb(26, 32, 44);
+        }
     </style>
 </head>
 <body class="h-full bg-gray-900 text-gray-100">
@@ -291,6 +561,12 @@
                    class="nav-link flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-gray-700 text-gray-300 hover:text-white">
                     <span>🔔</span>
                     <span>Vanity Alerts</span>
+                </a>
+                
+                <a href="#" onclick="showSection('comms'); return false;" 
+                   class="nav-link flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-gray-700 text-gray-300 hover:text-white">
+                    <span>💬</span>
+                    <span>Communications</span>
                 </a>
                 
                 <!-- SYSTEM SECTION -->
@@ -575,6 +851,142 @@
                     <h2 class="text-3xl font-bold mb-6">🔔 Vanity Alerts</h2>
                     <p class="text-gray-400 mb-6">Brand mentions, social media alerts, and web tracking</p>
                     <div id="vanity-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+                </div>
+            </section>
+            
+            <!-- Communications Section -->
+            <section id="section-comms" class="section-content hidden p-8">
+                <div class="max-w-7xl mx-auto">
+                    <h2 class="text-3xl font-bold mb-6">💬 Communications</h2>
+                    <p class="text-gray-400 mb-6">LinkedIn, Slack, and Discord messages with AI-powered prioritization</p>
+                    
+                    <!-- Communications Widget -->
+                    <div class="bg-gray-800 rounded-xl border border-gray-700 p-6 mb-6">
+                        <!-- Header with Controls -->
+                        <div class="flex flex-wrap items-center justify-between gap-4 mb-6">
+                            <div class="flex items-center gap-3">
+                                <h3 class="text-xl font-semibold">
+                                    <i class="fas fa-comments"></i> Communications
+                                </h3>
+                                <span class="bg-purple-600 text-white px-3 py-1 rounded-full text-sm font-semibold" id="comms-total-badge">0</span>
+                            </div>
+                            <div class="flex flex-wrap items-center gap-3">
+                                <button onclick="showConnectionsModal()" 
+                                        class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg text-sm flex items-center gap-2">
+                                    <i class="fas fa-plug"></i> Manage Connections
+                                </button>
+                                <select id="comms-timeframe" 
+                                        class="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm">
+                                    <option value="6">Last 6 hours</option>
+                                    <option value="12">Last 12 hours</option>
+                                    <option value="24" selected>Last 24 hours</option>
+                                    <option value="48">Last 2 days</option>
+                                    <option value="72">Last 3 days</option>
+                                </select>
+                                <button onclick="refreshComms()" 
+                                        class="bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded-lg text-sm flex items-center gap-2">
+                                    <i class="fas fa-sync-alt"></i> Refresh
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Platform Stats -->
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                            <div class="bg-gray-750 rounded-lg p-4 relative" id="linkedin-stat">
+                                <div class="absolute top-2 right-2">
+                                    <span class="text-red-500 text-xl" id="linkedin-indicator" title="Not Connected">●</span>
+                                </div>
+                                <div class="flex flex-col items-center">
+                                    <i class="fab fa-linkedin text-4xl mb-2" style="color: #0077b5;"></i>
+                                    <div class="text-3xl font-bold mb-1">
+                                        <span class="stat-count">0</span>
+                                    </div>
+                                    <div class="text-sm text-gray-400">LinkedIn</div>
+                                </div>
+                            </div>
+                            <div class="bg-gray-750 rounded-lg p-4 relative" id="slack-stat">
+                                <div class="absolute top-2 right-2">
+                                    <span class="text-red-500 text-xl" id="slack-indicator" title="Not Connected">●</span>
+                                </div>
+                                <div class="flex flex-col items-center">
+                                    <i class="fab fa-slack text-4xl mb-2" style="color: #4A154B;"></i>
+                                    <div class="text-3xl font-bold mb-1">
+                                        <span class="stat-count">0</span>
+                                    </div>
+                                    <div class="text-sm text-gray-400">Slack</div>
+                                </div>
+                            </div>
+                            <div class="bg-gray-750 rounded-lg p-4 relative" id="discord-stat">
+                                <div class="absolute top-2 right-2">
+                                    <span class="text-red-500 text-xl" id="discord-indicator" title="Not Connected">●</span>
+                                </div>
+                                <div class="flex flex-col items-center">
+                                    <i class="fab fa-discord text-4xl mb-2" style="color: #5865F2;"></i>
+                                    <div class="text-3xl font-bold mb-1">
+                                        <span class="stat-count">0</span>
+                                    </div>
+                                    <div class="text-sm text-gray-400">Discord</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Priority Summary -->
+                        <div class="mb-6">
+                            <h4 class="text-sm font-medium text-gray-400 mb-2">Priority Distribution</h4>
+                            <div class="flex h-10 rounded-lg overflow-hidden bg-gray-750">
+                                <div class="priority-segment bg-red-600 flex items-center justify-center text-white text-sm font-semibold transition-all" 
+                                     style="width: 0%" id="priority-urgent">
+                                    <span>Urgent: 0</span>
+                                </div>
+                                <div class="priority-segment bg-orange-500 flex items-center justify-center text-white text-sm font-semibold transition-all" 
+                                     style="width: 0%" id="priority-high">
+                                    <span>High: 0</span>
+                                </div>
+                                <div class="priority-segment bg-yellow-500 flex items-center justify-center text-gray-900 text-sm font-semibold transition-all" 
+                                     style="width: 0%" id="priority-medium">
+                                    <span>Medium: 0</span>
+                                </div>
+                                <div class="priority-segment bg-gray-600 flex items-center justify-center text-white text-sm font-semibold transition-all" 
+                                     style="width: 0%" id="priority-low">
+                                    <span>Low: 0</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Filter Tabs -->
+                        <div class="flex flex-wrap gap-2 mb-6">
+                            <button class="filter-btn px-4 py-2 rounded-full border-2 border-purple-600 bg-purple-600 text-white text-sm font-medium transition-all active" 
+                                    data-filter="all">All</button>
+                            <button class="filter-btn px-4 py-2 rounded-full border-2 border-gray-600 bg-transparent text-gray-300 hover:border-purple-600 hover:text-purple-400 text-sm font-medium transition-all" 
+                                    data-filter="urgent">Urgent</button>
+                            <button class="filter-btn px-4 py-2 rounded-full border-2 border-gray-600 bg-transparent text-gray-300 hover:border-purple-600 hover:text-purple-400 text-sm font-medium transition-all" 
+                                    data-filter="high">High</button>
+                            <button class="filter-btn px-4 py-2 rounded-full border-2 border-gray-600 bg-transparent text-gray-300 hover:border-purple-600 hover:text-purple-400 text-sm font-medium transition-all" 
+                                    data-filter="linkedin">LinkedIn</button>
+                            <button class="filter-btn px-4 py-2 rounded-full border-2 border-gray-600 bg-transparent text-gray-300 hover:border-purple-600 hover:text-purple-400 text-sm font-medium transition-all" 
+                                    data-filter="slack">Slack</button>
+                            <button class="filter-btn px-4 py-2 rounded-full border-2 border-gray-600 bg-transparent text-gray-300 hover:border-purple-600 hover:text-purple-400 text-sm font-medium transition-all" 
+                                    data-filter="discord">Discord</button>
+                        </div>
+
+                        <!-- Messages List -->
+                        <div class="max-h-[600px] overflow-y-auto space-y-3" id="comms-messages-list">
+                            <div class="text-center py-12 text-gray-400">
+                                <i class="fas fa-spinner fa-spin text-4xl mb-3"></i>
+                                <p>Loading communications...</p>
+                            </div>
+                        </div>
+
+                        <!-- Suggested Actions -->
+                        <div class="mt-6 pt-6 border-t border-gray-700 hidden" id="comms-actions">
+                            <h4 class="text-lg font-semibold mb-4">
+                                <i class="fas fa-tasks"></i> Suggested Actions
+                            </h4>
+                            <div class="space-y-3" id="comms-actions-list"></div>
+                        </div>
+                    </div>
+                    <!-- End Communications Widget -->
+                    
                 </div>
             </section>
             
@@ -1337,6 +1749,15 @@
                 case 'music':
                     dataLoader.loadMusicNews();
                     break;
+                case 'comms':
+                    // Communications widget initializes itself via comms_widget.html
+                    if (typeof initComms === 'function') {
+                        initComms();
+                    }
+                    if (typeof loadConnectionStatus === 'function') {
+                        loadConnectionStatus();
+                    }
+                    break;
                 // Add other section loaders
             }
         }
@@ -1831,6 +2252,596 @@
                 dashboardManager.init();
             }
         });
+    </script>
+
+    <script>
+    // Communications Widget JavaScript
+    let commsData = null;
+    let currentFilter = 'all';
+    let currentManualPlatform = null;
+
+    // Initialize communications widget
+    async function initComms() {
+        await loadConnectionStatus();
+        await refreshComms();
+    }
+
+    // Refresh communications data
+    async function refreshComms() {
+        const timeframeEl = document.getElementById('comms-timeframe');
+        if (!timeframeEl) return;
+        
+        const timeframe = timeframeEl.value;
+        
+        try {
+            const response = await fetch(`/api/modules/comms/analyze?hours_back=${timeframe}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+            
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+            
+            const result = await response.json();
+            
+            if (result.success) {
+                commsData = result.analysis;
+                updateCommsDisplay();
+            } else {
+                showCommsError('Failed to load communications');
+            }
+        } catch (error) {
+            console.error('Error fetching communications:', error);
+            // For now, just show a message that analysis is not available yet
+            showCommsError('Communications analysis coming soon. Connection status is working!');
+        }
+    }
+
+    // Update the display with communications data
+    function updateCommsDisplay() {
+        if (!commsData) return;
+        
+        const badgeEl = document.getElementById('comms-total-badge');
+        if (badgeEl) badgeEl.textContent = commsData.total_messages;
+        
+        // Update platform stats
+        const linkedinCount = document.querySelector('#linkedin-stat .stat-count');
+        const slackCount = document.querySelector('#slack-stat .stat-count');
+        const discordCount = document.querySelector('#discord-stat .stat-count');
+        
+        if (linkedinCount) linkedinCount.textContent = commsData.by_platform.linkedin;
+        if (slackCount) slackCount.textContent = commsData.by_platform.slack;
+        if (discordCount) discordCount.textContent = commsData.by_platform.discord;
+        
+        // Update priority bar
+        const total = commsData.total_messages || 1;
+        const priorities = commsData.by_priority;
+        
+        updatePrioritySegment('urgent', priorities.urgent, total);
+        updatePrioritySegment('high', priorities.high, total);
+        updatePrioritySegment('medium', priorities.medium, total);
+        updatePrioritySegment('low', priorities.low, total);
+        
+        // Render messages
+        renderMessages(commsData.priority_messages);
+        
+        // Render suggested actions
+        if (commsData.suggested_actions && commsData.suggested_actions.length > 0) {
+            renderActions(commsData.suggested_actions);
+        }
+    }
+
+    function updatePrioritySegment(priority, count, total) {
+        const segment = document.getElementById(`priority-${priority}`);
+        if (segment) {
+            segment.style.width = `${(count / total) * 100}%`;
+            const span = segment.querySelector('span');
+            if (span) span.textContent = `${priority.charAt(0).toUpperCase() + priority.slice(1)}: ${count}`;
+        }
+    }
+
+    // Render messages list
+    function renderMessages(messages) {
+        const container = document.getElementById('comms-messages-list');
+        if (!container) return;
+        
+        if (!messages || messages.length === 0) {
+            container.innerHTML = '<div class="text-center py-8 text-gray-400">No messages found</div>';
+            return;
+        }
+        
+        // Priority colors for border
+        const priorityColors = {
+            urgent: 'border-red-600',
+            high: 'border-orange-500',
+            medium: 'border-yellow-500',
+            low: 'border-gray-600'
+        };
+        
+        // Priority badge colors
+        const priorityBadges = {
+            urgent: 'bg-red-600',
+            high: 'bg-orange-500',
+            medium: 'bg-yellow-500 text-gray-900',
+            low: 'bg-gray-600'
+        };
+        
+        // Platform badge colors
+        const platformBadges = {
+            linkedin: 'bg-blue-600',
+            slack: 'bg-purple-800',
+            discord: 'bg-indigo-600'
+        };
+        
+        container.innerHTML = messages.map(msg => `
+            <div class="message-item bg-gray-750 border-l-4 ${priorityColors[msg.priority]} rounded-lg p-4 hover:bg-gray-700 transition-all" 
+                 data-priority="${msg.priority}" data-platform="${msg.platform}">
+                <div class="flex justify-between items-start mb-2">
+                    <div class="flex flex-wrap items-center gap-2">
+                        <span class="font-semibold text-white">${escapeHtml(msg.from_user)}</span>
+                        <span class="px-2 py-1 rounded text-xs font-semibold text-white ${platformBadges[msg.platform]}">${msg.platform.toUpperCase()}</span>
+                        <span class="px-2 py-1 rounded text-xs font-semibold ${priorityBadges[msg.priority]}">${msg.priority.toUpperCase()}</span>
+                    </div>
+                    <span class="text-sm text-gray-400">${formatTimestamp(msg.timestamp)}</span>
+                </div>
+                <div class="text-gray-300 mb-2 leading-relaxed">${escapeHtml(msg.text || msg.preview || '')}</div>
+                <div class="flex flex-wrap items-center gap-4 text-sm text-gray-400 mb-3">
+                    <span><i class="fas fa-hashtag"></i> ${escapeHtml(msg.channel || msg.type)}</span>
+                    ${msg.priority_reason ? `<span title="${escapeHtml(msg.priority_reason)}"><i class="fas fa-info-circle"></i> ${escapeHtml(msg.priority_reason)}</span>` : ''}
+                </div>
+                ${msg.action_needed ? `<div class="bg-blue-900 bg-opacity-30 border border-blue-700 rounded p-3 mb-3 text-sm"><strong>Action needed:</strong> ${escapeHtml(msg.action_needed)}</div>` : ''}
+                <div class="flex gap-2">
+                    <a href="${escapeHtml(msg.link)}" target="_blank" 
+                       class="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded text-sm transition-colors">
+                        <i class="fas fa-reply"></i> Reply
+                    </a>
+                </div>
+            </div>
+        `).join('');
+        
+        // Apply current filter
+        applyFilter(currentFilter);
+    }
+
+    // Render suggested actions
+    function renderActions(actions) {
+        const container = document.getElementById('comms-actions');
+        const list = document.getElementById('comms-actions-list');
+        if (!container || !list) return;
+        
+        // Platform badge colors
+        const platformBadges = {
+            linkedin: 'bg-blue-600',
+            slack: 'bg-purple-800',
+            discord: 'bg-indigo-600'
+        };
+        
+        list.innerHTML = actions.map(action => `
+            <div class="bg-gray-750 border-l-4 border-blue-600 rounded-lg p-4">
+                <div class="mb-2">
+                    <strong class="text-white">${escapeHtml(action.from_user)}</strong> 
+                    <span class="text-gray-400">on</span> 
+                    <span class="px-2 py-1 rounded text-xs font-semibold text-white ${platformBadges[action.platform]}">${action.platform.toUpperCase()}</span>
+                </div>
+                <div class="text-gray-300 mb-2">${escapeHtml(action.suggested_action)}</div>
+                <div class="text-sm text-gray-400 mb-3">${escapeHtml(action.preview)}</div>
+                <a href="${escapeHtml(action.link)}" target="_blank" 
+                   class="inline-flex items-center gap-2 bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded text-sm transition-colors">
+                    <i class="fas fa-external-link-alt"></i> Open & Reply
+                </a>
+            </div>
+        `).join('');
+        
+        container.classList.remove('hidden');
+    }
+
+    // Apply filter to messages
+    function applyFilter(filter) {
+        const messages = document.querySelectorAll('.message-item');
+        
+        messages.forEach(msg => {
+            if (filter === 'all') {
+                msg.classList.remove('hidden');
+            } else if (filter === 'urgent' || filter === 'high') {
+                msg.classList.toggle('hidden', msg.dataset.priority !== filter);
+            } else {
+                msg.classList.toggle('hidden', msg.dataset.platform !== filter);
+            }
+        });
+    }
+
+    // Connection management functions
+    async function loadConnectionStatus() {
+        try {
+            console.log('Loading connection status...');
+            const response = await fetch('/api/modules/comms/auth/status');
+            const status = await response.json();
+            console.log('Connection status response:', status);
+            
+            for (const [platform, info] of Object.entries(status)) {
+                console.log(`Updating ${platform}: connected=${info.connected}, user=${info.user}`);
+                updateConnectionUI(platform, info.connected, info.user);
+                
+                // Also update the modal status indicators
+                const modalIndicator = document.getElementById(`modal-${platform}-status`);
+                if (modalIndicator) {
+                    if (info.connected) {
+                        modalIndicator.className = 'inline-flex items-center px-3 py-1 rounded-full text-sm font-semibold bg-green-100 text-green-800';
+                        modalIndicator.innerHTML = '<i class="fas fa-check-circle mr-1"></i> Connected';
+                    } else {
+                        modalIndicator.className = 'inline-flex items-center px-3 py-1 rounded-full text-sm font-semibold bg-red-100 text-red-800';
+                        modalIndicator.innerHTML = '<i class="fas fa-times-circle mr-1"></i> Not Connected';
+                    }
+                }
+            }
+        } catch (error) {
+            console.error('Error loading connection status:', error);
+        }
+    }
+
+    function updateConnectionUI(platform, connected, userName) {
+        const statusEl = document.getElementById(`${platform}-status`);
+        const disconnectBtn = document.getElementById(`${platform}-disconnect-btn`);
+        const infoEl = document.getElementById(`${platform}-info`);
+        const indicator = document.getElementById(`${platform}-indicator`);
+        
+        console.log(`updateConnectionUI for ${platform}:`, {
+            connected,
+            userName,
+            foundIndicator: !!indicator,
+            indicatorElement: indicator
+        });
+        
+        if (connected) {
+            if (statusEl) {
+                statusEl.textContent = `Connected${userName ? ': ' + userName : ''}`;
+                statusEl.className = 'connection-status connected';
+            }
+            if (disconnectBtn) {
+                disconnectBtn.style.display = 'inline-block';
+            }
+            if (infoEl && userName) {
+                infoEl.innerHTML = `<small class="text-gray-400"><i class="fas fa-user"></i> ${escapeHtml(userName)}</small>`;
+                infoEl.style.display = 'block';
+            }
+            if (indicator) {
+                console.log(`Setting ${platform} indicator to green`);
+                indicator.className = 'text-green-500 text-xl';
+                indicator.title = 'Connected';
+            } else {
+                console.warn(`Indicator element not found for ${platform}`);
+            }
+        } else {
+            if (statusEl) {
+                statusEl.textContent = 'Not Connected';
+                statusEl.className = 'connection-status disconnected';
+            }
+            if (disconnectBtn) {
+                disconnectBtn.style.display = 'none';
+            }
+            if (infoEl) {
+                infoEl.style.display = 'none';
+            }
+            if (indicator) {
+                indicator.className = 'text-red-500 text-xl';
+                indicator.title = 'Not Connected';
+            }
+        }
+    }
+
+    function showConnectionsModal() {
+        loadConnectionStatus();
+        
+        // Build modal content with connection cards
+        const content = `
+            <p class="text-gray-400 mb-6">Connect your communication platforms to see messages and mentions in one place.</p>
+            
+            <!-- Slack Connection -->
+            <div class="connection-card mb-4" id="slack-connection">
+                <div class="connection-header">
+                    <i class="fab fa-slack fa-2x"></i>
+                    <div>
+                        <h6 class="text-lg font-semibold">Slack</h6>
+                        <span class="connection-status" id="modal-slack-status">Not Connected</span>
+                    </div>
+                </div>
+                <div class="connection-actions mt-3 flex flex-col gap-2">
+                    <button class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded text-sm font-semibold" onclick="showManualTokenModal('slack')">
+                        <i class="fas fa-key"></i> Enter Token
+                    </button>
+                    <button class="bg-red-600 hover:bg-red-700 px-4 py-2 rounded text-sm" id="modal-slack-disconnect-btn" style="display:none;" onclick="disconnectPlatform('slack')">
+                        <i class="fas fa-unlink"></i> Disconnect
+                    </button>
+                </div>
+                <div class="connection-info mt-2" id="modal-slack-info" style="display:none;"></div>
+            </div>
+
+            <!-- Discord Connection -->
+            <div class="connection-card mb-4" id="discord-connection">
+                <div class="connection-header">
+                    <i class="fab fa-discord fa-2x"></i>
+                    <div>
+                        <h6 class="text-lg font-semibold">Discord</h6>
+                        <span class="connection-status" id="modal-discord-status">Not Connected</span>
+                    </div>
+                </div>
+                <div class="connection-actions mt-3 flex flex-col gap-2">
+                    <button class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded text-sm font-semibold" onclick="showManualTokenModal('discord')">
+                        <i class="fas fa-key"></i> Enter Token
+                    </button>
+                    <button class="bg-red-600 hover:bg-red-700 px-4 py-2 rounded text-sm" id="modal-discord-disconnect-btn" style="display:none;" onclick="disconnectPlatform('discord')">
+                        <i class="fas fa-unlink"></i> Disconnect
+                    </button>
+                </div>
+                <div class="connection-info mt-2" id="modal-discord-info" style="display:none;"></div>
+            </div>
+
+            <!-- LinkedIn Connection -->
+            <div class="connection-card mb-4" id="linkedin-connection">
+                <div class="connection-header">
+                    <i class="fab fa-linkedin fa-2x"></i>
+                    <div>
+                        <h6 class="text-lg font-semibold">LinkedIn</h6>
+                        <span class="connection-status" id="modal-linkedin-status">Not Connected</span>
+                    </div>
+                </div>
+                <div class="connection-actions mt-3 flex flex-col gap-2">
+                    <button class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded text-sm font-semibold" onclick="showManualTokenModal('linkedin')">
+                        <i class="fas fa-key"></i> Enter Token
+                    </button>
+                    <button class="bg-red-600 hover:bg-red-700 px-4 py-2 rounded text-sm" id="modal-linkedin-disconnect-btn" style="display:none;" onclick="disconnectPlatform('linkedin')">
+                        <i class="fas fa-unlink"></i> Disconnect
+                    </button>
+                </div>
+                <div class="connection-info mt-2" id="modal-linkedin-info" style="display:none;"></div>
+            </div>
+        `;
+        
+        showModal('<i class="fas fa-plug"></i> Manage Platform Connections', content, [
+            { label: 'Close', onclick: 'closeModal()', class: 'bg-gray-600 hover:bg-gray-700' }
+        ]);
+        
+        // Update connection status in modal after it's shown
+        setTimeout(() => {
+            updateModalConnectionStatus();
+        }, 100);
+    }
+    
+    function updateModalConnectionStatus() {
+        // Update UI for modal elements (prefixed with modal-)
+        ['slack', 'discord', 'linkedin'].forEach(platform => {
+            const statusEl = document.getElementById(`${platform}-status`);
+            if (statusEl) {
+                const modalStatusEl = document.getElementById(`modal-${platform}-status`);
+                const modalConnectBtn = document.getElementById(`modal-${platform}-connect-btn`);
+                const modalDisconnectBtn = document.getElementById(`modal-${platform}-disconnect-btn`);
+                const modalInfoEl = document.getElementById(`modal-${platform}-info`);
+                
+                if (modalStatusEl) {
+                    modalStatusEl.textContent = statusEl.textContent;
+                    modalStatusEl.className = statusEl.className;
+                }
+                
+                const isConnected = statusEl.classList.contains('connected');
+                if (modalConnectBtn && modalDisconnectBtn) {
+                    modalConnectBtn.style.display = isConnected ? 'none' : 'inline-block';
+                    modalDisconnectBtn.style.display = isConnected ? 'inline-block' : 'none';
+                }
+            }
+        });
+    }
+
+    function connectPlatform(platform) {
+        window.location.href = `/api/modules/comms/auth/${platform}/connect`;
+    }
+
+    async function disconnectPlatform(platform) {
+        if (!confirm(`Are you sure you want to disconnect ${platform}?`)) {
+            return;
+        }
+        
+        try {
+            const response = await fetch(`/api/modules/comms/auth/${platform}/disconnect`, {
+                method: 'DELETE'
+            });
+            
+            if (response.ok) {
+                updateConnectionUI(platform, false, null);
+                refreshComms();
+            } else {
+                alert('Failed to disconnect platform');
+            }
+        } catch (error) {
+            console.error('Error disconnecting:', error);
+            alert('Error disconnecting platform');
+        }
+    }
+
+    function showManualTokenModal(platform) {
+        closeModal(); // Close connections modal first
+        currentManualPlatform = platform;
+        const instructions = getTokenInstructions(platform);
+        
+        const content = `
+            ${instructions}
+            <div class="mt-4">
+                <label class="block text-sm font-medium mb-2">Access Token *</label>
+                <input type="password" class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-gray-100" 
+                       id="temp-manual-access-token" placeholder="Paste your token here">
+            </div>
+            <div class="mt-4">
+                <label class="block text-sm font-medium mb-2">Refresh Token (Optional)</label>
+                <input type="password" class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-gray-100" 
+                       id="temp-manual-refresh-token" placeholder="Paste refresh token if available">
+            </div>
+        `;
+        
+        showModal(`<i class="fas fa-key"></i> Enter API Token for ${platform.charAt(0).toUpperCase() + platform.slice(1)}`, content, [
+            { label: 'Cancel', onclick: 'closeModal()', class: 'bg-gray-600 hover:bg-gray-700' },
+            { label: '<i class="fas fa-save"></i> Save Token', onclick: 'saveManualTokenFromModal()', class: 'bg-blue-600 hover:bg-blue-700' }
+        ]);
+    }
+    
+    async function saveManualTokenFromModal() {
+        const accessToken = document.getElementById('temp-manual-access-token')?.value.trim();
+        const refreshToken = document.getElementById('temp-manual-refresh-token')?.value.trim();
+        
+        if (!accessToken) {
+            alert('Please enter an access token');
+            return;
+        }
+        
+        try {
+            const response = await fetch(`/api/modules/comms/auth/${currentManualPlatform}/manual`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    access_token: accessToken,
+                    refresh_token: refreshToken || null
+                })
+            });
+            
+            if (response.ok) {
+                closeModal();
+                updateConnectionUI(currentManualPlatform, true, 'Manual Entry');
+                refreshComms();
+                alert(`Successfully connected ${currentManualPlatform}!`);
+            } else {
+                const error = await response.json();
+                alert('Failed to save token: ' + (error.detail || 'Unknown error'));
+            }
+        } catch (error) {
+            console.error('Error saving token:', error);
+            alert('Error saving token');
+        }
+    }
+
+    function getTokenInstructions(platform) {
+        const instructions = {
+            slack: `
+                <div class="bg-blue-900 bg-opacity-30 border border-blue-700 rounded-lg p-4">
+                    <h6 class="font-semibold mb-3"><i class="fab fa-slack"></i> Get your Slack User Token</h6>
+                    <ol class="list-decimal list-inside space-y-2 text-sm mb-3">
+                        <li>Visit <a href="https://api.slack.com/apps" target="_blank" class="text-blue-400 hover:underline font-semibold">api.slack.com/apps</a></li>
+                        <li>Select your app (or create a new one)</li>
+                        <li>Go to <strong>"OAuth & Permissions"</strong> in the sidebar</li>
+                        <li>Scroll down to <strong>"User Token Scopes"</strong> and add:
+                            <ul class="list-disc list-inside ml-6 mt-1 text-xs text-gray-300">
+                                <li>channels:history, channels:read, groups:history</li>
+                                <li>im:history, im:read, mpim:history</li>
+                                <li>search:read, users:read, users:read.email</li>
+                            </ul>
+                        </li>
+                        <li>Click <strong>"Install to Workspace"</strong> at the top</li>
+                        <li>After installation, copy the <strong>"User OAuth Token"</strong> (starts with <code class="bg-gray-700 px-1">xoxp-</code> or <code class="bg-gray-700 px-1">xoxe.xoxp-</code>)</li>
+                    </ol>
+                    <p class="text-xs text-gray-400">The token will be securely stored in the database.</p>
+                </div>`,
+            discord: `
+                <div class="bg-blue-900 bg-opacity-30 border border-blue-700 rounded-lg p-4">
+                    <h6 class="font-semibold mb-3"><i class="fab fa-discord"></i> Get your Discord Bot Token</h6>
+                    <ol class="list-decimal list-inside space-y-2 text-sm mb-3">
+                        <li>Visit <a href="https://discord.com/developers/applications" target="_blank" class="text-blue-400 hover:underline font-semibold">discord.com/developers/applications</a></li>
+                        <li>Create a new application or select an existing one</li>
+                        <li>Go to the <strong>"Bot"</strong> section in the sidebar</li>
+                        <li>Enable <strong>"Message Content Intent"</strong> under Privileged Gateway Intents</li>
+                        <li>Click <strong>"Reset Token"</strong> to reveal your bot token</li>
+                        <li>Copy the token</li>
+                        <li>Use the OAuth2 URL Generator to invite the bot to your server with appropriate permissions</li>
+                    </ol>
+                    <p class="text-xs text-gray-400">The token will be securely stored in the database.</p>
+                </div>`,
+            linkedin: `
+                <div class="bg-blue-900 bg-opacity-30 border border-blue-700 rounded-lg p-4">
+                    <h6 class="font-semibold mb-3"><i class="fab fa-linkedin"></i> Get your LinkedIn Access Token</h6>
+                    <ol class="list-decimal list-inside space-y-2 text-sm mb-3">
+                        <li>Visit <a href="https://www.linkedin.com/developers/apps" target="_blank" class="text-blue-400 hover:underline font-semibold">linkedin.com/developers/apps</a></li>
+                        <li>Create a new app or select an existing one</li>
+                        <li>Request access to the <strong>"Messaging API"</strong> product</li>
+                        <li>Go to the <strong>"Auth"</strong> tab</li>
+                        <li>Use OAuth 2.0 tools to generate an access token with these scopes:
+                            <ul class="list-disc list-inside ml-6 mt-1 text-xs text-gray-300">
+                                <li>r_liteprofile, r_emailaddress, r_messaging</li>
+                            </ul>
+                        </li>
+                        <li>Copy the generated access token</li>
+                    </ol>
+                    <p class="text-xs text-yellow-400 mb-2"><strong>⚠️ Note:</strong> LinkedIn tokens expire after 60 days.</p>
+                    <p class="text-xs text-gray-400">The token will be securely stored in the database.</p>
+                </div>`
+        };
+        return instructions[platform] || '<p>Platform not found</p>';
+    }
+
+    // Helper functions
+    function formatTimestamp(timestamp) {
+        const date = new Date(timestamp);
+        const now = new Date();
+        const diffMs = now - date;
+        const diffMins = Math.floor(diffMs / 60000);
+        const diffHours = Math.floor(diffMs / 3600000);
+        const diffDays = Math.floor(diffMs / 86400000);
+        
+        if (diffMins < 60) return `${diffMins}m ago`;
+        if (diffHours < 24) return `${diffHours}h ago`;
+        if (diffDays < 7) return `${diffDays}d ago`;
+        return date.toLocaleDateString();
+    }
+
+    function escapeHtml(text) {
+        if (!text) return '';
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    function showCommsError(message) {
+        const container = document.getElementById('comms-messages-list');
+        if (container) {
+            container.innerHTML = `<div class="alert alert-danger">${escapeHtml(message)}</div>`;
+        }
+    }
+
+    // Event listeners
+    document.addEventListener('DOMContentLoaded', function() {
+        const timeframeEl = document.getElementById('comms-timeframe');
+        if (timeframeEl) {
+            timeframeEl.addEventListener('change', refreshComms);
+        }
+        
+        // Filter buttons
+        document.querySelectorAll('.filter-btn').forEach(btn => {
+            btn.addEventListener('click', function() {
+                // Remove active state from all buttons
+                document.querySelectorAll('.filter-btn').forEach(b => {
+                    b.classList.remove('active', 'bg-purple-600', 'border-purple-600', 'text-white');
+                    b.classList.add('bg-transparent', 'border-gray-600', 'text-gray-300');
+                });
+                // Add active state to clicked button
+                this.classList.remove('bg-transparent', 'border-gray-600', 'text-gray-300');
+                this.classList.add('active', 'bg-purple-600', 'border-purple-600', 'text-white');
+                currentFilter = this.dataset.filter;
+                applyFilter(currentFilter);
+            });
+        });
+        
+        // Check for OAuth callback success
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.has('connected')) {
+            const platform = urlParams.get('connected');
+            setTimeout(() => {
+                alert(`Successfully connected to ${platform}!`);
+                loadConnectionStatus();
+                // Clean up URL
+                window.history.replaceState({}, document.title, window.location.pathname);
+            }, 500);
+        }
+    });
     </script>
 </body>
 </html>

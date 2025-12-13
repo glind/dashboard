@@ -442,6 +442,7 @@ def collect_all_notes(obsidian_path: Optional[str] = None,
                 })
     
     # Collect from Google Drive
+    gdrive_auth_error = None
     if gdrive_folder_id:
         try:
             logger.info(f"Attempting to collect Google Drive notes from folder: {gdrive_folder_id}")
@@ -452,6 +453,17 @@ def collect_all_notes(obsidian_path: Optional[str] = None,
                 gdrive_notes = gdrive.get_meeting_notes(gdrive_folder_id, limit)
             except Exception as gdrive_err:
                 logger.error(f"Error in get_meeting_notes: {gdrive_err}", exc_info=True)
+                
+                # Check if it's an auth error
+                error_str = str(gdrive_err)
+                if '403' in error_str and ('insufficientPermissions' in error_str or 'insufficient authentication scopes' in error_str):
+                    gdrive_auth_error = {
+                        'error': 'authentication',
+                        'message': 'Google Drive access requires re-authentication',
+                        'reauth_url': 'http://localhost:8008/auth/google'
+                    }
+                    logger.warning("Google Drive authentication error - user needs to re-authenticate")
+                
                 gdrive_notes = []
             
             if gdrive_notes:
@@ -469,17 +481,30 @@ def collect_all_notes(obsidian_path: Optional[str] = None,
                             'context': todo.get('context', '')
                         })
             else:
-                logger.warning("No Google Drive notes found - check folder ID and permissions")
+                if not gdrive_auth_error:
+                    logger.warning("No Google Drive notes found - check folder ID and permissions")
         except Exception as e:
             logger.error(f"Error collecting Google Drive notes (outer): {e}", exc_info=True)
+            if '403' in str(e):
+                gdrive_auth_error = {
+                    'error': 'authentication',
+                    'message': 'Google Drive access requires re-authentication',
+                    'reauth_url': 'http://localhost:8008/auth/google'
+                }
     
     # Sort all notes by modification time
     all_notes.sort(key=lambda x: x.get('modified_at', ''), reverse=True)
     
-    return {
+    result = {
         'notes': all_notes[:limit * 2],  # Return more notes from combined sources
         'todos_to_create': todos_to_create,
         'obsidian_count': len([n for n in all_notes if n['source'] == 'obsidian']),
         'gdrive_count': len([n for n in all_notes if n['source'] == 'google_drive']),
         'total_todos_found': len(todos_to_create)
     }
+    
+    # Add auth error if present
+    if gdrive_auth_error:
+        result['gdrive_auth_error'] = gdrive_auth_error
+    
+    return result

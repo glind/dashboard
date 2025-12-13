@@ -83,13 +83,46 @@ try:
     from modules.music_news.endpoints import router as music_news_router
     from modules.vanity_alerts.endpoints import router as vanity_alerts_router
     from modules.comms.endpoints import router as comms_router
+    from modules.foundershield.endpoints import router as foundershield_router
+    from modules.leads.endpoints import router as leads_router
+    from modules.tasks.endpoints import router as tasks_router
+    from modules.ai_summarizer.endpoints import router as ai_summarizer_router
     
     app.include_router(music_news_router)
     app.include_router(vanity_alerts_router)
     app.include_router(comms_router)
-    logging.info("✅ Custom modules registered (music_news, vanity_alerts, comms)")
+    app.include_router(foundershield_router, prefix="/foundershield")
+    app.include_router(leads_router)
+    app.include_router(tasks_router)
+    app.include_router(ai_summarizer_router)
+    logging.info("✅ Custom modules registered (music_news, vanity_alerts, comms, foundershield, leads, tasks, ai_summarizer)")
 except ImportError as e:
     logging.warning(f"Could not load custom modules: {e}")
+
+# Register Trust Layer API
+try:
+    from trust_layer.api.endpoints import router as trust_layer_router, set_db_connection
+    from trust_layer.plugin_registry import get_registry
+    from trust_layer.plugins.email_auth import EmailAuthPlugin
+    from trust_layer.plugins.dns_records import DNSRecordsPlugin
+    from trust_layer.plugins.content_heuristics import ContentHeuristicsPlugin
+    
+    # Set database manager for trust layer (pass the manager, not conn)
+    set_db_connection(db)
+    
+    # Register plugins
+    registry = get_registry()
+    registry.register(EmailAuthPlugin())
+    registry.register(DNSRecordsPlugin())
+    registry.register(ContentHeuristicsPlugin())
+    
+    # Include API router
+    app.include_router(trust_layer_router, prefix="/api")
+    logging.info("✅ Trust Layer API registered with 3 plugins (email_auth, dns_records, content_heuristics)")
+except Exception as e:
+    logging.warning(f"Could not load trust layer: {e}")
+    import traceback
+    traceback.print_exc()
 
 
 # Health check endpoint for monitoring
@@ -549,6 +582,131 @@ async def get_calendar():
         return {"events": [{"title": "Team Meeting", "time": "9:00 AM - 10:00 AM"}]}
     except Exception as e:
         return {"error": str(e)}
+
+
+@app.post("/api/notes/scan")
+async def scan_notes():
+    """Scan for new notes from Obsidian and Google Drive with detailed feedback."""
+    try:
+        from collectors.notes_collector import collect_all_notes
+        from database import get_credentials, DatabaseManager
+        import traceback
+        
+        db = DatabaseManager()
+        
+        # Get configuration with priority: Environment Variables > Database > credentials.yaml
+        notes_config = get_credentials('notes') or {}
+        
+        # Obsidian vault path
+        obsidian_path = (
+            os.getenv('OBSIDIAN_VAULT_PATH') or
+            db.get_setting('obsidian_vault_path') or
+            notes_config.get('obsidian_vault_path')
+        )
+        
+        # Google Drive folder ID
+        gdrive_folder_id = (
+            os.getenv('GOOGLE_DRIVE_NOTES_FOLDER_ID') or
+            db.get_setting('google_drive_notes_folder_id') or
+            notes_config.get('google_drive_folder_id')
+        )
+        
+        # Other settings
+        limit = int(os.getenv('NOTES_LIMIT', db.get_setting('notes_limit', notes_config.get('notes_limit', 10))))
+        
+        logger.info(f"Scanning notes - Obsidian: {obsidian_path}, GDrive: {gdrive_folder_id}")
+        
+        # DEBUG: Log what we're working with
+        logger.info(f"DEBUG - obsidian_path: {repr(obsidian_path)}")
+        logger.info(f"DEBUG - gdrive_folder_id: {repr(gdrive_folder_id)}")
+        
+        # Collect notes from all sources
+        try:
+            result = collect_all_notes(
+                obsidian_path=obsidian_path,
+                gdrive_folder_id=gdrive_folder_id,
+                limit=limit
+            )
+        except Exception as collect_err:
+            logger.error(f"Error in collect_all_notes: {collect_err}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            raise
+        
+        # Create suggested tasks from TODOs for user approval
+        suggestions_created = 0
+        if result['todos_to_create']:
+            # Get existing suggestions to avoid duplicates
+            existing_suggestions = db.get_suggested_todos(status='pending')
+            existing_titles = {s['title'].lower() for s in existing_suggestions}
+            
+            # Get existing tasks to avoid duplicates
+            existing_tasks = db.get_todos()
+            existing_task_titles = {t.get('title', '').lower() for t in existing_tasks}
+            
+            for todo_item in result['todos_to_create']:
+                try:
+                    todo_text = todo_item['text']
+                    
+                    # Skip if already exists as suggestion or task
+                    if todo_text.lower() in existing_titles or todo_text.lower() in existing_task_titles:
+                        continue
+                    
+                    # Create suggested task
+                    suggestion_data = {
+                        'title': todo_text,
+                        'description': f"From {todo_item['source']}: {todo_item['source_title']}",
+                        'context': todo_item.get('context', ''),
+                        'source': f"notes_{todo_item['source']}",
+                        'source_url': todo_item.get('source_url') or todo_item.get('source_path'),
+                        'source_title': todo_item['source_title'],
+                        'priority': 'medium'
+                    }
+                    
+                    suggestion_id = db.add_suggested_todo(suggestion_data)
+                    if suggestion_id:
+                        suggestions_created += 1
+                        logger.info(f"Created suggested todo from note: {todo_text[:50]}...")
+                    
+                except Exception as e:
+                    logger.error(f"Error creating suggested todo: {e}")
+                    continue
+        
+        response_data = {
+            "success": True,
+            "notes": result['notes'],
+            "obsidian_count": result['obsidian_count'],
+            "gdrive_count": result['gdrive_count'],
+            "total_todos_found": result['total_todos_found'],
+            "suggestions_created": suggestions_created,
+            "config_status": {
+                'obsidian_configured': bool(obsidian_path),
+                'obsidian_path': obsidian_path or 'Not configured',
+                'gdrive_configured': bool(gdrive_folder_id and gdrive_folder_id.strip()),
+                'gdrive_folder_id': gdrive_folder_id or 'Not configured',
+                'notes_by_source': {
+                    'obsidian': result['obsidian_count'],
+                    'google_drive': result['gdrive_count']
+                }
+            }
+        }
+        
+        # Add auth error if present
+        if result.get('gdrive_auth_error'):
+            response_data['gdrive_auth_error'] = result['gdrive_auth_error']
+        
+        return response_data
+        
+    except Exception as e:
+        logger.error(f"Error scanning notes: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "notes": [],
+            "obsidian_count": 0,
+            "gdrive_count": 0,
+            "total_todos_found": 0,
+            "suggestions_created": 0
+        }
 
 
 @app.get("/api/notes")

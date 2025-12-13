@@ -563,12 +563,25 @@ class DashboardDataLoader {
                                 <div class="flex-1">
                                     <h4 class="font-semibold text-white">${this.escapeHtml(event.summary || event.title)}</h4>
                                     ${event.location ? `<p class="text-sm text-gray-400">📍 ${this.escapeHtml(event.location)}</p>` : ''}
-                                    ${meetingLink ? `
-                                        <a href="${meetingLink}" target="_blank" onclick="event.stopPropagation()"
-                                           class="inline-flex items-center gap-1 text-xs bg-blue-600 hover:bg-blue-700 px-2 py-1 rounded mt-2">
-                                            🎥 Join
-                                        </a>
+                                    ${event.summary_ai ? `
+                                        <div class="mt-2 p-2 bg-gray-700 rounded text-sm">
+                                            <div class="text-xs text-gray-400 mb-1">AI Summary:</div>
+                                            <div class="text-white">${this.escapeHtml(event.summary_ai)}</div>
+                                        </div>
                                     ` : ''}
+                                    <div class="flex gap-2 mt-2" onclick="event.stopPropagation()">
+                                        ${meetingLink ? `
+                                            <a href="${meetingLink}" target="_blank"
+                                               class="inline-flex items-center gap-1 text-xs bg-blue-600 hover:bg-blue-700 px-2 py-1 rounded">
+                                                🎥 Join
+                                            </a>
+                                        ` : ''}
+                                        <button onclick="dataLoader.summarizeItem('calendar', '${this.escapeHtml(event.event_id)}', ${this.escapeHtml(JSON.stringify(event))})" 
+                                                class="inline-flex items-center gap-1 text-xs bg-purple-600 hover:bg-purple-700 px-2 py-1 rounded"
+                                                title="Summarize and scan for tasks">
+                                            🤖 AI
+                                        </button>
+                                    </div>
                                 </div>
                                 <span class="text-sm text-blue-400">${this.formatEventTime(event)}</span>
                             </div>
@@ -905,7 +918,16 @@ class DashboardDataLoader {
                         ).join('')}
                     </div>
                 ` : ''}
+                ${email.summary ? `
+                    <div class="mt-2 p-2 bg-gray-700 rounded text-sm">
+                        <div class="text-xs text-gray-400 mb-1">AI Summary:</div>
+                        <div class="text-white">${this.escapeHtml(email.summary)}</div>
+                    </div>
+                ` : ''}
                 <div class="flex gap-1 pt-2 border-t border-gray-700" onclick="event.stopPropagation()">
+                    <button onclick="dataLoader.summarizeItem('email', '${this.escapeHtml(email.id)}', ${this.escapeHtml(JSON.stringify(email))})" 
+                            class="px-2 py-1 rounded text-xs bg-purple-600 hover:bg-purple-700" 
+                            title="Summarize and scan for tasks">🤖 AI</button>
                     ${email.is_whitelisted ? 
                         '<span class="px-2 py-1 text-xs bg-green-600 rounded">✓ Trusted Sender</span>' :
                         `<button onclick="dataLoader.markEmailAsSafe('${this.escapeHtml(email.sender)}')" 
@@ -1684,6 +1706,110 @@ class DashboardDataLoader {
         this.loadNotes();
     }
     
+    async summarizeItem(itemType, itemId, itemData) {
+        try {
+            // Show loading indicator
+            const button = event.target.closest('button');
+            const originalText = button.innerHTML;
+            button.disabled = true;
+            button.innerHTML = '⏳';
+            
+            // Prepare content based on item type
+            let content = '';
+            let title = '';
+            let metadata = {};
+            
+            if (itemType === 'note') {
+                content = itemData.preview || '';
+                title = itemData.title || 'Untitled Note';
+                metadata = {
+                    url: itemData.url || itemData.path,
+                    source: itemData.source
+                };
+            } else if (itemType === 'email') {
+                content = itemData.body || itemData.snippet || '';
+                title = itemData.subject || 'No Subject';
+                metadata = {
+                    id: itemData.id,
+                    from: itemData.from
+                };
+            } else if (itemType === 'calendar') {
+                content = itemData.description || '';
+                title = itemData.summary || itemData.title || 'Untitled Event';
+                metadata = {
+                    id: itemData.id,
+                    start: itemData.start,
+                    end: itemData.end
+                };
+            }
+            
+            // Call API
+            const response = await fetch('/api/ai/summarize/item', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    item_type: itemType,
+                    item_id: itemId,
+                    content: content,
+                    title: title,
+                    metadata: metadata
+                })
+            });
+            
+            if (response.ok) {
+                const data = await response.json();
+                
+                // Update the item with the summary
+                if (itemType === 'note') {
+                    const note = this.notes.find(n => (n.doc_id === itemId || n.relative_path === itemId));
+                    if (note) {
+                        note.summary = data.summary;
+                    }
+                    this.renderNotes();
+                } else if (itemType === 'email') {
+                    const email = this.emails.find(e => e.id === itemId);
+                    if (email) {
+                        email.summary = data.summary;
+                    }
+                    this.renderEmails();
+                } else if (itemType === 'calendar') {
+                    const event = this.calendar.find(e => e.id === itemId);
+                    if (event) {
+                        event.summary_ai = data.summary;
+                    }
+                    this.renderCalendar();
+                }
+                
+                // Show success message
+                const message = `✅ Summary complete! ${data.tasks_created > 0 ? `Created ${data.tasks_created} task${data.tasks_created > 1 ? 's' : ''}.` : 'No tasks found.'}`;
+                this.showNotification(message, 'success');
+                
+                // Reload tasks if any were created
+                if (data.tasks_created > 0) {
+                    this.loadTodos();
+                }
+            } else {
+                const error = await response.json();
+                this.showNotification(`❌ Error: ${error.detail || 'Failed to summarize'}`, 'error');
+            }
+            
+            // Restore button
+            button.disabled = false;
+            button.innerHTML = originalText;
+            
+        } catch (error) {
+            console.error('Error summarizing item:', error);
+            this.showNotification('❌ Error summarizing item', 'error');
+            
+            // Restore button
+            const button = event.target.closest('button');
+            button.disabled = false;
+            button.innerHTML = '🤖 AI';
+        }
+    }
+    
     renderNotes() {
         const container = document.getElementById('notes-grid');
         const statsContainer = document.getElementById('notes-stats');
@@ -1766,11 +1892,23 @@ class DashboardDataLoader {
                     
                     ${note.word_count ? `<div class="text-xs text-gray-500 mb-3">${note.word_count} words</div>` : ''}
                     
+                    ${note.summary ? `
+                        <div class="mb-3 p-3 bg-gray-700 rounded text-sm">
+                            <div class="text-xs text-gray-400 mb-1">AI Summary:</div>
+                            <div class="text-white">${this.escapeHtml(note.summary)}</div>
+                        </div>
+                    ` : ''}
+                    
                     <div class="flex gap-2">
                         <a href="${noteLink}" target="_blank" 
                            class="flex-1 px-3 py-2 bg-${sourceColor}-600 hover:bg-${sourceColor}-700 rounded text-sm font-medium text-center transition-all duration-200">
                             Open Note
                         </a>
+                        <button onclick="dataLoader.summarizeItem('note', '${note.doc_id || note.relative_path}', ${this.escapeHtml(JSON.stringify(note))})" 
+                                class="px-3 py-2 bg-purple-600 hover:bg-purple-700 rounded text-sm font-medium transition-all duration-200 flex items-center gap-1"
+                                title="Summarize and scan for tasks">
+                            🤖 AI
+                        </button>
                         ${note.todo_count ? `
                             <button onclick="dataLoader.loadTodos(); showSection('todos');" 
                                     class="px-3 py-2 bg-yellow-600 hover:bg-yellow-700 rounded text-sm font-medium transition-all duration-200">

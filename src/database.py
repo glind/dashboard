@@ -445,6 +445,100 @@ class DatabaseManager:
                 )
             """)
             
+            # Trust Reports for Anti-Scam Layer
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS trust_reports (
+                    id TEXT PRIMARY KEY,
+                    thread_id TEXT NOT NULL,
+                    primary_message_id TEXT NOT NULL,
+                    score INTEGER NOT NULL CHECK(score >= 0 AND score <= 100),
+                    risk_level TEXT NOT NULL CHECK(risk_level IN ('likely_ok', 'caution', 'high_risk')),
+                    summary TEXT,
+                    findings_json TEXT,
+                    signals_json TEXT,
+                    version INTEGER DEFAULT 1,
+                    ruleset_version TEXT DEFAULT '1.0',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Trust Claims from verifiers
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS trust_claims (
+                    id TEXT PRIMARY KEY,
+                    report_id TEXT NOT NULL,
+                    provider TEXT NOT NULL,
+                    claim_type TEXT NOT NULL,
+                    subject TEXT NOT NULL,
+                    issuer TEXT NOT NULL,
+                    evidence_json TEXT,
+                    confidence REAL DEFAULT 0.5 CHECK(confidence >= 0 AND confidence <= 1),
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (report_id) REFERENCES trust_reports (id) ON DELETE CASCADE
+                )
+            """)
+            
+            # Provider Accounts (OAuth connections)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS provider_accounts (
+                    id TEXT PRIMARY KEY,
+                    user_id INTEGER DEFAULT 1,
+                    provider TEXT NOT NULL,
+                    access_token TEXT,
+                    refresh_token TEXT,
+                    expires_at TIMESTAMP,
+                    scopes TEXT,
+                    provider_metadata TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Verification Requests (for external verification)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS verification_requests (
+                    id TEXT PRIMARY KEY,
+                    created_by_user_id INTEGER DEFAULT 1,
+                    report_id TEXT NOT NULL,
+                    provider TEXT NOT NULL,
+                    target_email TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'created' CHECK(status IN ('created', 'sent', 'completed', 'expired', 'revoked')),
+                    request_token TEXT UNIQUE NOT NULL,
+                    expires_at TIMESTAMP NOT NULL,
+                    completed_at TIMESTAMP,
+                    result_json TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (report_id) REFERENCES trust_reports (id) ON DELETE CASCADE
+                )
+            """)
+            
+            # Audit log for trust system
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS trust_audit_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER DEFAULT 1,
+                    action TEXT NOT NULL,
+                    resource_type TEXT NOT NULL,
+                    resource_id TEXT NOT NULL,
+                    details TEXT,
+                    ip_address TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Create indexes for trust tables
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_trust_reports_thread ON trust_reports(thread_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_trust_reports_created ON trust_reports(created_at DESC)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_trust_reports_risk ON trust_reports(risk_level)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_trust_claims_report ON trust_claims(report_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_trust_claims_provider ON trust_claims(provider, claim_type)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_verification_requests_report ON verification_requests(report_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_verification_requests_token ON verification_requests(request_token)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_verification_requests_status ON verification_requests(status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_provider_accounts_provider ON provider_accounts(provider)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_trust_audit_log_created ON trust_audit_log(created_at DESC)")
+            
             # Create index for fast domain lookups
             cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_safe_senders_domain 
@@ -2805,26 +2899,24 @@ class DatabaseManager:
     def add_safe_sender(self, sender_email: str, reason: str = "User marked as safe") -> bool:
         """Add an email sender to the safe senders whitelist."""
         try:
-            conn = self.get_connection()
-            cursor = conn.cursor()
-            
-            # Extract domain from email
-            import re
-            domain_match = re.search(r'@([a-zA-Z0-9.-]+)', sender_email)
-            sender_domain = domain_match.group(1).lower() if domain_match else ''
-            
-            cursor.execute("""
-                INSERT INTO safe_email_senders (sender_email, sender_domain, added_reason, last_seen, updated_at)
-                VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                ON CONFLICT(sender_email) DO UPDATE SET
-                    marked_safe_count = marked_safe_count + 1,
-                    last_seen = CURRENT_TIMESTAMP,
-                    updated_at = CURRENT_TIMESTAMP
-            """, (sender_email.lower(), sender_domain, reason))
-            
-            conn.commit()
-            logger.info(f"Added safe sender: {sender_email}")
-            return True
+            with self.get_connection() as conn:
+                # Extract domain from email
+                import re
+                domain_match = re.search(r'@([a-zA-Z0-9.-]+)', sender_email)
+                sender_domain = domain_match.group(1).lower() if domain_match else ''
+                
+                conn.execute("""
+                    INSERT INTO safe_email_senders (sender_email, sender_domain, added_reason, last_seen, updated_at)
+                    VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    ON CONFLICT(sender_email) DO UPDATE SET
+                        marked_safe_count = marked_safe_count + 1,
+                        last_seen = CURRENT_TIMESTAMP,
+                        updated_at = CURRENT_TIMESTAMP
+                """, (sender_email.lower(), sender_domain, reason))
+                
+                conn.commit()
+                logger.info(f"✅ Added safe sender: {sender_email}")
+                return True
             
         except Exception as e:
             logger.error(f"Error adding safe sender {sender_email}: {e}")
@@ -2833,16 +2925,13 @@ class DatabaseManager:
     def is_safe_sender(self, sender_email: str) -> bool:
         """Check if an email sender is in the safe senders whitelist."""
         try:
-            conn = self.get_connection()
-            cursor = conn.cursor()
-            
-            cursor.execute("""
-                SELECT id FROM safe_email_senders
-                WHERE sender_email = ? COLLATE NOCASE
-            """, (sender_email.lower(),))
-            
-            result = cursor.fetchone()
-            return result is not None
+            with self.get_connection() as conn:
+                result = conn.execute("""
+                    SELECT id FROM safe_email_senders
+                    WHERE sender_email = ? COLLATE NOCASE
+                """, (sender_email.lower(),)).fetchone()
+                
+                return result is not None
             
         except Exception as e:
             logger.error(f"Error checking safe sender {sender_email}: {e}")

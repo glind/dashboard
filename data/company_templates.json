@@ -15,31 +15,30 @@
         "workflow"
       ],
       "market_segment": "B2B SaaS",
-      "technology_stack_preferences": []
+      "technology_stack_preferences": [
+        "docker"
+      ]
     },
     "interaction_patterns": {
       "email_frequency": {
-        "frequency": 16,
-        "pattern": "medium_frequency"
+        "frequency": 33,
+        "pattern": "high_frequency"
       },
       "task_patterns": {
         "completion_rate": 0.0,
-        "total_tasks": 4,
+        "total_tasks": 1,
         "completed_tasks": 0,
         "task_types": [
-          "email",
-          "email",
-          "email",
-          "email"
+          "ai-suggested"
         ]
       },
       "meeting_patterns": {
-        "total_meetings": 2,
+        "total_meetings": 1,
         "meeting_frequency": "occasional",
         "meeting_types": {
           "demo": 0,
           "sync": 0,
-          "technical": 1,
+          "technical": 0,
           "business": 1
         }
       },
@@ -48,24 +47,27 @@
         "response_consistency": "good",
         "preferred_communication_hours": "business_hours"
       },
-      "total_interactions": 16,
-      "total_tasks": 4,
-      "meeting_to_email_ratio": 0.125
+      "total_interactions": 33,
+      "total_tasks": 1,
+      "meeting_to_email_ratio": 0.030303030303030304
     },
     "success_indicators": [
       "sustained_communication",
       "meeting_engagement",
-      "technical_alignment"
+      "technical_alignment",
+      "business_progression",
+      "high_business_potential",
+      "meeting_history"
     ],
     "communication_style": {
       "dominant_style": "casual",
       "formality_scores": {
         "formal": 0,
-        "casual": 7,
+        "casual": 56,
         "business": 0
       },
-      "technical_depth": 0.125,
-      "urgency_level": 0.0625,
+      "technical_depth": 0.12121212121212122,
+      "urgency_level": 0.0,
       "preferred_communication_channels": [
         "email",
         "video_call",
@@ -73,21 +75,24 @@
       ],
       "response_time_expectations": "standard_business_response"
     },
-    "project_types": [],
-    "typical_engagement_timeline": "Short-term (< 1 month)",
+    "project_types": [
+      "API Integration",
+      "Consulting"
+    ],
+    "typical_engagement_timeline": "Long-term (6+ months)",
     "decision_makers": {
       "primary_contact_types": {
         "C-Level": 0,
         "VP/Director": 0,
-        "Manager": 1,
+        "Manager": 0,
         "Technical": 0,
-        "Business": 1
+        "Business": 0
       },
-      "decision_maker_accessibility": 0.1,
+      "decision_maker_accessibility": 0.5,
       "typical_approval_chain": [
-        "Management Approval"
+        "Standard Approval Process"
       ],
-      "contact_diversity": 14
+      "contact_diversity": 27
     },
     "technical_requirements": [],
     "business_model_indicators": [
@@ -308,31 +313,37 @@
     "industry_characteristics": {
       "primary_industry": "Low-Code/No-Code Platform",
       "focus_areas": [
-        "Platform Development",
         "Community Building",
-        "Developer Experience",
+        "Platform Development",
         "Open Source",
         "API Integration",
-        "Workflow Automation"
+        "Workflow Automation",
+        "Developer Experience"
       ],
       "market_segment": "B2B Technology Solutions"
     },
     "interaction_patterns": {
-      "average_interactions": 8.0,
+      "average_interactions": 16.5,
       "average_meetings": 0.0,
       "engagement_level": "medium"
     },
     "success_indicators": [
-      "sustained_communication",
+      "meeting_engagement",
+      "business_progression",
+      "high_business_potential",
       "technical_alignment",
-      "meeting_engagement"
+      "meeting_history",
+      "sustained_communication"
     ],
     "communication_style": {
       "dominant_style": "casual",
-      "technical_depth": 0.0625,
+      "technical_depth": 0.06060606060606061,
       "response_time_expectations": "standard_business_response"
     },
-    "project_types": [],
+    "project_types": [
+      "API Integration",
+      "Consulting"
+    ],
     "typical_engagement_timeline": "Medium-term (3-6 months)",
     "decision_makers": {
       "typical_contact_level": "Management to Executive",
@@ -367,8 +378,8 @@
       "primary_industry": "Custom Software Development",
       "focus_areas": [
         "System Integration",
-        "Legacy Modernization",
-        "Enterprise Solutions"
+        "Enterprise Solutions",
+        "Legacy Modernization"
       ],
       "market_segment": "B2B Technology Solutions"
     },
@@ -420,34 +431,40 @@
     "industry_characteristics": {
       "primary_industry": "Low-Code/No-Code Platform",
       "focus_areas": [
-        "Platform Development",
         "Community Building",
-        "Developer Experience",
         "Enterprise Solutions",
-        "System Integration",
+        "Platform Development",
         "Open Source",
         "API Integration",
+        "System Integration",
+        "Legacy Modernization",
         "Workflow Automation",
-        "Legacy Modernization"
+        "Developer Experience"
       ],
       "market_segment": "B2B Technology Solutions"
     },
     "interaction_patterns": {
-      "average_interactions": 3.2,
+      "average_interactions": 6.6,
       "average_meetings": 0.0,
       "engagement_level": "medium"
     },
     "success_indicators": [
-      "sustained_communication",
+      "meeting_engagement",
+      "business_progression",
+      "high_business_potential",
       "technical_alignment",
-      "meeting_engagement"
+      "meeting_history",
+      "sustained_communication"
     ],
     "communication_style": {
       "dominant_style": "business",
-      "technical_depth": 0.0375,
+      "technical_depth": 0.03636363636363636,
       "response_time_expectations": "standard_business_response"
     },
-    "project_types": [],
+    "project_types": [
+      "API Integration",
+      "Consulting"
+    ],
     "typical_engagement_timeline": "Medium-term (3-6 months)",
     "decision_makers": {
       "typical_contact_level": "Management to Executive",

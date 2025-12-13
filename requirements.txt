@@ -30,6 +30,10 @@ beautifulsoup4==4.13.5
 lxml==4.9.3
 feedparser==6.0.10
 
+# Email security and DNS verification (FounderShield)
+dnspython>=2.4.0
+python-whois>=0.8.0
+
 # Desktop application
 pywebview>=4.4.1
 

@@ -12,7 +12,7 @@ import yaml
 
 class OllamaSettings(BaseSettings):
     """Ollama server configuration."""
-    host: str = Field(default="pop-os.local", description="Ollama server host")
+    host: str = Field(default="alderaan.local", description="Ollama server host")
     port: int = Field(default=11434, description="Ollama server port")
     model: str = Field(default="llama3.2:1b", description="Default model to use")
     

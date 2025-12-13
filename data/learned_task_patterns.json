@@ -1,55 +1,25 @@
 {
   "preferred_project_types": [],
-  "high_value_keywords": [
-    "now",
-    "productworld"
-  ],
-  "low_value_keywords": [
-    "you",
-    "your",
-    "business",
-    "payment",
-    "buildly",
-    "google",
-    "sent",
-    "cto",
-    "new",
-    "just",
-    "connection",
-    "workspace",
-    "reminder",
-    "how",
-    "request",
-    "gregory",
-    "available",
-    "declined",
-    "secure",
-    "out"
-  ],
+  "high_value_keywords": [],
+  "low_value_keywords": [],
   "optimal_task_size": "small",
   "preferred_priorities": [
-    "high",
     "medium",
-    "low"
+    "high"
   ],
   "company_interaction_patterns": {
-    "total_company_tasks": 33,
-    "completed_company_tasks": 1,
-    "company_completion_rate": 0.030303030303030304,
+    "total_company_tasks": 2,
+    "completed_company_tasks": 0,
+    "company_completion_rate": 0.0,
     "preferred_company_priorities": [
-      "high"
+      "high",
+      "medium"
     ],
-    "company_interaction_keywords": {
-      "call": 2,
-      "speakers": 2,
-      "now": 2,
-      "open": 2,
-      "productworld": 2
-    }
+    "company_interaction_keywords": {}
   },
   "meeting_preferences": {
-    "total_meeting_tasks": 14,
-    "meeting_completion_rate": 0.07142857142857142,
+    "total_meeting_tasks": 2,
+    "meeting_completion_rate": 0.0,
     "preferred_meeting_times": {
       "preferred_days": [
         "Tuesday",
@@ -63,9 +33,9 @@
       "meeting_duration_preference": "medium"
     },
     "meeting_types": {
-      "general": 13,
-      "demo": 1
+      "demo": 1,
+      "general": 1
     }
   },
-  "last_updated": "2025-11-05T09:34:21.176950"
+  "last_updated": "2025-12-13T09:24:36.332714"
 }

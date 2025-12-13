@@ -24,6 +24,7 @@ from pathlib import Path
 # Add parent directory to path for database imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from database import DatabaseManager
+from processors.email_risk_learning import EmailRiskLearningSystem
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +35,7 @@ class EmailRiskChecker:
     def __init__(self, db: Optional[DatabaseManager] = None):
         # Database for safe senders whitelist
         self.db = db or DatabaseManager()
+        self.learning_system = EmailRiskLearningSystem(db=self.db)
         
         # Known safe domains (major companies, services)
         self.trusted_domains = {
@@ -141,8 +143,17 @@ class EmailRiskChecker:
         risk_score += urgency_score
         flags.extend(urgency_flags)
         
+        # Apply learned adjustments
+        learned_adjustment = self.learning_system.get_learned_risk_adjustment(
+            self._extract_domain(sender),
+            flags
+        )
+        risk_score += learned_adjustment
+        if learned_adjustment != 0:
+            details['learned_adjustment'] = learned_adjustment
+        
         # Cap at 10
-        risk_score = min(risk_score, 10)
+        risk_score = min(max(risk_score, 1), 10)
         
         # Determine risk level
         if risk_score <= 3:

@@ -10,9 +10,9 @@ collection_interval_hours: 6
 
 # Ollama configuration
 ollama:
-  host: "localhost"
+  host: "alderaan.local"
   port: 11434
-  model: "llama2"
+  model: "qwen2.5:7b"
 
 # Google APIs
 google:

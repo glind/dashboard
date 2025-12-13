@@ -1,23 +1,22 @@
 [
   {
-    "company_name": "Axiom",
-    "domain": "axiom.ai",
+    "company_name": "Zero",
+    "domain": "zerofinancial.com",
     "industry": "Technology",
     "estimated_size": "Early Stage",
     "contact_info": {},
-    "match_score": 1.0,
+    "match_score": 0.25,
     "match_reasons": [
-      "Matches search term: no-code",
-      "Matches search term: automation"
+      "Matches search term: fintech"
     ],
     "template_matches": [
       "startup",
       "early-stage"
     ],
     "recommended_approach": "Reach out via website",
-    "priority_level": "high",
+    "priority_level": "medium",
     "technical_fit_score": 0.8,
-    "business_potential_score": 1.0,
+    "business_potential_score": 0.25,
     "contact_accessibility_score": 0.3,
     "next_steps": [
       "Research company background and recent updates",
@@ -28,7 +27,7 @@
     "data_sources": [
       "Hacker News"
     ],
-    "confidence_level": 1.0,
-    "last_updated": "2025-11-05T09:34:53.978446"
+    "confidence_level": 0.25,
+    "last_updated": "2025-12-13T09:24:53.852792"
   }
 ]

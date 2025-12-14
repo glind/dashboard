@@ -844,50 +844,26 @@ class DashboardDataLoader {
             const emailDate = email.received_date || email.date;
             const timeAgo = this.getTimeAgo(emailDate);
             
-            // Risk score badge with detailed tooltip
-            const riskScore = email.risk_score || 0;
-            const riskLevel = email.risk_level || 'unknown';
-            const riskFlags = email.risk_flags || [];
-            let riskBadge = '';
-            
-            if (riskScore > 0 || email.is_whitelisted) {
-                let riskColor = 'bg-green-600';
-                let riskText = 'Safe';
-                let riskIcon = '✓';
-                
-                if (email.is_whitelisted) {
-                    riskColor = 'bg-green-600';
-                    riskText = 'Trusted';
-                    riskIcon = '✓';
-                } else if (riskScore >= 7) {
-                    riskColor = 'bg-red-600';
-                    riskText = 'High Risk';
-                    riskIcon = '⚠️';
-                } else if (riskScore >= 5) {
-                    riskColor = 'bg-orange-600';
-                    riskText = 'Medium Risk';
-                    riskIcon = '⚡';
-                } else if (riskScore >= 3) {
-                    riskColor = 'bg-yellow-600';
-                    riskText = 'Low Risk';
-                    riskIcon = '!';
-                }
-                
-                // Build detailed tooltip
-                let tooltip = `Risk Score: ${riskScore}/10\\nLevel: ${riskLevel}`;
-                if (email.is_whitelisted) {
-                    tooltip = 'Trusted Sender\\nYou marked this sender as safe';
-                } else if (riskFlags.length > 0) {
-                    tooltip += '\\n\\nRisk Factors:\\n• ' + riskFlags.join('\\n• ');
-                } else {
-                    tooltip += '\\n\\nNo significant risk factors detected';
-                }
-                
-                if (email.recommended_action && email.recommended_action !== 'none') {
-                    tooltip += `\\n\\nRecommended: ${email.recommended_action}`;
-                }
-                
-                riskBadge = `<span class="text-xs ${riskColor} px-2 py-1 rounded whitespace-nowrap cursor-help" title="${this.escapeHtml(tooltip)}">${riskIcon} ${riskText}</span>`;
+            // Trust Layer Badge - on-demand scanning only
+            // Auto-fetch trust report (backend caches safe emails to avoid rescanning)
+            let riskBadge = '<span class="text-xs bg-gray-600 px-2 py-1 rounded" title="Analyzing email security...">⏳ Analyzing...</span>';
+            if (trustUI) {
+                trustUI.getTrustReport(email).then(report => {
+                    if (report && report.score !== undefined) {
+                        const badge = trustUI.getTrustBadge(report.score, report.risk_level);
+                        const container = document.querySelector(`[onclick*="showEmailDetail('${this.escapeHtml(email.id)}')"] .trust-badge-container`);
+                        if (container) {
+                            container.innerHTML = badge;
+                        }
+                    }
+                }).catch(err => {
+                    console.error('Trust report fetch failed for', email.id, err);
+                    // Show scan button on error
+                    const container = document.querySelector(`[onclick*="showEmailDetail('${this.escapeHtml(email.id)}')"] .trust-badge-container`);
+                    if (container) {
+                        container.innerHTML = trustUI.getTrustBadge(null, null);
+                    }
+                });
             }
             
             // Smart tag with tooltip
@@ -910,7 +886,7 @@ class DashboardDataLoader {
                 <div class="flex justify-between items-start mb-2">
                     <h4 class="font-medium text-gray-200 flex-1">${this.escapeHtml(email.subject)}</h4>
                     <div class="flex gap-2 items-center ml-2">
-                        ${riskBadge}
+                        <div class="trust-badge-container">${riskBadge}</div>
                         ${smartTagHtml}
                         ${email.has_todos ? '<span class="text-xs bg-orange-600 px-2 py-1 rounded whitespace-nowrap cursor-help" title="This email has associated tasks">📋 Tasks</span>' : ''}
                         ${email.priority === 'high' ? '<span class="text-xs bg-red-600 px-2 py-1 rounded whitespace-nowrap cursor-help" title="High priority email">High</span>' : ''}

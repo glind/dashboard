@@ -87,6 +87,8 @@ try:
     from modules.leads.endpoints import router as leads_router
     from modules.tasks.endpoints import router as tasks_router
     from modules.ai_summarizer.endpoints import router as ai_summarizer_router
+    from modules.providers.endpoints import router as providers_router
+    from modules.providers.oauth import router as providers_oauth_router
     
     app.include_router(music_news_router)
     app.include_router(vanity_alerts_router)
@@ -95,7 +97,9 @@ try:
     app.include_router(leads_router)
     app.include_router(tasks_router)
     app.include_router(ai_summarizer_router)
-    logging.info("✅ Custom modules registered (music_news, vanity_alerts, comms, foundershield, leads, tasks, ai_summarizer)")
+    app.include_router(providers_router)
+    app.include_router(providers_oauth_router)
+    logging.info("✅ Custom modules registered (music_news, vanity_alerts, comms, foundershield, leads, tasks, ai_summarizer, providers)")
 except ImportError as e:
     logging.warning(f"Could not load custom modules: {e}")
 

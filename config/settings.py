@@ -110,6 +110,28 @@ class ObsidianSettings(BaseSettings):
     recent_days: int = Field(default=7, description="Only check notes modified in last N days")
 
 
+class MicrosoftSettings(BaseSettings):
+    """Microsoft Office 365 configuration."""
+    client_id: Optional[str] = Field(default=None, description="Microsoft OAuth client ID")
+    client_secret: Optional[str] = Field(default=None, description="Microsoft OAuth client secret")
+    redirect_uri: str = Field(default="http://localhost:8008/auth/microsoft/callback", description="OAuth redirect URI")
+    tenant_id: str = Field(default="common", description="Microsoft tenant ID")
+    
+    class Config:
+        env_prefix = "MICROSOFT_"
+
+
+class ProtonSettings(BaseSettings):
+    """Proton Mail (via Bridge) configuration."""
+    username: Optional[str] = Field(default=None, description="ProtonMail email address")
+    password: Optional[str] = Field(default=None, description="Proton Bridge password")
+    imap_host: str = Field(default="localhost", description="Proton Bridge IMAP host")
+    imap_port: int = Field(default=1143, description="Proton Bridge IMAP port")
+    
+    class Config:
+        env_prefix = "PROTON_"
+
+
 class GoogleDriveNotesSettings(BaseSettings):
     """Google Drive notes configuration."""
     enabled: bool = Field(default=False, description="Enable Google Drive notes integration")
@@ -165,6 +187,8 @@ class Settings(BaseSettings):
     # Component settings
     ollama: OllamaSettings = Field(default_factory=OllamaSettings)
     google: GoogleSettings = Field(default_factory=GoogleSettings)
+    microsoft: MicrosoftSettings = Field(default_factory=MicrosoftSettings)
+    proton: ProtonSettings = Field(default_factory=ProtonSettings)
     apple: AppleSettings = Field(default_factory=AppleSettings)
     todoist: TodoistSettings = Field(default_factory=TodoistSettings)
     ticktick: TickTickSettings = Field(default_factory=TickTickSettings)

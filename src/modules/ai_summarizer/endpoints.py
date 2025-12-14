@@ -58,20 +58,29 @@ async def get_ai_summary_and_tasks(content: str, title: str = "", item_type: str
         
         prompt = f"""Analyze this {item_type} and provide:
 1. A concise summary (2-3 sentences)
-2. A list of actionable tasks found in the content
+2. A list of actionable tasks with full context and details
 
 {item_type.upper()}: {title}
 
 CONTENT:
 {content[:2000]}  
 
+IMPORTANT: For each task, provide a COMPLETE, ACTIONABLE description with:
+- What needs to be done
+- Relevant context from the source (who, what, when, why)
+- Any deadlines or urgency indicators
+- Related details that make the task clear
+
+BAD EXAMPLE: "Send email"
+GOOD EXAMPLE: "Send project proposal to Alice by Friday EOD with updated pricing for Q1 features discussed in meeting"
+
 Respond in this exact format:
 SUMMARY: [your summary here]
 
 TASKS:
-- [task 1]
-- [task 2]
-- [etc, or "None" if no tasks]
+- [Complete task description with full context from content]
+- [Another complete task description with all relevant details]
+- [Or "None" if no tasks found]
 """
         
         summary = ""
@@ -211,35 +220,31 @@ async def summarize_item(request: SummarizeRequest):
         summary = result['summary']
         extracted_tasks = result['tasks']
         
-        # Create tasks in database
+        # Create tasks as suggested todos (require user approval)
         task_ids = []
         for task_text in extracted_tasks:
             try:
-                # Prepare metadata
-                metadata = {}
-                if request.item_type == 'note' and request.metadata.get('url'):
-                    metadata['source_url'] = request.metadata['url']
-                elif request.item_type == 'email' and request.metadata.get('id'):
-                    metadata['email_id'] = request.metadata['id']
-                elif request.item_type == 'calendar' and request.metadata.get('id'):
-                    metadata['event_id'] = request.metadata['id']
+                # Create as suggested todo with full context
+                todo_data = {
+                    'title': task_text[:200],  # Limit title length
+                    'description': task_text,  # Full task description with context
+                    'context': f"{request.item_type}: {request.title}",
+                    'source': request.item_type,
+                    'source_id': request.item_id,
+                    'source_title': request.title,
+                    'source_url': request.metadata.get('url', ''),
+                    'source_content': request.content[:5000],  # Store first 5000 chars for popup
+                    'priority': 'medium',
+                    'due_date': None
+                }
                 
-                # Create task using TaskManager
-                result = task_manager.create_task(
-                    title=task_text,
-                    description=f"Extracted from {request.item_type}: {request.title}",
-                    priority='medium',
-                    category='ai_extracted',
-                    source=f'{request.item_type}_{request.item_id}',
-                    metadata=metadata
-                )
-                
-                if result and result.get('id'):
-                    task_ids.append(result['id'])
-                    logger.info(f"Created task from {request.item_type}: {task_text[:50]}...")
+                suggestion_id = db.add_suggested_todo(todo_data)
+                if suggestion_id:
+                    task_ids.append(suggestion_id)
+                    logger.info(f"Created suggested task from {request.item_type}: {task_text[:50]}...")
                     
             except Exception as e:
-                logger.error(f"Error creating task: {e}")
+                logger.error(f"Error creating suggested task: {e}")
                 continue
         
         # Store summary in database (add to metadata)

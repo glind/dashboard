@@ -660,12 +660,18 @@ function renderSuggestedTodos(suggestions) {
     countBadge.textContent = suggestions.length;
     
     container.innerHTML = suggestions.map(suggestion => `
-        <div class="bg-black bg-opacity-30 rounded p-2 text-sm">
+        <div class="bg-black bg-opacity-30 rounded p-3 text-sm">
             <div class="flex justify-between items-start gap-2">
                 <div class="flex-1 min-w-0">
-                    <div class="text-white font-medium text-xs mb-1">${escapeHtml(suggestion.title)}</div>
-                    <div class="text-gray-300 text-xs mb-1">${escapeHtml(suggestion.source_title || suggestion.source)}</div>
-                    ${suggestion.context ? `<div class="text-gray-400 text-xs truncate">${escapeHtml(suggestion.context).substring(0, 80)}...</div>` : ''}
+                    <div class="text-white font-medium text-sm mb-2">${escapeHtml(suggestion.title)}</div>
+                    ${suggestion.description && suggestion.description !== suggestion.title ? 
+                        `<div class="text-gray-300 text-xs mb-2 line-clamp-2">${escapeHtml(suggestion.description)}</div>` : ''}
+                    <div class="flex items-center gap-2 text-gray-400 text-xs">
+                        <span>📄 ${escapeHtml(suggestion.source_title || suggestion.source)}</span>
+                        ${suggestion.source_content ? 
+                            `<button onclick="showSourceModal('${suggestion.id}', '${escapeHtml(suggestion.source_title || suggestion.source).replace(/'/g, "\\'")}')"
+                                     class="text-blue-400 hover:text-blue-300 underline">View source</button>` : ''}
+                    </div>
                 </div>
                 <div class="flex gap-1 shrink-0">
                     <button onclick="approveSuggestedTodo('${suggestion.id}')" 
@@ -682,6 +688,9 @@ function renderSuggestedTodos(suggestions) {
             </div>
         </div>
     `).join('');
+    
+    // Store suggestions globally for modal access
+    window._suggestedTodos = suggestions;
 }
 
 async function approveSuggestedTodo(suggestionId) {
@@ -728,6 +737,44 @@ async function rejectSuggestedTodo(suggestionId) {
         showTaskNotification('Error rejecting suggestion', 'error');
     }
 }
+
+function showSourceModal(suggestionId, title) {
+    const suggestions = window._suggestedTodos || [];
+    const suggestion = suggestions.find(s => s.id === suggestionId);
+    
+    if (!suggestion || !suggestion.source_content) {
+        showTaskNotification('Source content not available', 'error');
+        return;
+    }
+    
+    const modal = document.getElementById('source-content-modal');
+    const modalTitle = document.getElementById('modal-title');
+    const modalContent = document.getElementById('modal-content');
+    
+    modalTitle.textContent = title;
+    modalContent.textContent = suggestion.source_content;
+    
+    modal.classList.remove('hidden');
+}
+
+function closeSourceModal() {
+    const modal = document.getElementById('source-content-modal');
+    modal.classList.add('hidden');
+}
+
+// Close modal on escape key
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+        closeSourceModal();
+    }
+});
+
+// Close modal on background click
+document.getElementById('source-content-modal')?.addEventListener('click', function(e) {
+    if (e.target === this) {
+        closeSourceModal();
+    }
+});
 
 function showTaskNotification(message, type = 'info') {
     // Simple notification - you can enhance this

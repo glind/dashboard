@@ -155,6 +155,7 @@ class DatabaseManager:
                     source_id TEXT,
                     source_title TEXT,
                     source_url TEXT,
+                    source_content TEXT,
                     priority TEXT DEFAULT 'medium',
                     due_date TIMESTAMP,
                     status TEXT DEFAULT 'pending',
@@ -1266,7 +1267,7 @@ class DatabaseManager:
     # Suggested todos methods
     
     def add_suggested_todo(self, todo_data: Dict[str, Any]) -> str:
-        """Add a new suggested todo awaiting user approval."""
+        """Add a new suggested todo awaiting user approval. Respects rejected status - won't re-add dismissed tasks."""
         import uuid
         
         try:
@@ -1274,10 +1275,30 @@ class DatabaseManager:
             
             with self.get_connection() as conn:
                 cursor = conn.cursor()
+                
+                # Check if this task was previously rejected - don't re-add dismissed tasks
+                cursor.execute(
+                    "SELECT status FROM suggested_todos WHERE source = ? AND source_id = ? AND title = ?",
+                    (todo_data.get('source'), todo_data.get('source_id'), todo_data.get('title'))
+                )
+                existing = cursor.fetchone()
+                
+                if existing and existing[0] == 'rejected':
+                    logger.info(f"Skipping previously rejected task: {todo_data.get('title')[:50]}")
+                    return None
+                
+                # Insert or update (but preserve status if exists)
                 cursor.execute("""
-                    INSERT OR REPLACE INTO suggested_todos 
-                    (id, title, description, context, source, source_id, source_title, source_url, priority, due_date, status)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO suggested_todos 
+                    (id, title, description, context, source, source_id, source_title, source_url, source_content, priority, due_date, status)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(id) DO UPDATE SET
+                        description = excluded.description,
+                        context = excluded.context,
+                        source_content = excluded.source_content,
+                        priority = excluded.priority,
+                        due_date = excluded.due_date
+                    WHERE status != 'rejected'
                 """, (
                     todo_id,
                     todo_data.get('title'),
@@ -1287,6 +1308,7 @@ class DatabaseManager:
                     todo_data.get('source_id'),
                     todo_data.get('source_title'),
                     todo_data.get('source_url'),
+                    todo_data.get('source_content', ''),
                     todo_data.get('priority', 'medium'),
                     todo_data.get('due_date'),
                     'pending'
@@ -1305,7 +1327,7 @@ class DatabaseManager:
                 cursor = conn.cursor()
                 cursor.execute("""
                     SELECT id, title, description, context, source, source_id, source_title, 
-                           source_url, priority, due_date, status, created_at, reviewed_at
+                           source_url, source_content, priority, due_date, status, created_at, reviewed_at
                     FROM suggested_todos
                     WHERE status = ?
                     ORDER BY created_at DESC
@@ -1323,11 +1345,12 @@ class DatabaseManager:
                         'source_id': row[5],
                         'source_title': row[6],
                         'source_url': row[7],
-                        'priority': row[8],
-                        'due_date': row[9],
-                        'status': row[10],
-                        'created_at': row[11],
-                        'reviewed_at': row[12]
+                        'source_content': row[8],
+                        'priority': row[9],
+                        'due_date': row[10],
+                        'status': row[11],
+                        'created_at': row[12],
+                        'reviewed_at': row[13]
                     })
                 
                 return todos

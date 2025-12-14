@@ -26,8 +26,10 @@ class GoogleSettings(BaseSettings):
     credentials_file: Optional[str] = Field(default=None, description="Path to Google credentials JSON")
     scopes: list = Field(default_factory=lambda: [
         'https://www.googleapis.com/auth/gmail.readonly',
-        'https://www.googleapis.com/auth/calendar.readonly'
+        'https://www.googleapis.com/auth/calendar.readonly',
+        'https://www.googleapis.com/auth/drive.readonly'
     ])
+    drive_notes_folder_id: Optional[str] = Field(default=None, description="Google Drive folder ID for meeting notes")
 
 
 class AppleSettings(BaseSettings):

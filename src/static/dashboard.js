@@ -576,7 +576,10 @@ class DashboardDataLoader {
                                                 🎥 Join
                                             </a>
                                         ` : ''}
-                                        <button onclick="dataLoader.summarizeItem('calendar', '${this.escapeHtml(event.event_id)}', ${this.escapeHtml(JSON.stringify(event))})" 
+                                        <button data-item-type="calendar" 
+                                                data-item-id="${this.escapeHtml(event.event_id)}" 
+                                                data-item-data="${this.escapeHtml(JSON.stringify(event))}"
+                                                onclick="dataLoader.summarizeItemFromButton(this)"
                                                 class="inline-flex items-center gap-1 text-xs bg-purple-600 hover:bg-purple-700 px-2 py-1 rounded"
                                                 title="Summarize and scan for tasks">
                                             🤖 AI
@@ -630,8 +633,11 @@ class DashboardDataLoader {
             const response = await fetch(url);
             if (response.ok) {
                 const data = await response.json();
-                // Just show all 100 most recent emails - no filtering
-                this.emails = data.emails || [];
+                // Filter out noreply and no-reply emails
+                this.emails = (data.emails || []).filter(email => {
+                    const sender = (email.sender || email.from || '').toLowerCase();
+                    return !sender.includes('noreply') && !sender.includes('no-reply');
+                });
                 
                 const unreadCount = this.emails.filter(e => !e.read).length;
                 const readCount = this.emails.filter(e => e.read).length;
@@ -925,7 +931,10 @@ class DashboardDataLoader {
                     </div>
                 ` : ''}
                 <div class="flex gap-1 pt-2 border-t border-gray-700" onclick="event.stopPropagation()">
-                    <button onclick="dataLoader.summarizeItem('email', '${this.escapeHtml(email.id)}', ${this.escapeHtml(JSON.stringify(email))})" 
+                    <button data-item-type="email" 
+                            data-item-id="${this.escapeHtml(email.id)}" 
+                            data-item-data="${this.escapeHtml(JSON.stringify(email))}"
+                            onclick="dataLoader.summarizeItemFromButton(this)"
                             class="px-2 py-1 rounded text-xs bg-purple-600 hover:bg-purple-700" 
                             title="Summarize and scan for tasks">🤖 AI</button>
                     ${email.is_whitelisted ? 
@@ -1706,13 +1715,33 @@ class DashboardDataLoader {
         this.loadNotes();
     }
     
+    // Helper function to call summarizeItem from button with data attributes
+    async summarizeItemFromButton(button) {
+        try {
+            const itemType = button.getAttribute('data-item-type');
+            const itemId = button.getAttribute('data-item-id');
+            const itemDataStr = button.getAttribute('data-item-data');
+            const itemData = JSON.parse(itemDataStr);
+            
+            await this.summarizeItem(itemType, itemId, itemData);
+        } catch (error) {
+            console.error('Error parsing item data:', error);
+            this.showNotification('❌ Error: Invalid item data', 'error');
+        }
+    }
+    
     async summarizeItem(itemType, itemId, itemData) {
         try {
-            // Show loading indicator
+            // Show loading indicator - add spinning wheel next to button
             const button = event.target.closest('button');
             const originalText = button.innerHTML;
             button.disabled = true;
-            button.innerHTML = '⏳';
+            
+            // Create and add spinner
+            const spinner = document.createElement('span');
+            spinner.className = 'ai-loading-spinner';
+            spinner.innerHTML = '&nbsp;<svg class="inline-block animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>';
+            button.appendChild(spinner);
             
             // Prepare content based on item type
             let content = '';
@@ -1795,18 +1824,20 @@ class DashboardDataLoader {
                 this.showNotification(`❌ Error: ${error.detail || 'Failed to summarize'}`, 'error');
             }
             
-            // Restore button
+            // Remove spinner and restore button
+            const loadingSpinner = button.querySelector('.ai-loading-spinner');
+            if (loadingSpinner) loadingSpinner.remove();
             button.disabled = false;
-            button.innerHTML = originalText;
             
         } catch (error) {
             console.error('Error summarizing item:', error);
             this.showNotification('❌ Error summarizing item', 'error');
             
-            // Restore button
-            const button = event.target.closest('button');
-            button.disabled = false;
-            button.innerHTML = '🤖 AI';
+            // Remove spinner and restore button
+            const errorButton = event.target.closest('button');
+            const errorSpinner = errorButton.querySelector('.ai-loading-spinner');
+            if (errorSpinner) errorSpinner.remove();
+            errorButton.disabled = false;
         }
     }
     
@@ -1904,7 +1935,10 @@ class DashboardDataLoader {
                            class="flex-1 px-3 py-2 bg-${sourceColor}-600 hover:bg-${sourceColor}-700 rounded text-sm font-medium text-center transition-all duration-200">
                             Open Note
                         </a>
-                        <button onclick="dataLoader.summarizeItem('note', '${note.doc_id || note.relative_path}', ${this.escapeHtml(JSON.stringify(note))})" 
+                        <button data-item-type="note" 
+                                data-item-id="${note.doc_id || note.relative_path}" 
+                                data-item-data="${this.escapeHtml(JSON.stringify(note))}"
+                                onclick="dataLoader.summarizeItemFromButton(this)"
                                 class="px-3 py-2 bg-purple-600 hover:bg-purple-700 rounded text-sm font-medium transition-all duration-200 flex items-center gap-1"
                                 title="Summarize and scan for tasks">
                             🤖 AI
@@ -5752,7 +5786,7 @@ function showNotification(message, type = 'info') {
 }
 
 // Google Authentication
-async function handleGoogleAuth() {
+window.handleGoogleAuth = async function() {
     try {
         const statusResponse = await fetch('/api/auth/google/status');
         const status = await statusResponse.json();

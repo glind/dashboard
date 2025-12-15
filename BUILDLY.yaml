@@ -3,7 +3,7 @@
 
 name: "Personal Dashboard"
 slug: "personal-dashboard"
-version: "1.0.0"
+version: "0.5.0"
 summary: "AI-powered personal dashboard integrating email, calendar, tasks, GitHub, news, music, and weather with intelligent insights and automation."
 
 # Licensing
@@ -24,11 +24,11 @@ targets:
 
 # Target configurations
 docker:
-  image: "buildly/personal-dashboard"
+  image: "buildly/founder-dashboard"
   compose_file: "ops/docker-compose.yml"
   
 github-pages:
-  template_repo: "buildly-marketplace/personal-dashboard"
+  template_repo: "Buildly-Marketplace/FounderDashboard"
   actions_workflow: ".github/workflows/pages.yml"
 
 # Documentation

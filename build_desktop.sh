@@ -13,8 +13,8 @@ RED='\033[0;31m'
 NC='\033[0m' # No Color
 
 # Configuration
-APP_NAME="PersonalDashboard"
-VERSION="1.0.0"
+APP_NAME="FounderDashboard"
+VERSION="0.5.0"
 PYTHON_VERSION="3.11"
 
 # Check if virtual environment exists
@@ -46,7 +46,7 @@ echo -e "${BLUE}🧹 Cleaning previous builds...${NC}"
 rm -rf build dist *.spec
 
 # Use Buildly logo as icon
-if [ -f "assets/buildly_logo.png" ]; then
+if [ -f "assets/images/buildly-new-logo.png" ]; then
     echo -e "${BLUE}🎨 Using Buildly logo as app icon...${NC}"
     
     # Convert Buildly logo to ICNS for macOS
@@ -54,23 +54,25 @@ if [ -f "assets/buildly_logo.png" ]; then
     mkdir -p assets/icon.iconset
     
     # Create different sizes for iconset
-    sips -z 16 16     assets/buildly_logo.png --out assets/icon.iconset/icon_16x16.png
-    sips -z 32 32     assets/buildly_logo.png --out assets/icon.iconset/icon_16x16@2x.png
-    sips -z 32 32     assets/buildly_logo.png --out assets/icon.iconset/icon_32x32.png
-    sips -z 64 64     assets/buildly_logo.png --out assets/icon.iconset/icon_32x32@2x.png
-    sips -z 128 128   assets/buildly_logo.png --out assets/icon.iconset/icon_128x128.png
-    sips -z 256 256   assets/buildly_logo.png --out assets/icon.iconset/icon_128x128@2x.png
-    sips -z 256 256   assets/buildly_logo.png --out assets/icon.iconset/icon_256x256.png
-    sips -z 512 512   assets/buildly_logo.png --out assets/icon.iconset/icon_256x256@2x.png
-    sips -z 512 512   assets/buildly_logo.png --out assets/icon.iconset/icon_512x512.png
+    sips -z 16 16     assets/images/buildly-new-logo.png --out assets/icon.iconset/icon_16x16.png
+    sips -z 32 32     assets/images/buildly-new-logo.png --out assets/icon.iconset/icon_16x16@2x.png
+    sips -z 32 32     assets/images/buildly-new-logo.png --out assets/icon.iconset/icon_32x32.png
+    sips -z 64 64     assets/images/buildly-new-logo.png --out assets/icon.iconset/icon_32x32@2x.png
+    sips -z 128 128   assets/images/buildly-new-logo.png --out assets/icon.iconset/icon_128x128.png
+    sips -z 256 256   assets/images/buildly-new-logo.png --out assets/icon.iconset/icon_128x128@2x.png
+    sips -z 256 256   assets/images/buildly-new-logo.png --out assets/icon.iconset/icon_256x256.png
+    sips -z 512 512   assets/images/buildly-new-logo.png --out assets/icon.iconset/icon_256x256@2x.png
+    sips -z 512 512   assets/images/buildly-new-logo.png --out assets/icon.iconset/icon_512x512.png
     
     # Create ICNS file
     iconutil -c icns assets/icon.iconset -o assets/icon.icns
     rm -rf assets/icon.iconset
     
     echo -e "${GREEN}✅ Buildly logo icon created${NC}"
+elif [ -f "assets/icon.icns" ]; then
+    echo -e "${BLUE}🎨 Using existing icon file${NC}"
 else
-    echo -e "${RED}❌ Buildly logo not found at assets/buildly_logo.png${NC}"
+    echo -e "${RED}❌ No icon found${NC}"
     exit 1
 fi
 

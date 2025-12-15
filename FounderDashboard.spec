@@ -31,7 +31,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='PersonalDashboard',
+    name='FounderDashboard',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -48,7 +48,7 @@ exe = EXE(
 )
 app = BUNDLE(
     exe,
-    name='PersonalDashboard.app',
+    name='FounderDashboard.app',
     icon='assets/icon.icns',
     bundle_identifier=None,
 )

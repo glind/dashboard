@@ -23,6 +23,7 @@ class DashboardDataLoader {
         this.feedbackData = {}; // Store feedback for AI training
         this.dismissedSuggestions = new Set(); // Track dismissed AI suggestions
         this.aiVoiceEnabled = localStorage.getItem('aiVoiceEnabled') !== 'false'; // AI voice responses - persisted
+        this.globalMuted = localStorage.getItem('globalMuted') === 'true'; // Global mute for ALL voice alerts
         this.editMode = false;
         this.autoRefreshInterval = 5; // minutes
         this.autoRefreshTimer = null;
@@ -62,6 +63,26 @@ class DashboardDataLoader {
         this.loadTaskSyncSettings();
         this.loadVoiceSettings();
         this.loadUserProfile();
+        this.updateGlobalMuteButton();
+    }
+    
+    updateGlobalMuteButton() {
+        // Update button state on init
+        const iconEl = document.getElementById('mute-icon');
+        const textEl = document.getElementById('mute-text');
+        const btnEl = document.getElementById('global-mute-btn');
+        
+        if (iconEl && textEl && btnEl) {
+            if (this.globalMuted) {
+                iconEl.textContent = '🔇';
+                textEl.textContent = 'Voice Alerts Off';
+                btnEl.className = 'mt-2 w-full flex items-center justify-center gap-2 px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white text-sm font-medium rounded-lg transition-colors shadow-lg';
+            } else {
+                iconEl.textContent = '🔊';
+                textEl.textContent = 'Voice Alerts On';
+                btnEl.className = 'mt-2 w-full flex items-center justify-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm font-medium rounded-lg transition-colors shadow-lg';
+            }
+        }
     }
     
     initVoiceRecognition() {
@@ -3089,6 +3110,12 @@ Then ask me: "What would you like to do with this email?"`,
     speakText(text) {
         if (!this.speechSynthesis) return;
         
+        // Check if globally muted
+        if (this.globalMuted) {
+            console.log('🔇 Voice muted globally');
+            return;
+        }
+        
         // Cancel any ongoing speech
         this.speechSynthesis.cancel();
         
@@ -3431,6 +3458,42 @@ Then ask me: "What would you like to do with this email?"`,
         // Show notification
         this.showNotification(
             this.aiVoiceEnabled ? 'Voice responses enabled' : 'Voice responses muted',
+            'info'
+        );
+    }
+    
+    toggleGlobalMute() {
+        this.globalMuted = !this.globalMuted;
+        
+        // Persist the setting
+        localStorage.setItem('globalMuted', this.globalMuted);
+        
+        // Stop any currently speaking text
+        if (this.globalMuted && this.speechSynthesis && this.speechSynthesis.speaking) {
+            this.speechSynthesis.cancel();
+            this.hideStopSpeechButton();
+        }
+        
+        // Update button UI
+        const iconEl = document.getElementById('mute-icon');
+        const textEl = document.getElementById('mute-text');
+        const btnEl = document.getElementById('global-mute-btn');
+        
+        if (iconEl && textEl && btnEl) {
+            if (this.globalMuted) {
+                iconEl.textContent = '🔇';
+                textEl.textContent = 'Voice Alerts Off';
+                btnEl.className = 'mt-2 w-full flex items-center justify-center gap-2 px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white text-sm font-medium rounded-lg transition-colors shadow-lg';
+            } else {
+                iconEl.textContent = '🔊';
+                textEl.textContent = 'Voice Alerts On';
+                btnEl.className = 'mt-2 w-full flex items-center justify-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm font-medium rounded-lg transition-colors shadow-lg';
+            }
+        }
+        
+        // Show notification
+        this.showNotification(
+            this.globalMuted ? '🔇 All voice alerts muted' : '🔊 Voice alerts enabled',
             'info'
         );
     }

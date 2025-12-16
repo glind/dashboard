@@ -102,7 +102,7 @@ class DesktopApp:
             return None
         
         self.splash_window = webview.create_window(
-            title='Loading...',
+            title='Loading Personal Dashboard',
             url=str(splash_path),
             width=600,
             height=500,
@@ -110,8 +110,9 @@ class DesktopApp:
             fullscreen=False,
             frameless=True,
             easy_drag=True,
-            background_color='#1a1a1a',
-            on_top=True
+            background_color='#1a202c',
+            on_top=True,
+            hidden=False  # Show immediately
         )
         
         return self.splash_window
@@ -157,10 +158,7 @@ class DesktopApp:
     def run(self):
         """Run the desktop application."""
         try:
-            # Create splash screen first
-            self.create_splash_window()
-            
-            # Start server in background thread
+            # Start server in background thread FIRST
             self.server_thread = threading.Thread(
                 target=self.start_server,
                 daemon=True,
@@ -168,10 +166,13 @@ class DesktopApp:
             )
             self.server_thread.start()
             
+            # Create splash screen
+            self.create_splash_window()
+            
             # Create main window (hidden)
             self.create_window()
             
-            # Start webview with splash screen
+            # Start webview with splash screen - this blocks until all windows close
             logger.info("✨ Launching application...")
             
             # Wait for server in background, then transition
@@ -187,6 +188,7 @@ class DesktopApp:
             
             threading.Thread(target=wait_and_transition, daemon=True).start()
             
+            # Start webview - this will show the splash window immediately
             webview.start(debug=False)
             
             logger.info("👋 Application closed")

@@ -55,7 +55,10 @@ class VanityAlertsCollector:
             'hackernews': 'https://hn.algolia.com/api/v1/search',
             'github': 'https://api.github.com/search/repositories',
             'stackoverflow': 'https://api.stackexchange.com/2.3/search',
-            'digg': 'https://digg.com/api/search'
+            'producthunt': 'https://www.producthunt.com/search',
+            'devto': 'https://dev.to/api/articles',
+            'medium': 'https://medium.com/search',
+            'twitter_search': 'https://twitter.com/search'
         }
         
         # User agent for web scraping
@@ -64,7 +67,7 @@ class VanityAlertsCollector:
         }
     
     def _load_search_terms_from_db(self) -> Dict[str, List[str]]:
-        """Load search terms from user profile in database."""
+        """Load comprehensive search terms from user profile in database."""
         try:
             from database import DatabaseManager
             db = DatabaseManager()
@@ -78,35 +81,100 @@ class VanityAlertsCollector:
             else:
                 custom_terms = vanity_terms_json
             
-            # If custom terms exist, use them
-            if custom_terms:
-                return custom_terms
+            # If custom terms exist and have values, use them
+            if custom_terms and isinstance(custom_terms, dict):
+                # Check if any category has terms
+                has_terms = any(v and len(v) > 0 for v in custom_terms.values() if isinstance(v, (list, tuple)))
+                if has_terms:
+                    total_count = sum(len(v) for v in custom_terms.values() if isinstance(v, (list, tuple)))
+                    logger.info(f"Using custom vanity search terms: {total_count} terms")
+                    return custom_terms
             
-            # Otherwise, build default terms from profile
+            # Otherwise, build comprehensive terms from profile
             full_name = profile.get('full_name', 'User')
             company = profile.get('company', 'Company')
             book_title = profile.get('book_title', '')
             artist_name = profile.get('music_artist_name', '')
             label_name = profile.get('music_label_name', '')
+            github_username = profile.get('github_username', '')
             
-            return {
+            # Split name for variations
+            first_name = full_name.split()[0] if full_name else ''
+            last_name = full_name.split()[-1] if full_name and len(full_name.split()) > 1 else ''
+            
+            search_terms = {
                 'company': [
                     f'"{company}"',
-                    f'site:{company.lower().replace(" ", "")}.io' if company != 'Company' else ''
-                ],
+                    company,
+                    f'{company} software',
+                    f'{company} platform',
+                    f'{company} API',
+                    f'{company}.io',
+                    f'{company.lower().replace(" ", "")}',
+                    f'site:{company.lower().replace(" ", "")}.io',
+                    f'{company} launch',
+                    f'{company} founder',
+                    f'{company} CEO'
+                ] if company != 'Company' else [],
+                
                 'personal': [
                     f'"{full_name}"',
-                    f'"{full_name}" CEO',
-                    f'"{full_name}" founder'
-                ],
+                    full_name,
+                    f'{first_name} {last_name}',
+                    f'{full_name} CEO',
+                    f'{full_name} founder',
+                    f'{full_name} developer',
+                    f'{full_name} engineer',
+                    f'{full_name} author',
+                    f'{full_name} composer',
+                    f'@{github_username}' if github_username else '',
+                    f'{first_name}Lind',  # Handle name variations
+                    f'Greg Lind',  # Common nickname
+                    f'Gregory {last_name}'
+                ] if full_name != 'User' else [],
+                
                 'book': [
-                    f'"{book_title}"'
+                    f'"{book_title}"',
+                    book_title,
+                    f'{book_title} book',
+                    f'{book_title} author',
+                    f'{book_title} therapy',
+                    f'radical therapy software',
+                    f'therapy software teams',
+                    f'{full_name} book' if full_name != 'User' else ''
                 ] if book_title else [],
+                
                 'music': [
                     f'"{artist_name}"',
-                    f'"{label_name}"'
-                ] if artist_name or label_name else []
+                    artist_name,
+                    f'{artist_name} music',
+                    f'{artist_name} composer',
+                    f'{artist_name} album',
+                    f'"{label_name}"',
+                    label_name,
+                    f'{label_name} records',
+                    f'{label_name} music',
+                    f'{artist_name} {label_name}'
+                ] if artist_name or label_name else [],
+                
+                'projects': [
+                    f'{full_name} GitHub' if full_name != 'User' else '',
+                    f'{company} GitHub' if company != 'Company' else '',
+                    f'{full_name} open source' if full_name != 'User' else '',
+                    f'{company} repository' if company != 'Company' else ''
+                ]
             }
+            
+            # Remove empty strings and duplicates
+            for category in search_terms:
+                search_terms[category] = [term for term in search_terms[category] if term.strip()]
+                search_terms[category] = list(set(search_terms[category]))  # Remove duplicates
+            
+            total_terms = sum([len(v) for v in search_terms.values()])
+            logger.info(f"Generated {total_terms} comprehensive search terms across {len(search_terms)} categories")
+            
+            return search_terms
+            
         except Exception as e:
             logger.error(f"Error loading search terms from database: {e}")
             # Fallback to empty terms
@@ -114,7 +182,8 @@ class VanityAlertsCollector:
                 'company': [],
                 'personal': [],
                 'book': [],
-                'music': []
+                'music': [],
+                'projects': []
             }
     
     def _generate_alert_id(self, title: str, url: str, source: str) -> str:
@@ -173,7 +242,7 @@ class VanityAlertsCollector:
                         content = await response.text()
                         feed = feedparser.parse(content)
                         
-                        for entry in feed.entries[:10]:  # Limit to 10 results
+                        for entry in feed.entries[:15]:  # Limit to 15 results
                             alert = VanityAlert(
                                 id=self._generate_alert_id(entry.title, entry.link, 'google_news'),
                                 title=entry.title,
@@ -305,35 +374,74 @@ class VanityAlertsCollector:
         
         return alerts
     
-    async def search_digg(self, search_term: str) -> List[VanityAlert]:
-        """Search Digg for mentions (using their RSS-like endpoints)."""
+    async def search_devto(self, search_term: str) -> List[VanityAlert]:
+        """Search Dev.to for mentions."""
         alerts = []
         try:
-            # Digg doesn't have a simple API, but we can search via URL patterns
-            query = quote_plus(search_term)
-            # Try to search Digg through their search URL
-            url = f"https://digg.com/search?q={query}"
+            # Clean search term for URL
+            query = search_term.replace('"', '')
+            url = f"{self.sources['devto']}?per_page=10&tag={quote_plus(query)}"
+            
+            async with aiohttp.ClientSession(headers=self.headers) as session:
+                async with session.get(url) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        
+                        for article in data:
+                            alert = VanityAlert(
+                                id=self._generate_alert_id(article.get('title', ''), 
+                                                         article.get('url', ''), 
+                                                         'devto'),
+                                title=article.get('title', ''),
+                                content=article.get('description', ''),
+                                url=article.get('url', ''),
+                                source='Dev.to',
+                                search_term=search_term,
+                                timestamp=datetime.fromisoformat(article.get('published_at', datetime.now().isoformat()).replace('Z', '+00:00')).replace(tzinfo=None) if article.get('published_at') else datetime.now(),
+                                confidence_score=self._calculate_confidence_score(
+                                    article.get('title', ''), 
+                                    article.get('description', ''), 
+                                    search_term
+                                ),
+                                snippet=article.get('description', '')[:200] + '...' if len(article.get('description', '')) > 200 else article.get('description', '')
+                            )
+                            alerts.append(alert)
+        except Exception as e:
+            logger.error(f"Error searching Dev.to for '{search_term}': {e}")
+        
+        return alerts
+    
+    async def search_producthunt(self, search_term: str) -> List[VanityAlert]:
+        """Search Product Hunt for mentions (via web scraping)."""
+        alerts = []
+        try:
+            query = quote_plus(search_term.replace('"', ''))
+            url = f"{self.sources['producthunt']}?q={query}"
             
             async with aiohttp.ClientSession(headers=self.headers) as session:
                 async with session.get(url) as response:
                     if response.status == 200:
                         content = await response.text()
-                        # Basic HTML parsing for Digg results
-                        from bs4 import BeautifulSoup
                         soup = BeautifulSoup(content, 'html.parser')
                         
-                        # Look for article titles and links (simplified parsing)
-                        articles = soup.find_all('a', href=True)[:5]  # Limit results
+                        # Look for product cards (simplified parsing)
+                        # This is a basic implementation; PH's structure may vary
+                        links = soup.find_all('a', href=True)[:10]
                         
-                        for article in articles:
-                            title = article.get_text(strip=True)
-                            if title and len(title) > 10 and search_term.lower().replace('"', '') in title.lower():
+                        for link in links:
+                            title = link.get_text(strip=True)
+                            href = link['href']
+                            
+                            if (title and len(title) > 10 and 
+                                search_term.lower().replace('"', '') in title.lower() and
+                                '/posts/' in href):
+                                
                                 alert = VanityAlert(
-                                    id=self._generate_alert_id(title, article['href'], 'digg'),
+                                    id=self._generate_alert_id(title, href, 'producthunt'),
                                     title=title,
                                     content='',
-                                    url=article['href'] if article['href'].startswith('http') else f"https://digg.com{article['href']}",
-                                    source='Digg',
+                                    url=f"https://www.producthunt.com{href}" if not href.startswith('http') else href,
+                                    source='Product Hunt',
                                     search_term=search_term,
                                     timestamp=datetime.now(),
                                     confidence_score=self._calculate_confidence_score(title, '', search_term),
@@ -341,7 +449,7 @@ class VanityAlertsCollector:
                                 )
                                 alerts.append(alert)
         except Exception as e:
-            logger.error(f"Error searching Digg for '{search_term}': {e}")
+            logger.error(f"Error searching Product Hunt for '{search_term}': {e}")
         
         return alerts
     
@@ -350,7 +458,13 @@ class VanityAlertsCollector:
         all_alerts = []
         
         for category, terms in self.search_terms.items():
+            if not terms:
+                continue
+                
             for term in terms:
+                if not term or not term.strip():
+                    continue
+                    
                 logger.info(f"Searching for '{term}' in category '{category}'")
                 
                 # Search all sources concurrently
@@ -359,7 +473,8 @@ class VanityAlertsCollector:
                     self.search_reddit(term),
                     self.search_hackernews(term),
                     self.search_github(term),
-                    self.search_digg(term)
+                    self.search_devto(term),
+                    self.search_producthunt(term)
                 ]
                 
                 results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -368,7 +483,7 @@ class VanityAlertsCollector:
                     if isinstance(result, list):
                         all_alerts.extend(result)
                     elif isinstance(result, Exception):
-                        logger.error(f"Error in search task: {result}")
+                        logger.error(f"Error in search task for '{term}': {result}")
         
         # Remove duplicates based on ID
         seen_ids = set()
@@ -399,8 +514,8 @@ class VanityAlertsCollector:
             # Collect all alerts
             all_alerts = await self.collect_all_alerts()
             
-            # Filter alerts with confidence score > 0.3 to reduce noise
-            filtered_alerts = [alert for alert in all_alerts if alert.confidence_score > 0.3]
+            # Filter alerts with confidence score > 0.2 to catch more mentions
+            filtered_alerts = [alert for alert in all_alerts if alert.confidence_score > 0.2]
             
             # Sort by confidence score descending
             filtered_alerts.sort(key=lambda x: x.confidence_score, reverse=True)
@@ -423,7 +538,7 @@ class VanityAlertsCollector:
                         'confidence_score': alert.confidence_score,
                         'snippet': alert.snippet
                     }
-                    for alert in filtered_alerts[:15]  # Return top 15 high-confidence alerts
+                    for alert in filtered_alerts[:30]  # Return top 30 alerts
                 ],
                 'timestamp': datetime.now().isoformat(),
                 'filtered_count': len(all_alerts) - len(filtered_alerts),  # Show how many were filtered out
@@ -460,7 +575,6 @@ class VanityAlertsCollector:
                 CREATE TABLE IF NOT EXISTS vanity_alerts (
                     id TEXT PRIMARY KEY,
                     title TEXT NOT NULL,
-                    content TEXT,
                     url TEXT NOT NULL,
                     source TEXT NOT NULL,
                     search_term TEXT NOT NULL,
@@ -468,7 +582,8 @@ class VanityAlertsCollector:
                     confidence_score REAL NOT NULL,
                     is_liked INTEGER DEFAULT NULL,
                     is_validated INTEGER DEFAULT NULL,
-                    snippet TEXT
+                    snippet TEXT,
+                    sentiment TEXT DEFAULT NULL
                 )
             ''')
             
@@ -476,12 +591,11 @@ class VanityAlertsCollector:
             for alert in alerts:
                 cursor.execute('''
                 INSERT OR REPLACE INTO vanity_alerts 
-                (id, title, content, url, source, search_term, timestamp, confidence_score, snippet)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (id, title, url, source, search_term, timestamp, confidence_score, snippet)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 alert.id,
                 alert.title,
-                alert.content or '',
                 alert.url,
                 alert.source,
                 alert.search_term,

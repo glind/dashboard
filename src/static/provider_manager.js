@@ -181,7 +181,16 @@ class ProviderManager {
             
             const data = await response.json();
             
-            if (!response.ok) throw new Error(data.detail || 'Failed to add provider');
+            if (!response.ok) {
+                // Show detailed error if available
+                if (data.detail && typeof data.detail === 'object') {
+                    if (window.showDetailedError) {
+                        window.showDetailedError(data.detail);
+                        return;
+                    }
+                }
+                throw new Error(typeof data.detail === 'string' ? data.detail : 'Failed to add provider');
+            }
             
             this.showNotification('Provider added successfully!', 'success');
             this.closeAddProviderModal();
@@ -203,7 +212,16 @@ class ProviderManager {
             const response = await fetch(`/api/providers/${providerId}/auth-url`);
             const data = await response.json();
             
-            if (!response.ok) throw new Error(data.detail || 'Failed to get auth URL');
+            if (!response.ok) {
+                // Show detailed error if available
+                if (data.detail && typeof data.detail === 'object') {
+                    if (window.showDetailedError) {
+                        window.showDetailedError(data.detail);
+                        return;
+                    }
+                }
+                throw new Error(typeof data.detail === 'string' ? data.detail : 'Failed to get auth URL');
+            }
             
             if (data.requires_credentials) {
                 // Show Proton credentials form

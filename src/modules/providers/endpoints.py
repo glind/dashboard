@@ -54,6 +54,13 @@ async def list_providers():
             """)
             rows = cursor.fetchall()
         
+        # Also check for legacy Google credentials (not in provider_configs table yet)
+        has_legacy_google = False
+        google_token_path = Path(__file__).parent.parent.parent.parent / "tokens" / "google_credentials.json"
+        if google_token_path.exists():
+            has_legacy_google = True
+            logger.info(f"Found legacy Google credentials at {google_token_path}")
+        
         providers = []
         for row in rows:
             provider_id, provider_type, enabled, capabilities_json, last_auth = row
@@ -66,27 +73,61 @@ async def list_providers():
             try:
                 if provider_type == "google":
                     provider = GoogleProvider(provider_id, settings, db)
+                    # Check OAuth authentication first
+                    import asyncio
+                    is_authenticated = asyncio.get_event_loop().run_until_complete(provider.is_authenticated())
+                    # If not authenticated via OAuth, check for legacy credentials
+                    if not is_authenticated and has_legacy_google:
+                        is_authenticated = True
+                        logger.info(f"Using legacy Google credentials for {provider_id}")
                 elif provider_type == "microsoft":
                     provider = MicrosoftProvider(provider_id, settings, db)
+                    import asyncio
+                    is_authenticated = asyncio.get_event_loop().run_until_complete(provider.is_authenticated())
                 elif provider_type == "proton":
                     provider = ProtonProvider(provider_id, settings, db)
+                    import asyncio
+                    is_authenticated = asyncio.get_event_loop().run_until_complete(provider.is_authenticated())
                 else:
                     continue
-                
-                import asyncio
-                is_authenticated = asyncio.get_event_loop().run_until_complete(provider.is_authenticated())
             except Exception as e:
                 logger.error(f"Error checking auth for {provider_id}: {e}")
+            
+            provider_name = provider_id.replace(f"{provider_type}_", "").replace("_", " ").title()
+            # Add "(Legacy)" suffix if using legacy credentials
+            if provider_type == "google" and has_legacy_google and is_authenticated:
+                provider_name += " (Legacy)"
             
             providers.append({
                 "id": provider_id,
                 "type": provider_type,
-                "name": provider_id.replace(f"{provider_type}_", "").replace("_", " ").title(),
+                "name": provider_name,
                 "enabled": bool(enabled),
                 "authenticated": is_authenticated,
                 "capabilities": capabilities,
                 "last_auth": last_auth
             })
+        
+        # Only add separate legacy Google provider if NO google providers exist in database
+        if has_legacy_google and not any(p["type"] == "google" for p in providers):
+            google_provider = GoogleProvider("google_default", settings, db)
+            is_google_authenticated = False
+            try:
+                import asyncio
+                is_google_authenticated = asyncio.get_event_loop().run_until_complete(google_provider.is_authenticated())
+            except Exception as e:
+                logger.error(f"Error checking Google auth: {e}")
+            
+            providers.append({
+                "id": "google_default",
+                "type": "google",
+                "name": "Google (Legacy)",
+                "enabled": True,
+                "authenticated": is_google_authenticated,
+                "capabilities": ["email", "calendar", "notes"],
+                "last_auth": None
+            })
+            logger.info("Added legacy Google provider to list")
         
         return {
             "providers": providers,
@@ -145,8 +186,15 @@ async def add_provider(config: ProviderConfig):
         }
         
     except Exception as e:
-        logger.error(f"Error adding provider: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error adding provider: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500, 
+            detail={
+                "error": str(e),
+                "type": type(e).__name__,
+                "provider_type": config.provider_type if config else None
+            }
+        )
 
 
 @router.delete("/{provider_id}")

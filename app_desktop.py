@@ -48,6 +48,7 @@ class DesktopApp:
         self.server_thread = None
         self.server_started = False
         self.window = None
+        self.splash_window = None
         
     def start_server(self):
         """Start FastAPI server in background thread."""
@@ -91,6 +92,30 @@ class DesktopApp:
         logger.error("❌ Server failed to start within timeout")
         return False
     
+    def create_splash_window(self):
+        """Create splash screen window."""
+        logger.info("🪟 Creating splash screen...")
+        
+        splash_path = Path(__file__).parent / 'splash.html'
+        if not splash_path.exists():
+            logger.warning("⚠️  Splash screen not found, skipping...")
+            return None
+        
+        self.splash_window = webview.create_window(
+            title='Loading...',
+            url=str(splash_path),
+            width=600,
+            height=500,
+            resizable=False,
+            fullscreen=False,
+            frameless=True,
+            easy_drag=True,
+            background_color='#1a1a1a',
+            on_top=True
+        )
+        
+        return self.splash_window
+    
     def create_window(self):
         """Create and configure desktop window."""
         logger.info("🪟 Creating desktop window...")
@@ -104,7 +129,8 @@ class DesktopApp:
             fullscreen=False,
             min_size=(MIN_WIDTH, MIN_HEIGHT),
             background_color='#1a1a1a',
-            text_select=True
+            text_select=True,
+            hidden=True  # Start hidden, show after splash
         )
         
         return self.window
@@ -113,9 +139,27 @@ class DesktopApp:
         """Handle window closing event."""
         logger.info("👋 Closing application...")
         
+    def transition_from_splash(self):
+        """Transition from splash screen to main app."""
+        def do_transition():
+            time.sleep(0.5)  # Brief delay for smooth transition
+            
+            if self.window:
+                logger.info("✨ Showing main window...")
+                self.window.show()
+            
+            if self.splash_window:
+                logger.info("👋 Closing splash screen...")
+                self.splash_window.destroy()
+        
+        threading.Thread(target=do_transition, daemon=True).start()
+    
     def run(self):
         """Run the desktop application."""
         try:
+            # Create splash screen first
+            self.create_splash_window()
+            
             # Start server in background thread
             self.server_thread = threading.Thread(
                 target=self.start_server,
@@ -124,16 +168,25 @@ class DesktopApp:
             )
             self.server_thread.start()
             
-            # Wait for server to be ready
-            if not self.wait_for_server():
-                logger.error("❌ Could not start server")
-                sys.exit(1)
-            
-            # Create and show window
+            # Create main window (hidden)
             self.create_window()
             
-            # Start webview (this blocks until window is closed)
+            # Start webview with splash screen
             logger.info("✨ Launching application...")
+            
+            # Wait for server in background, then transition
+            def wait_and_transition():
+                if self.wait_for_server():
+                    logger.info("✅ Server ready, transitioning to main app...")
+                    self.transition_from_splash()
+                else:
+                    logger.error("❌ Could not start server")
+                    # Show error in splash or close
+                    if self.splash_window:
+                        self.splash_window.destroy()
+            
+            threading.Thread(target=wait_and_transition, daemon=True).start()
+            
             webview.start(debug=False)
             
             logger.info("👋 Application closed")

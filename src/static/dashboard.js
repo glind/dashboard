@@ -36,6 +36,7 @@ class DashboardDataLoader {
         this.taskSyncService = 'ticktick'; // 'ticktick' or 'todoist'
         this.selectedVoice = null; // Selected TTS voice
         this.availableVoices = []; // Available TTS voices
+        this.voiceSignatureEnabled = localStorage.getItem('voiceSignatureEnabled') === 'true'; // "Roger Roger" signature
         this.conversationId = null; // Current AI conversation ID
         this.userProfile = null; // User profile for AI
         this.overviewSummary = null; // 5-minute overview summary for AI Assistant
@@ -3107,18 +3108,57 @@ Then ask me: "What would you like to do with this email?"`,
         }
     }
     
-    speakText(text) {
+    speakText(text, forceSignature = false) {
         // Check if globally muted
         if (this.globalMuted) {
             console.log('🔇 Voice muted globally');
             return;
         }
         
-        // Use Rogr battle-droid voice system instead of browser TTS
-        this.speakWithRogr(text);
+        // Check if Rogr is selected (default)
+        if (!this.selectedVoice || this.selectedVoice === 'rogr') {
+            // Use Rogr battle-droid voice system
+            // If forceSignature is true (from test button), use it; otherwise use setting
+            this.speakWithRogr(text, 'droid', forceSignature ? true : null);
+        } else {
+            // Use browser TTS for other voices
+            this.speakWithBrowserTTS(text);
+        }
     }
     
-    async speakWithRogr(text, style = 'droid', addSignature = false) {
+    speakWithBrowserTTS(text) {
+        // Fallback to browser Text-to-Speech
+        if ('speechSynthesis' in window) {
+            // Cancel any ongoing speech
+            window.speechSynthesis.cancel();
+            
+            const utterance = new SpeechSynthesisUtterance(text);
+            
+            // Find and set the selected voice
+            if (this.selectedVoice) {
+                const voice = this.availableVoices.find(v => v.name === this.selectedVoice);
+                if (voice) {
+                    utterance.voice = voice;
+                }
+            }
+            
+            // Set voice properties
+            utterance.rate = 0.9;
+            utterance.pitch = 1.0;
+            utterance.volume = 1.0;
+            
+            window.speechSynthesis.speak(utterance);
+        } else {
+            console.warn('Browser TTS not supported');
+        }
+    }
+    
+    async speakWithRogr(text, style = 'droid', addSignature = null) {
+        // Use setting if not explicitly specified
+        if (addSignature === null) {
+            addSignature = this.voiceSignatureEnabled;
+        }
+        
         try {
             const response = await fetch('/api/voice/test', {
                 method: 'POST',
@@ -4275,6 +4315,13 @@ Then ask me: "What would you like to do with this email?"`,
                                 class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2">
                             <option value="">Loading voices...</option>
                         </select>
+                        <label class="flex items-center gap-2 mt-3">
+                            <input type="checkbox" 
+                                   ${this.voiceSignatureEnabled ? 'checked' : ''}
+                                   onchange="dataLoader.setVoiceSignature(this.checked)"
+                                   class="w-4 h-4 rounded">
+                            <span class="text-sm">Enable "Roger Roger" signature</span>
+                        </label>
                         <button onclick="dataLoader.testAIVoice()" 
                                 class="w-full mt-2 bg-blue-600 hover:bg-blue-700 px-3 py-2 rounded text-sm">
                             🔊 Test Voice
@@ -4455,22 +4502,37 @@ Then ask me: "What would you like to do with this email?"`,
         const selector = document.getElementById('voice-selector');
         if (!selector) return;
         
+        // Build options array with Rogr first
+        let options = [];
+        
+        // Add Rogr as the primary option
+        const rogrSelected = (!this.selectedVoice || this.selectedVoice === 'rogr') ? 'selected' : '';
+        options.push(`<option value="rogr" ${rogrSelected}>🤖 Rogr (Battle Droid) - Recommended</option>`);
+        
+        // Add browser TTS voices
         if (this.availableVoices.length === 0) {
             // Try loading voices again
             this.loadAvailableVoices();
-            
-            // If still no voices, show message
-            if (this.availableVoices.length === 0) {
-                selector.innerHTML = '<option value="">No voices available</option>';
-                return;
-            }
         }
         
-        // Populate dropdown with available voices
-        selector.innerHTML = this.availableVoices.map((voice, index) => {
-            const selected = this.selectedVoice === voice.name ? 'selected' : '';
-            return `<option value="${voice.name}" ${selected}>${voice.name} (${voice.lang})</option>`;
-        }).join('');
+        if (this.availableVoices.length > 0) {
+            // Add separator
+            options.push('<option disabled>──────────────</option>');
+            options.push('<option disabled>Browser Voices (Fallback):</option>');
+            
+            // Add browser voices
+            this.availableVoices.forEach((voice, index) => {
+                const selected = this.selectedVoice === voice.name ? 'selected' : '';
+                options.push(`<option value="${voice.name}" ${selected}>${voice.name} (${voice.lang})</option>`);
+            });
+        }
+        
+        selector.innerHTML = options.join('');
+        
+        // Set default to Rogr if nothing selected
+        if (!this.selectedVoice) {
+            this.setAIVoice('rogr');
+        }
     }
     
     setAIVoice(voiceName) {
@@ -4479,8 +4541,18 @@ Then ask me: "What would you like to do with this email?"`,
         console.log(`AI voice set to: ${voiceName}`);
     }
     
+    setVoiceSignature(enabled) {
+        this.voiceSignatureEnabled = enabled;
+        localStorage.setItem('voiceSignatureEnabled', enabled);
+        console.log(`Voice signature ${enabled ? 'enabled' : 'disabled'}`);
+    }
+    
     testAIVoice() {
-        this.speakText('Hello! This is your AI assistant. How does my voice sound?');
+        if (this.selectedVoice === 'rogr') {
+            this.speakText('Roger roger. Voice system operational. All systems ready.', true);
+        } else {
+            this.speakText('Hello! This is your AI assistant. How does my voice sound?');
+        }
     }
     
     updateNavVisibility() {

@@ -28,13 +28,17 @@ class VoiceSystem:
         piper_bin: str = "piper",
         model_path: Optional[str] = None,
         cache_dir: str = "data/voice_cache",
-        default_style: VoiceStyle = "droid"
+        default_style: VoiceStyle = "droid",
+        speed: float = 0.65,
+        pitch: float = 0.65
     ):
         self.piper_bin = piper_bin
         self.model_path = model_path
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.default_style = default_style
+        self.speed = speed  # Speech speed multiplier
+        self.pitch = pitch  # Pitch shift multiplier
         self.playback_lock = threading.Lock()
         
         # Wake words
@@ -43,7 +47,7 @@ class VoiceSystem:
         # Signature phrase
         self.signature = "roger, roger"
         
-        logger.info(f"Voice system initialized with style: {default_style}")
+        logger.info(f"Voice system initialized with style: {default_style}, speed: {speed}x, pitch: {pitch}x")
     
     def _check_dependencies(self) -> bool:
         """Check if required binaries are available"""
@@ -120,28 +124,21 @@ class VoiceSystem:
             
             "droid": (
                 # Battle-droid style: aggressive processing for robotic sound
-                # Step 1: Slow down speech by 25% for better clarity and comprehension
-                "atempo=0.75,"
-                # Step 2: Pitch shift down significantly for deeper, more mechanical voice
-                "asetrate=44100*0.85,aresample=44100,"
-                # Step 3: Narrow band-pass for radio/comms quality
+                f"atempo={self.speed},"
+                f"asetrate=44100*{self.pitch},aresample=44100,"
                 "highpass=f=250,lowpass=f=3000,"
-                # Step 4: Heavy compression for that clipped, limited sound
                 "acompressor=threshold=-18dB:ratio=5:attack=2:release=40,"
-                # Step 5: Bit crushing for digital degradation
                 "acrusher=bits=10:mix=0.35,"
-                # Step 6: Tremolo for metallic vibrato
                 "tremolo=f=100:d=0.12,"
-                # Step 7: Short echo for radio transmission
                 "aecho=0.7:0.4:18:0.25,"
-                # Step 8: Final high-pass to remove mud
                 "highpass=f=220,"
-                # Step 9: Hard limiter to prevent clipping
                 "alimiter=limit=0.85"
             ),
             
             "radio": (
                 # Radio transmission style
+                f"atempo={self.speed},"
+                f"asetrate=44100*{self.pitch},aresample=44100,"
                 "highpass=f=300,"
                 "lowpass=f=3000,"
                 "acompressor=threshold=-14dB:ratio=3:attack=5:release=80,"
@@ -151,6 +148,8 @@ class VoiceSystem:
             
             "pa_system": (
                 # PA/intercom style
+                f"atempo={self.speed},"
+                f"asetrate=44100*{self.pitch},aresample=44100,"
                 "highpass=f=250,"
                 "lowpass=f=4000,"
                 "acompressor=threshold=-12dB:ratio=2.5:attack=10:release=100,"
@@ -233,6 +232,135 @@ class VoiceSystem:
         text = re.sub(r'\s+', ' ', text).strip()
         
         return text
+    
+    def _generate_signature(self, style: Optional[VoiceStyle] = None) -> Optional[Path]:
+        """
+        Generate "roger roger" signature
+        Uses slower speed (0.45x) and much lower pitch (0.5x) for deep voice
+        """
+        if style is None:
+            style = self.default_style
+        
+        # Check cache first
+        sig_cache = self.cache_dir / f"{style}_signature.wav"
+        if sig_cache.exists():
+            return sig_cache
+        
+        # Generate with faster speed
+        raw_path = self.cache_dir / "temp_sig_raw.wav"
+        if not self._synthesize_piper(self.signature, raw_path):
+            return None
+        
+        # Apply FX with super fast speed (2.5x) and high pitch (1.8x)
+        if not self._apply_fx_signature(raw_path, sig_cache, style):
+            return None
+        
+        raw_path.unlink(missing_ok=True)
+        return sig_cache
+    
+    def _apply_fx_signature(self, in_wav: Path, out_wav: Path, style: VoiceStyle) -> bool:
+        """
+        Apply FX to signature with slower speed (0.45x) and much lower pitch (0.5x)
+        """
+        slower_speed = 0.45  # Much slower (50% of 0.85x)
+        lower_pitch = 0.5  # Much deeper pitch
+        
+        fx_chains = {
+            "clean": f"atempo={slower_speed},asetrate=44100*{lower_pitch},aresample=44100",
+            
+            "droid": (
+                f"atempo={slower_speed},"
+                f"asetrate=44100*{lower_pitch},aresample=44100,"
+                "highpass=f=250,lowpass=f=3000,"
+                "acompressor=threshold=-18dB:ratio=5:attack=2:release=40,"
+                "acrusher=bits=10:mix=0.35,"
+                "tremolo=f=100:d=0.12,"
+                "aecho=0.7:0.4:18:0.25,"
+                "highpass=f=220,"
+                "alimiter=limit=0.85"
+            ),
+            
+            "radio": (
+                f"atempo={slower_speed},"
+                f"asetrate=44100*{lower_pitch},aresample=44100,"
+                "highpass=f=300,"
+                "lowpass=f=3000,"
+                "acompressor=threshold=-14dB:ratio=3:attack=5:release=80,"
+                "acrusher=bits=12:mix=0.2,"
+                "aecho=0.7:0.5:15:0.15"
+            ),
+            
+            "pa_system": (
+                f"atempo={slower_speed},"
+                f"asetrate=44100*{lower_pitch},aresample=44100,"
+                "highpass=f=250,"
+                "lowpass=f=4000,"
+                "acompressor=threshold=-12dB:ratio=2.5:attack=10:release=100,"
+                "aecho=0.9:0.8:40:0.3"
+            ),
+        }
+        
+        fx = fx_chains.get(style, fx_chains["droid"])
+        
+        try:
+            cmd = [
+                "ffmpeg", "-y",
+                "-i", str(in_wav),
+                "-af", fx,
+                str(out_wav),
+            ]
+            
+            subprocess.run(
+                cmd,
+                capture_output=True,
+                check=True
+            )
+            
+            logger.debug(f"Applied fast signature FX: {out_wav}")
+            return True
+            
+        except subprocess.CalledProcessError as e:
+            logger.error(f"ffmpeg signature FX failed: {e.stderr.decode()}")
+            return False
+        except Exception as e:
+            logger.error(f"Signature FX error: {e}")
+            return False
+    
+    def _concatenate_audio(self, wav1: Path, wav2: Path) -> Optional[Path]:
+        """
+        Concatenate two audio files
+        """
+        output = self.cache_dir / f"combined_{wav1.stem}.wav"
+        
+        try:
+            # Create concat list file
+            concat_list = self.cache_dir / "concat_list.txt"
+            with open(concat_list, 'w') as f:
+                f.write(f"file '{wav1.absolute()}'\n")
+                f.write(f"file '{wav2.absolute()}'\n")
+            
+            cmd = [
+                "ffmpeg", "-y",
+                "-f", "concat",
+                "-safe", "0",
+                "-i", str(concat_list),
+                "-c", "copy",
+                str(output)
+            ]
+            
+            subprocess.run(
+                cmd,
+                capture_output=True,
+                check=True
+            )
+            
+            concat_list.unlink(missing_ok=True)
+            logger.debug(f"Concatenated audio: {output}")
+            return output
+            
+        except Exception as e:
+            logger.error(f"Audio concatenation failed: {e}")
+            return None
     
     def generate(
         self,
@@ -323,21 +451,38 @@ class VoiceSystem:
         Args:
             text: Text to speak
             style: Voice style
-            add_signature: If True, append "roger, roger"
+            add_signature: If True, prepend "roger, roger" slightly faster at the beginning
             blocking: Wait for playback to finish
         
         Returns:
             True if successful
         """
         if add_signature:
-            text = f"{text}. {self.signature}"
-        
-        wav_path = self.generate(text, style)
-        if not wav_path:
-            logger.error("Voice generation failed")
-            return False
-        
-        return self.play(wav_path, blocking=blocking)
+            # Generate slower/deeper "roger roger" signature (0.45x speed, 0.5x pitch)
+            sig_wav = self._generate_signature(style)
+            if not sig_wav:
+                logger.warning("Signature generation failed, playing without it")
+            
+            # Generate main message with slow/deep voice
+            main_wav = self.generate(text, style)
+            if not main_wav:
+                logger.error("Voice generation failed")
+                return False
+            
+            # Concatenate: signature FIRST, then main message
+            if sig_wav:
+                combined_wav = self._concatenate_audio(sig_wav, main_wav)
+                if combined_wav:
+                    return self.play(combined_wav, blocking=blocking)
+            
+            return self.play(main_wav, blocking=blocking)
+        else:
+            wav_path = self.generate(text, style)
+            if not wav_path:
+                logger.error("Voice generation failed")
+                return False
+            
+            return self.play(wav_path, blocking=blocking)
     
     def announce(self, text: str, **kwargs) -> bool:
         """

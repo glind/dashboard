@@ -55,11 +55,38 @@ dashboard:
 # Voice system settings (Rogr assistant)
 voice:
   enabled: true
-  default_style: "droid"  # Options: clean, droid, radio, pa_system
+  
+  # Voice model to use (must be installed in data/voice_models/piper/)
+  # Options:
+  #   - en_US-ryan-high (default) - Deep male voice, great for battle-droid
+  #   - en_US-libritts-high - Varied male voice
+  #   - en_US-lessac-medium - Female voice (original)
+  #   - en_US-ljspeech-high - Clear female voice
+  # Download models from: https://huggingface.co/rhasspy/piper-voices
+  model: "en_US-ryan-high"
+  
+  # Voice style/effect to apply
+  # Options: clean, droid, radio, pa_system
+  default_style: "droid"
+  
+  # Speed adjustment (0.5 = half speed, 1.0 = normal, 2.0 = double speed)
+  # Current default: 0.75 (25% slower for clarity)
+  speed: 0.75
+  
+  # Pitch adjustment (0.5 = deeper, 1.0 = normal, 2.0 = higher)
+  # Current default: 0.85 (15% deeper for robotic sound)
+  pitch: 0.85
+  
+  # When to announce
   announce_on_startup: true
   announce_on_collection: true
   announce_on_error: false
+  
+  # Wake words for voice commands (optional - requires PyAudio)
   wake_words:
     - "rogr"
     - "roger"
+  
+  # Signature phrase added to announcements
   signature_phrase: "roger, roger"
+

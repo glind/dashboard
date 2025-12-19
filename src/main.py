@@ -6788,30 +6788,63 @@ async def startup_event():
     try:
         # Import voice system from current directory structure
         import voice as voice_module
-        voice = voice_module.get_voice()
         
-        # Configure voice system with Piper path
-        piper_bin = project_root / "data" / "voice_models" / "piper" / "piper"
-        model_path = project_root / "data" / "voice_models" / "piper" / "en_US-ryan-high.onnx"
+        # Load voice configuration from settings
+        voice_config = getattr(settings, 'voice', {})
+        if not voice_config:
+            # Fallback to default config
+            voice_config = {
+                'enabled': True,
+                'model': 'en_US-ryan-high',
+                'default_style': 'droid',
+                'speed': 0.75,
+                'pitch': 0.85
+            }
         
-        if piper_bin.exists() and model_path.exists():
-            voice.piper_bin = str(piper_bin)
-            voice.model_path = str(model_path)
-            
-            # Preload common phrases
-            common_phrases = [
-                "Dashboard online",
-                "Data collection complete",
-                "No urgent items detected",
-                "Status report ready",
-            ]
-            voice.preload_common_phrases(common_phrases)
-            
-            # Announce startup (non-blocking to avoid startup delays)
-            voice_module.announce("Dashboard initialization complete", blocking=False)
-            logger.info("Voice system initialized and ready")
+        if not voice_config.get('enabled', True):
+            logger.info("Voice system disabled in configuration")
         else:
-            logger.warning("Voice system not configured. Run scripts/setup_voice.sh to install.")
+            # Get configuration values
+            model_name = voice_config.get('model', 'en_US-ryan-high')
+            default_style = voice_config.get('default_style', 'droid')
+            speed = voice_config.get('speed', 0.75)
+            pitch = voice_config.get('pitch', 0.85)
+            
+            # Initialize voice with configuration
+            voice = voice_module.VoiceSystem(
+                default_style=default_style,
+                speed=speed,
+                pitch=pitch
+            )
+            
+            # Set as global voice instance
+            voice_module._voice = voice
+            
+            # Configure voice system with Piper path
+            piper_bin = project_root / "data" / "voice_models" / "piper" / "piper"
+            model_path = project_root / "data" / "voice_models" / "piper" / f"{model_name}.onnx"
+            
+            if piper_bin.exists() and model_path.exists():
+                voice.piper_bin = str(piper_bin)
+                voice.model_path = str(model_path)
+                
+                # Preload common phrases
+                common_phrases = [
+                    "Dashboard online",
+                    "Data collection complete",
+                    "No urgent items detected",
+                    "Status report ready",
+                ]
+                voice.preload_common_phrases(common_phrases)
+                
+                # Announce startup if configured
+                if voice_config.get('announce_on_startup', True):
+                    voice_module.announce("Dashboard initialization complete", blocking=False)
+                
+                logger.info(f"Voice system initialized: {model_name}, style={default_style}, speed={speed}x, pitch={pitch}x")
+            else:
+                logger.warning(f"Voice system not configured. Model not found: {model_path}")
+                logger.warning("Run scripts/setup_voice.sh to install.")
     except Exception as e:
         logger.warning(f"Voice system initialization failed: {e}")
     

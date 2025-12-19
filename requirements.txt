@@ -47,6 +47,12 @@ plotly==5.17.0
 # AI and machine learning
 openai==1.3.0
 
+# Voice system (TTS and speech recognition)
+# Note: Voice listening requires PyAudio, which needs portaudio19-dev
+# Install with: sudo apt install portaudio19-dev python3-pyaudio
+# Then: pip install SpeechRecognition PyAudio
+# Voice output (TTS) works without PyAudio
+
 # Task scheduling and monitoring
 schedule==1.2.0
 psutil==5.9.6

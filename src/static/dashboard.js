@@ -3108,13 +3108,40 @@ Then ask me: "What would you like to do with this email?"`,
     }
     
     speakText(text) {
-        if (!this.speechSynthesis) return;
-        
         // Check if globally muted
         if (this.globalMuted) {
             console.log('🔇 Voice muted globally');
             return;
         }
+        
+        // Use Rogr battle-droid voice system instead of browser TTS
+        this.speakWithRogr(text);
+    }
+    
+    async speakWithRogr(text, style = 'droid', addSignature = false) {
+        try {
+            const response = await fetch('/api/voice/test', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    message: text,
+                    style: style,
+                    signature: addSignature
+                })
+            });
+            
+            const result = await response.json();
+            if (!result.success) {
+                console.error('Voice system error:', result.error);
+            }
+        } catch (error) {
+            console.error('Failed to speak with Rogr:', error);
+        }
+    }
+    
+    // Legacy browser TTS (fallback if needed)
+    speakTextBrowser(text) {
+        if (!this.speechSynthesis) return;
         
         // Cancel any ongoing speech
         this.speechSynthesis.cancel();

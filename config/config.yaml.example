@@ -51,3 +51,15 @@ dashboard:
     meetings_attended: 40
     tasks_completed: 80
     github_commits: 60
+
+# Voice system settings (Rogr assistant)
+voice:
+  enabled: true
+  default_style: "droid"  # Options: clean, droid, radio, pa_system
+  announce_on_startup: true
+  announce_on_collection: true
+  announce_on_error: false
+  wake_words:
+    - "rogr"
+    - "roger"
+  signature_phrase: "roger, roger"

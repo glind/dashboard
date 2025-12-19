@@ -1,0 +1,10 @@
+# Optional voice system dependencies
+# These are NOT included in main requirements.txt because they require system packages
+
+# Voice input (microphone/speech recognition)
+# Requires: sudo apt install portaudio19-dev
+SpeechRecognition==3.10.0
+PyAudio==0.2.14
+
+# Note: Voice output (TTS) works without these packages
+# Only voice commands (listening) require PyAudio

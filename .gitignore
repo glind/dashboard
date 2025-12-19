@@ -76,3 +76,9 @@ node_modules/
 # Cache
 .cache/
 dashboard.pid
+
+# Voice system models and cache (large binary files)
+data/voice_models/
+data/voice_cache/
+*.onnx
+*.onnx.json

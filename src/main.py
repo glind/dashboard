@@ -4258,6 +4258,7 @@ async def chat_with_ai(request: Request):
         message = data.get('message', '')
         conversation_id = data.get('conversation_id')
         stream = data.get('stream', False)
+        speak_response = data.get('speak', False)  # New: option to speak response
         
         if not message:
             return {"error": "Message is required"}
@@ -4281,6 +4282,15 @@ async def chat_with_ai(request: Request):
         
         if not result.get('success'):
             return {"error": result.get('error', 'Unknown error')}
+        
+        # Speak the response if requested
+        if speak_response and result.get('response'):
+            try:
+                import voice as voice_module
+                # Speak in background (non-blocking)
+                voice_module.say(result['response'], blocking=False)
+            except Exception as e:
+                logger.warning(f"Voice output failed: {e}")
         
         return {
             "response": result['response'],
@@ -6739,6 +6749,33 @@ async def leads_page():
         raise HTTPException(status_code=404, detail="Leads page not found")
 
 
+@app.post("/api/voice/test")
+async def test_voice(request: Request):
+    """Test the voice system - makes Rogr speak."""
+    try:
+        data = await request.json()
+        message = data.get('message', 'Roger roger. Voice system operational.')
+        style = data.get('style', 'droid')
+        add_signature = data.get('signature', True)
+        
+        import voice as voice_module
+        
+        if add_signature:
+            success = voice_module.announce(message, style=style, blocking=False)
+        else:
+            success = voice_module.say(message, style=style, blocking=False)
+        
+        return {
+            "success": success,
+            "message": message,
+            "style": style,
+            "signature": add_signature
+        }
+    except Exception as e:
+        logger.error(f"Voice test error: {e}")
+        return {"success": False, "error": str(e)}
+
+
 @app.on_event("startup")
 async def startup_event():
     """Initialize services on startup."""
@@ -6746,6 +6783,37 @@ async def startup_event():
     
     # Create data directory for lead generation files
     os.makedirs('data', exist_ok=True)
+    
+    # Initialize voice system
+    try:
+        # Import voice system from current directory structure
+        import voice as voice_module
+        voice = voice_module.get_voice()
+        
+        # Configure voice system with Piper path
+        piper_bin = project_root / "data" / "voice_models" / "piper" / "piper"
+        model_path = project_root / "data" / "voice_models" / "piper" / "en_US-ryan-high.onnx"
+        
+        if piper_bin.exists() and model_path.exists():
+            voice.piper_bin = str(piper_bin)
+            voice.model_path = str(model_path)
+            
+            # Preload common phrases
+            common_phrases = [
+                "Dashboard online",
+                "Data collection complete",
+                "No urgent items detected",
+                "Status report ready",
+            ]
+            voice.preload_common_phrases(common_phrases)
+            
+            # Announce startup (non-blocking to avoid startup delays)
+            voice_module.announce("Dashboard initialization complete", blocking=False)
+            logger.info("Voice system initialized and ready")
+        else:
+            logger.warning("Voice system not configured. Run scripts/setup_voice.sh to install.")
+    except Exception as e:
+        logger.warning(f"Voice system initialization failed: {e}")
     
     logger.info("Dashboard startup complete")
 

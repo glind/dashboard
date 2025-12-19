@@ -207,6 +207,119 @@ install_requirements() {
     fi
 }
 
+# Function to check and install voice system dependencies
+check_voice_system() {
+    echo -e "${BLUE}🎙️  Checking voice system dependencies...${NC}"
+    
+    # Check for Homebrew (macOS only)
+    local os_type=$(uname -s)
+    if [[ "$os_type" == "Darwin" ]]; then
+        if ! command -v brew &> /dev/null; then
+            echo -e "${YELLOW}   ⚠️  Homebrew not found - voice system will be unavailable${NC}"
+            echo -e "${BLUE}   ℹ️  Install Homebrew from: https://brew.sh${NC}"
+            return 0
+        fi
+    fi
+    
+    # Check for ffmpeg
+    if ! command -v ffmpeg &> /dev/null; then
+        echo -e "${YELLOW}   ⚠️  ffmpeg not found - installing...${NC}"
+        if [[ "$os_type" == "Darwin" ]]; then
+            brew install ffmpeg || {
+                echo -e "${YELLOW}   ⚠️  Failed to install ffmpeg - voice will be unavailable${NC}"
+                return 0
+            }
+            echo -e "${GREEN}   ✅ ffmpeg installed${NC}"
+        elif [[ "$os_type" == "Linux" ]]; then
+            echo -e "${YELLOW}   Please install ffmpeg manually: sudo apt-get install ffmpeg${NC}"
+            return 0
+        fi
+    else
+        echo -e "${GREEN}   ✅ ffmpeg found${NC}"
+    fi
+    
+    # Check for Piper TTS binary
+    local piper_dir="$PROJECT_ROOT/data/voice_models/piper"
+    local piper_bin="$piper_dir/piper"
+    
+    if [ ! -f "$piper_bin" ]; then
+        echo -e "${YELLOW}   ⚠️  Piper TTS not found - installing...${NC}"
+        
+        # Create directories
+        mkdir -p "$piper_dir"
+        mkdir -p "$PROJECT_ROOT/data/voice_cache"
+        
+        # Download Piper based on OS and architecture
+        if [[ "$os_type" == "Darwin" ]]; then
+            local arch=$(uname -m)
+            local piper_url
+            local piper_version="2023.11.14-2"
+            
+            if [ "$arch" = "arm64" ]; then
+                piper_url="https://github.com/rhasspy/piper/releases/download/${piper_version}/piper_macos_aarch64.tar.gz"
+            else
+                piper_url="https://github.com/rhasspy/piper/releases/download/${piper_version}/piper_macos_x86_64.tar.gz"
+            fi
+            
+            echo -e "${BLUE}   Downloading Piper TTS for macOS ($arch)...${NC}"
+            curl -L "$piper_url" -o /tmp/piper.tar.gz || {
+                echo -e "${YELLOW}   ⚠️  Failed to download Piper - voice will be unavailable${NC}"
+                rm -f /tmp/piper.tar.gz
+                return 0
+            }
+            
+            tar -xzf /tmp/piper.tar.gz -C "$piper_dir" --strip-components=1
+            chmod +x "$piper_bin"
+            rm /tmp/piper.tar.gz
+            echo -e "${GREEN}   ✅ Piper TTS installed${NC}"
+        elif [[ "$os_type" == "Linux" ]]; then
+            echo -e "${YELLOW}   Please run: ./install_voice.sh${NC}"
+            return 0
+        fi
+    else
+        echo -e "${GREEN}   ✅ Piper TTS found${NC}"
+    fi
+    
+    # Check for voice model
+    local model_name="en_US-ryan-high"
+    local model_file="$piper_dir/${model_name}.onnx"
+    
+    if [ ! -f "$model_file" ]; then
+        echo -e "${YELLOW}   ⚠️  Voice model not found - downloading...${NC}"
+        
+        local model_url="https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/ryan/high/en_US-ryan-high.onnx"
+        local config_url="https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/ryan/high/en_US-ryan-high.onnx.json"
+        
+        echo -e "${BLUE}   Downloading voice model: $model_name...${NC}"
+        curl -L "$model_url" -o "$model_file" || {
+            echo -e "${YELLOW}   ⚠️  Failed to download voice model - voice will be unavailable${NC}"
+            rm -f "$model_file"
+            return 0
+        }
+        
+        curl -L "$config_url" -o "${model_file}.json" || {
+            echo -e "${YELLOW}   ⚠️  Failed to download model config${NC}"
+        }
+        
+        echo -e "${GREEN}   ✅ Voice model installed${NC}"
+    else
+        echo -e "${GREEN}   ✅ Voice model found${NC}"
+    fi
+    
+    # Test voice system
+    if [ -f "$piper_bin" ] && [ -f "$model_file" ]; then
+        echo -e "${BLUE}   Testing voice synthesis...${NC}"
+        echo "Roger roger. Voice system online." | "$piper_bin" -m "$model_file" -f /tmp/test_voice.wav 2>/dev/null
+        
+        if [ -f /tmp/test_voice.wav ]; then
+            rm /tmp/test_voice.wav
+            echo -e "${GREEN}   ✅ Voice system fully operational${NC}"
+        else
+            echo -e "${YELLOW}   ⚠️  Voice test failed - synthesis may not work${NC}"
+        fi
+    fi
+}
+
 # Function to verify configuration
 check_config() {
     echo -e "${BLUE}⚙️  Checking configuration...${NC}"
@@ -399,6 +512,7 @@ case "${1:-start}" in
         check_server_running
         setup_venv
         install_requirements
+        check_voice_system
         check_config
         check_database
         start_server
@@ -413,6 +527,7 @@ case "${1:-start}" in
         sleep 2
         setup_venv
         install_requirements
+        check_voice_system
         check_config
         check_database
         start_server

@@ -1082,41 +1082,55 @@ def get_voice() -> VoiceSystem:
     """Get or create the global voice system instance"""
     global _voice
     if _voice is None:
-        # Try to load voice settings from config file
+        # Try to load voice model path from database first
         try:
-            import yaml
-            cfg = None
-            cfg_path = Path('config/config.yaml')
-            if cfg_path.exists():
-                with open(cfg_path, 'r') as f:
-                    cfg = yaml.safe_load(f) or {}
-            else:
-                ex = Path('config/config.yaml.example')
-                if ex.exists():
-                    with open(ex, 'r') as f:
-                        cfg = yaml.safe_load(f) or {}
-
-            voice_cfg = cfg.get('voice', {}) if cfg else {}
-            model = voice_cfg.get('model')
+            from src.database import DatabaseManager
+            db = DatabaseManager()
+            model_path = db.get_setting('voice_model_path', None)
+        except Exception as e:
             model_path = None
-            if model:
-                candidate = Path('data/voice_models/piper') / model
-                # Common extension .onnx
-                if candidate.exists():
-                    model_path = str(candidate)
+            logger.warning(f"Could not load voice_model_path from database: {e}")
+
+        # If not in database, fall back to config.yaml
+        if not model_path:
+            try:
+                import yaml
+                cfg = None
+                cfg_path = Path('config/config.yaml')
+                if cfg_path.exists():
+                    with open(cfg_path, 'r') as f:
+                        cfg = yaml.safe_load(f) or {}
                 else:
-                    # try with .onnx extension
-                    candidate2 = Path('data/voice_models/piper') / f"{model}.onnx"
-                    if candidate2.exists():
-                        model_path = str(candidate2)
+                    ex = Path('config/config.yaml.example')
+                    if ex.exists():
+                        with open(ex, 'r') as f:
+                            cfg = yaml.safe_load(f) or {}
 
-            default_style = voice_cfg.get('default_style', voice_cfg.get('default', 'droid'))
-            speed = float(voice_cfg.get('speed', 0.75))
-            pitch = float(voice_cfg.get('pitch', 0.85))
+                voice_cfg = cfg.get('voice', {}) if cfg else {}
+                model = voice_cfg.get('model')
+                if model:
+                    candidate = Path('data/voice_models/piper') / model
+                    if candidate.exists():
+                        model_path = str(candidate)
+                    else:
+                        candidate2 = Path('data/voice_models/piper') / f"{model}.onnx"
+                        if candidate2.exists():
+                            model_path = str(candidate2)
+                default_style = voice_cfg.get('default_style', voice_cfg.get('default', 'droid'))
+                speed = float(voice_cfg.get('speed', 0.75))
+                pitch = float(voice_cfg.get('pitch', 0.85))
+            except Exception as e:
+                logger.warning(f"Could not load voice config from yaml: {e}")
+                default_style = 'droid'
+                speed = 0.75
+                pitch = 0.85
+        else:
+            # If loaded from DB, use defaults for other params
+            default_style = 'droid'
+            speed = 0.75
+            pitch = 0.85
 
-            _voice = VoiceSystem(model_path=model_path, default_style=default_style, speed=speed, pitch=pitch)
-        except Exception:
-            _voice = VoiceSystem()
+        _voice = VoiceSystem(model_path=model_path, default_style=default_style, speed=speed, pitch=pitch)
     return _voice
 
 def say(text: str, **kwargs) -> bool:

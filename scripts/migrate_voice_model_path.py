@@ -3,7 +3,17 @@ Migration script to add the default voice_model_path setting to the dashboard da
 Run this script with the same Python environment as your dashboard app.
 """
 
-from src.database import DatabaseManager
+
+import sys
+import os
+from pathlib import Path
+
+# Ensure src is in sys.path
+script_dir = Path(__file__).resolve().parent.parent
+src_dir = script_dir / 'src'
+sys.path.insert(0, str(src_dir))
+
+from database import DatabaseManager
 
 def main():
     db = DatabaseManager()

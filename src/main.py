@@ -24,14 +24,34 @@ async def get_voice_settings():
         "enabled": enabled
     }
 
+from fastapi import Body
+
 @app.post("/api/settings/voice")
 async def update_voice_settings(
-    model_path: str = Body(..., embed=True, description="Path or directory to Piper voice model")
+    model: str = Body(None, embed=True, description="Voice model name (without extension)"),
+    model_path: str = Body(None, embed=True, description="Path or directory to Piper voice model")
 ):
-    """Update AI voice model path setting."""
+    """Update AI voice model name and/or path setting."""
     db = DatabaseManager()
-    db.save_setting('voice_model_path', model_path)
-    return {"success": True, "voice_model_path": model_path}
+    result = {}
+    if model is not None:
+        db.save_setting('voice_model', model)
+        result['voice_model'] = model
+    if model_path is not None:
+        db.save_setting('voice_model_path', model_path)
+        result['voice_model_path'] = model_path
+    if not result:
+        return {"success": False, "error": "No model or model_path provided."}
+    return {"success": True, **result}
+
+# DELETE endpoint to clear both settings
+@app.delete("/api/settings/voice")
+async def delete_voice_settings():
+    """Delete AI voice model and model_path settings from the database."""
+    db = DatabaseManager()
+    db.delete_setting('voice_model')
+    db.delete_setting('voice_model_path')
+    return {"success": True, "message": "Voice model and model_path deleted."}
 #!/usr/bin/env python3
 """
 Simple Personal Dashboard with News Filtering

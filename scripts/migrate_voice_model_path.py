@@ -18,10 +18,10 @@ from database import DatabaseManager
 
 def main():
     db = DatabaseManager()
-    # Set the correct path as requested
+    # Set the correct path as requested, always update
     correct_path = str(Path.home() / "Projects/ramona/dashboard/data/voice_models/piper")
     db.save_setting('voice_model_path', correct_path)
-    print(f"voice_model_path set to: {correct_path}")
+    print(f"voice_model_path updated to: {correct_path}")
 
 if __name__ == "__main__":
     main()

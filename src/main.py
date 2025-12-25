@@ -1,3 +1,37 @@
+from fastapi import Body
+# ================= AI Voice Settings API =================
+from database import DatabaseManager
+from config.settings import Settings
+
+@app.get("/api/settings/voice")
+async def get_voice_settings():
+    """Get AI voice configuration settings."""
+    db = DatabaseManager()
+    settings = Settings()
+    # Get from DB, fallback to settings
+    model_path = db.get_setting('voice_model_path', None)
+    model = settings.voice.model
+    default_style = settings.voice.default_style
+    speed = settings.voice.speed
+    pitch = settings.voice.pitch
+    enabled = settings.voice.enabled
+    return {
+        "model": model,
+        "model_path": model_path,
+        "default_style": default_style,
+        "speed": speed,
+        "pitch": pitch,
+        "enabled": enabled
+    }
+
+@app.post("/api/settings/voice")
+async def update_voice_settings(
+    model_path: str = Body(..., embed=True, description="Path or directory to Piper voice model")
+):
+    """Update AI voice model path setting."""
+    db = DatabaseManager()
+    db.save_setting('voice_model_path', model_path)
+    return {"success": True, "voice_model_path": model_path}
 #!/usr/bin/env python3
 """
 Simple Personal Dashboard with News Filtering

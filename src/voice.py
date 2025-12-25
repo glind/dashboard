@@ -1091,44 +1091,53 @@ def get_voice() -> VoiceSystem:
             model_path = None
             logger.warning(f"Could not load voice_model_path from database: {e}")
 
-        # If not in database, fall back to config.yaml
-        if not model_path:
-            try:
-                import yaml
-                cfg = None
-                cfg_path = Path('config/config.yaml')
-                if cfg_path.exists():
-                    with open(cfg_path, 'r') as f:
-                        cfg = yaml.safe_load(f) or {}
-                else:
-                    ex = Path('config/config.yaml.example')
-                    if ex.exists():
-                        with open(ex, 'r') as f:
-                            cfg = yaml.safe_load(f) or {}
+        model = None
+        default_style = 'droid'
+        speed = 0.75
+        pitch = 0.85
 
-                voice_cfg = cfg.get('voice', {}) if cfg else {}
-                model = voice_cfg.get('model')
-                if model:
-                    candidate = Path('data/voice_models/piper') / model
-                    if candidate.exists():
-                        model_path = str(candidate)
-                    else:
-                        candidate2 = Path('data/voice_models/piper') / f"{model}.onnx"
-                        if candidate2.exists():
-                            model_path = str(candidate2)
-                default_style = voice_cfg.get('default_style', voice_cfg.get('default', 'droid'))
-                speed = float(voice_cfg.get('speed', 0.75))
-                pitch = float(voice_cfg.get('pitch', 0.85))
-            except Exception as e:
-                logger.warning(f"Could not load voice config from yaml: {e}")
-                default_style = 'droid'
-                speed = 0.75
-                pitch = 0.85
+        # If not in database, fall back to config.yaml for model name and params
+        try:
+            import yaml
+            cfg = None
+            cfg_path = Path('config/config.yaml')
+            if cfg_path.exists():
+                with open(cfg_path, 'r') as f:
+                    cfg = yaml.safe_load(f) or {}
+            else:
+                ex = Path('config/config.yaml.example')
+                if ex.exists():
+                    with open(ex, 'r') as f:
+                        cfg = yaml.safe_load(f) or {}
+            voice_cfg = cfg.get('voice', {}) if cfg else {}
+            model = voice_cfg.get('model', 'en_US-ryan-high')
+            default_style = voice_cfg.get('default_style', 'droid')
+            speed = float(voice_cfg.get('speed', 0.75))
+            pitch = float(voice_cfg.get('pitch', 0.85))
+        except Exception as e:
+            logger.warning(f"Could not load voice config from yaml: {e}")
+
+        # If model_path is a directory, append model name and .onnx
+        if model_path:
+            model_path_obj = Path(model_path).expanduser()
+            if model_path_obj.is_dir():
+                model_file = model + '.onnx' if model else 'en_US-ryan-high.onnx'
+                candidate = model_path_obj / model_file
+                if candidate.exists():
+                    model_path = str(candidate)
+                else:
+                    logger.warning(f"Model file {candidate} does not exist in directory {model_path_obj}")
+                    model_path = str(candidate)  # Still use the constructed path
         else:
-            # If loaded from DB, use defaults for other params
-            default_style = 'droid'
-            speed = 0.75
-            pitch = 0.85
+            # If not set in DB, try config.yaml logic for file path
+            if model:
+                candidate = Path('data/voice_models/piper') / model
+                if candidate.exists():
+                    model_path = str(candidate)
+                else:
+                    candidate2 = Path('data/voice_models/piper') / f"{model}.onnx"
+                    if candidate2.exists():
+                        model_path = str(candidate2)
 
         _voice = VoiceSystem(model_path=model_path, default_style=default_style, speed=speed, pitch=pitch)
     return _voice

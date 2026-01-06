@@ -2506,22 +2506,54 @@
         async function speakText(text, style = null) {
             if (!text) return;
             style = style || currentSkin?.voice?.style || 'droid';
+            console.log('🔊 speakText called with:', { text: text.substring(0, 50), style });
             try {
+                console.log('📡 Fetching /api/voice/speak...');
                 const response = await fetch('/api/voice/speak', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ text, style })
                 });
+                console.log('📡 Response status:', response.status, response.statusText);
+                console.log('📡 Content-Type:', response.headers.get('content-type'));
+                
                 if (response.ok) {
                     const blob = await response.blob();
-                    const audio = new Audio(URL.createObjectURL(blob));
+                    console.log('✅ Got blob:', { size: blob.size, type: blob.type });
+                    
+                    if (blob.size === 0) {
+                        console.error('❌ Blob is empty!');
+                        showToast('Voice generation failed: empty audio');
+                        return;
+                    }
+                    
+                    const audioUrl = URL.createObjectURL(blob);
+                    console.log('🔗 Audio URL:', audioUrl);
+                    
+                    const audio = new Audio(audioUrl);
+                    audio.onerror = (e) => console.error('❌ Audio playback error:', e);
+                    audio.onloadstart = () => console.log('🎵 Audio loading...');
+                    audio.oncanplay = () => console.log('🎵 Audio ready to play');
+                    audio.onplay = () => console.log('▶️ Audio playing');
+                    audio.onended = () => console.log('⏹️ Audio finished');
+                    
                     currentAudioElement = audio;
-                    audio.play();
+                    console.log('🔊 Starting playback...');
+                    const playPromise = audio.play();
+                    if (playPromise !== undefined) {
+                        playPromise.catch(err => {
+                            console.error('❌ Playback failed:', err);
+                            showToast('Playback failed: ' + err.message);
+                        });
+                    }
                 } else {
-                    console.error('Voice generation failed');
+                    const text = await response.text();
+                    console.error('❌ Voice generation failed:', response.status, text);
+                    showToast('Voice generation failed: ' + response.statusText);
                 }
             } catch (e) {
-                console.error('Speak error:', e);
+                console.error('❌ Speak error:', e);
+                showToast('Voice error: ' + e.message);
             }
         }
 

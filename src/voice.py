@@ -12,6 +12,8 @@ from typing import Optional, Literal
 import hashlib
 import logging
 import sys
+import time
+from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
@@ -106,7 +108,19 @@ class VoiceSystem:
         self.piper_bin = piper_bin if piper_bin else _find_piper_binary()
         # Auto-detect model if not specified
         self.model_path = model_path if model_path else _find_voice_model()
-        self.cache_dir = Path(cache_dir)
+        # Anchor cache to project root if running from src/
+        cache_path = Path(cache_dir)
+        if not cache_path.is_absolute():
+            # Try under repo root (parent of src)
+            repo_root = Path(__file__).resolve().parent.parent
+            root_candidate = (repo_root / cache_path).resolve()
+            # Prefer repo root path when running from src and root path exists or parent exists
+            try:
+                root_candidate.parent.mkdir(parents=True, exist_ok=True)
+                cache_path = root_candidate
+            except Exception:
+                pass
+        self.cache_dir = cache_path
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.default_style = default_style
         self.speed = speed  # Speech speed multiplier
@@ -180,6 +194,11 @@ class VoiceSystem:
         # Random chances (30% for signature, 40% for sarcasm after first run)
         self.signature_chance = 0.3
         self.sarcasm_chance = 0.4
+
+        # Cache maintenance
+        self._last_prune_check = 0.0
+        self._default_cache_max_mb = 256  # cap cache size to 256MB by default
+        self._default_cache_max_age_hours = 24 * 7  # prune files older than 7 days
         
         logger.info(f"Voice system initialized with style: {default_style}, speed: {speed}x, pitch: {pitch}x")
         logger.info(f"Battle droid samples enabled: {self.use_authentic_samples}")
@@ -290,6 +309,99 @@ class VoiceSystem:
             logger.debug("Voice cache cleared")
         except Exception as e:
             logger.warning(f"Could not clear voice cache: {e}")
+
+    def get_cache_stats(self) -> dict:
+        """Return cache statistics (files, total_bytes, oldest, newest)."""
+        files = list(self.cache_dir.glob("*.wav"))
+        total_bytes = 0
+        oldest = None
+        newest = None
+        for f in files:
+            try:
+                st = f.stat()
+                total_bytes += st.st_size
+                mtime = st.st_mtime
+                if oldest is None or mtime < oldest:
+                    oldest = mtime
+                if newest is None or mtime > newest:
+                    newest = mtime
+            except FileNotFoundError:
+                pass
+        return {
+            "files": len(files),
+            "total_bytes": total_bytes,
+            "oldest": datetime.fromtimestamp(oldest).isoformat() if oldest else None,
+            "newest": datetime.fromtimestamp(newest).isoformat() if newest else None,
+        }
+
+    def prune_cache(self, max_mb: int | float = None, max_age_hours: int | float = None) -> None:
+        """Prune cache by age first, then by size until under limit.
+
+        - Removes files older than `max_age_hours`.
+        - If total size > `max_mb`, deletes oldest files until within limit.
+        """
+        max_mb = self._default_cache_max_mb if max_mb is None else max_mb
+        max_age_hours = self._default_cache_max_age_hours if max_age_hours is None else max_age_hours
+
+        try:
+            files = [f for f in self.cache_dir.glob("*.wav") if f.is_file()]
+            if not files:
+                return
+
+            now = time.time()
+            max_age_seconds = float(max_age_hours) * 3600.0
+
+            # Remove old files
+            removed = 0
+            for f in files:
+                try:
+                    if max_age_seconds > 0 and (now - f.stat().st_mtime) > max_age_seconds:
+                        f.unlink(missing_ok=True)
+                        removed += 1
+                except FileNotFoundError:
+                    pass
+
+            if removed:
+                logger.info(f"Pruned {removed} old voice cache files (> {max_age_hours}h)")
+
+            # Recompute list and total size
+            files = [f for f in self.cache_dir.glob("*.wav") if f.is_file()]
+            files_with_mtime = []
+            total_bytes = 0
+            for f in files:
+                try:
+                    st = f.stat()
+                    files_with_mtime.append((f, st.st_mtime, st.st_size))
+                    total_bytes += st.st_size
+                except FileNotFoundError:
+                    pass
+
+            max_bytes = int(float(max_mb) * 1024 * 1024)
+            if total_bytes <= max_bytes:
+                return
+
+            # Sort by oldest first
+            files_with_mtime.sort(key=lambda x: x[1])
+            deleted = 0
+            while total_bytes > max_bytes and files_with_mtime:
+                f, _mtime, size = files_with_mtime.pop(0)
+                try:
+                    f.unlink(missing_ok=True)
+                    total_bytes -= size
+                    deleted += 1
+                except FileNotFoundError:
+                    pass
+            if deleted:
+                logger.info(f"Pruned {deleted} voice cache files to fit under {max_mb}MB")
+        except Exception as e:
+            logger.warning(f"Voice cache prune failed: {e}")
+
+    def _maybe_prune_cache(self) -> None:
+        """Prune cache at most once per hour to limit overhead."""
+        now = time.time()
+        if now - self._last_prune_check >= 3600:  # 1 hour
+            self._last_prune_check = now
+            self.prune_cache()
 
     def _play_battle_droid_sample(self, phrase: str) -> bool:
         """
@@ -947,6 +1059,9 @@ class VoiceSystem:
         
         # Cleanup temp
         raw_path.unlink(missing_ok=True)
+
+        # Maintain cache periodically
+        self._maybe_prune_cache()
         
         return cache_path
     
@@ -1138,6 +1253,11 @@ def get_voice() -> VoiceSystem:
                     model_path = str(candidate)  # Still use the constructed path
 
         _voice = VoiceSystem(model_path=model_path, default_style=default_style, speed=speed, pitch=pitch)
+        # Initial prune to keep cache in check on startup
+        try:
+            _voice.prune_cache()
+        except Exception as e:
+            logger.warning(f"Initial voice cache prune failed: {e}")
     return _voice
 
 def say(text: str, **kwargs) -> bool:

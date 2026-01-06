@@ -8578,18 +8578,38 @@ async def speak_text(request: Request):
         if not text:
             return {"success": False, "error": "No text provided"}
         
+        logger.info(f"Voice speak request: text={text[:50]}..., style={style}")
+        
         # Get voice style from skin if not provided
         if not style:
             from config.skin_loader import get_active_skin
             skin = get_active_skin()
-            style = skin.voice.get('style', 'droid') if hasattr(skin, 'voice') else 'droid'
+            # Handle both dict and VoiceSettings object
+            if hasattr(skin, 'voice'):
+                voice_config = skin.voice
+                if hasattr(voice_config, 'style'):
+                    style = voice_config.style
+                elif isinstance(voice_config, dict):
+                    style = voice_config.get('style', 'droid')
+                else:
+                    style = 'droid'
+            else:
+                style = 'droid'
+        
+        logger.info(f"Voice style resolved to: {style}")
         
         # Use voice system to generate audio
         import voice as voice_module
+        logger.info(f"Voice module loaded, _voice exists: {voice_module._voice is not None}")
+        
         if voice_module._voice:
+            logger.info(f"Generating voice with style={style}")
             # Generate the audio file
             wav_path = voice_module._voice.generate(text, style=style)
+            logger.info(f"Generation result: {wav_path}")
+            
             if wav_path and wav_path.exists():
+                logger.info(f"Returning audio file: {wav_path}")
                 # Return the audio file
                 from fastapi.responses import FileResponse
                 return FileResponse(
@@ -8597,11 +8617,36 @@ async def speak_text(request: Request):
                     media_type="audio/wav",
                     filename="speech.wav"
                 )
+            else:
+                logger.error(f"Generated path does not exist or is None: {wav_path}")
+        else:
+            logger.error("Voice module _voice is None")
         
         return {"success": False, "error": "Voice generation failed"}
-        
     except Exception as e:
-        logger.error(f"Voice speak error: {e}")
+        logger.error(f"Voice speak error: {e}", exc_info=True)
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/voice/cache/clear")
+async def clear_voice_cache():
+    """Clear all cached voice WAV files to free disk space."""
+    try:
+        import voice as voice_module
+        v = voice_module.get_voice()
+        v.clear_cache()
+        # Also clear legacy cache location at repo root if different
+        from pathlib import Path
+        try:
+            repo_root = Path(__file__).resolve().parent.parent
+            legacy_cache = repo_root / "data" / "voice_cache"
+            for f in legacy_cache.glob("*.wav"):
+                f.unlink(missing_ok=True)
+        except Exception:
+            pass
+        return {"success": True}
+    except Exception as e:
+        logger.error(f"Clear voice cache error: {e}")
         return {"success": False, "error": str(e)}
 
 
@@ -9515,6 +9560,18 @@ async def startup_event():
         
         # Load voice configuration from settings
         voice_config = getattr(settings, 'voice', {})
+        # Support both dict and Pydantic BaseSettings objects
+        if voice_config and not isinstance(voice_config, dict):
+            try:
+                if hasattr(voice_config, 'model_dump'):
+                    voice_config = voice_config.model_dump()
+                elif hasattr(voice_config, 'dict'):
+                    voice_config = voice_config.dict()
+                else:
+                    voice_config = {k: getattr(voice_config, k) for k in dir(voice_config) if not k.startswith('_')}
+            except Exception as conv_err:
+                logger.warning(f"Could not convert voice settings to dict: {conv_err}")
+                voice_config = {}
         if not voice_config:
             # Fallback to default config
             voice_config = {

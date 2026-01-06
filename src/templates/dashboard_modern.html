@@ -2502,23 +2502,34 @@
             console.log('All audio stopped');
         }
 
+        // Speak text using AI voice - plays in browser (not server)
+        async function speakText(text, style = null) {
+            if (!text) return;
+            style = style || currentSkin?.voice?.style || 'droid';
+            try {
+                const response = await fetch('/api/voice/speak', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text, style })
+                });
+                if (response.ok) {
+                    const blob = await response.blob();
+                    const audio = new Audio(URL.createObjectURL(blob));
+                    currentAudioElement = audio;
+                    audio.play();
+                } else {
+                    console.error('Voice generation failed');
+                }
+            } catch (e) {
+                console.error('Speak error:', e);
+            }
+        }
+
         async function promptSpeak() {
             const assistantName = currentSkin?.identity?.display_name || 'Assistant';
             const text = prompt(`Ask ${assistantName}:`);
             if (!text) return;
-            // Use current skin's voice style
-            const style = currentSkin?.voice?.style || 'droid';
-            try {
-                const r = await fetch('/api/voice/test', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ message: text, style: style, signature: false })
-                });
-                const data = await r.json();
-                if (!data.success) console.warn('Voice speak failed', data);
-            } catch (e) {
-                console.error('Speak error', e);
-            }
+            await speakText(text);
         }
 
         // Voice Settings
@@ -2810,25 +2821,21 @@
         }
 
         async function testVoice() {
-            const testBtn = document.getElementById('test-voice-btn');
+            const testBtn = document.getElementById('test-voice-btn') || document.getElementById('settings-test-voice-btn');
             if (testBtn) testBtn.disabled = true;
             try {
                 // Get the selected style from the dropdown (or use skin default)
-                const selectedStyle = document.getElementById('voice-style')?.value;
+                const selectedStyle = document.getElementById('voice-style')?.value || 
+                                     document.getElementById('settings-voice-style')?.value;
                 
-                // Send empty body to use skin's default message and style
-                const r = await fetch('/api/voice/test', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ 
-                        style: selectedStyle || undefined,
-                        signature: true 
-                    })
-                });
-                const data = await r.json();
-                if (!data.success) alert('Voice test failed: ' + (data.error || 'Unknown error'));
+                const style = selectedStyle || currentSkin?.voice?.style || 'droid';
+                const message = currentSkin?.identity?.signature_phrase || 'Voice system operational.';
+                
+                // Use speakText to play in browser
+                await speakText(message, style);
             } catch (e) {
                 console.error('Voice test error:', e);
+                alert('Voice test failed: ' + e.message);
             } finally {
                 if (testBtn) testBtn.disabled = false;
             }
@@ -2839,34 +2846,14 @@
             const jokesEl = document.getElementById('jokes');
             if (!jokesEl) return;
             const text = jokesEl.innerText || 'No jokes loaded';
-            // Get current skin style
-            const style = currentSkin?.voice?.style || 'droid';
-            try {
-                await fetch('/api/voice/test', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ message: text, style: style, signature: false })
-                });
-            } catch (e) {
-                console.error('Read jokes error:', e);
-            }
+            await speakText(text);
         }
 
         async function readQuote() {
             const quoteEl = document.getElementById('quote');
             if (!quoteEl) return;
             const text = quoteEl.innerText || 'No quote loaded';
-            // Use current skin's voice style
-            const style = currentSkin?.voice?.style || 'droid';
-            try {
-                await fetch('/api/voice/test', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ message: text, style: style, signature: false })
-                });
-            } catch (e) {
-                console.error('Read quote error:', e);
-            }
+            await speakText(text);
         }
 
         async function readRogerQuote() {
@@ -2874,17 +2861,7 @@
             const el = document.getElementById('roger-quotes') || document.getElementById('dracula-quotes');
             if (!el) return;
             const text = el.innerText || 'No quote loaded';
-            // Use current skin's voice style
-            const style = currentSkin?.voice?.style || 'droid';
-            try {
-                await fetch('/api/voice/test', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ message: text, style: style, signature: true })
-                });
-            } catch (e) {
-                console.error('Read quote error:', e);
-            }
+            await speakText(text);
         }
 
         // OAuth Connect Functions

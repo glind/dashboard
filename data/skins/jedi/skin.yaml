@@ -68,8 +68,8 @@ voice:
     highpass_freq: 80
     lowpass_freq: 7000
     echo_gain: 0.20
-    vibrato_freq: 0
-    vibrato_depth: 0.0
+    vibrato_freq: 2
+    vibrato_depth: 0.05
   use_authentic_samples: false
   samples_dir: "data/voice_models/jedi"
 

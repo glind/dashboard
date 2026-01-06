@@ -1,57 +1,3 @@
-from fastapi import Body
-# ================= AI Voice Settings API =================
-from database import DatabaseManager
-from config.settings import Settings
-
-@app.get("/api/settings/voice")
-async def get_voice_settings():
-    """Get AI voice configuration settings."""
-    db = DatabaseManager()
-    settings = Settings()
-    # Get from DB, fallback to settings
-    model_path = db.get_setting('voice_model_path', None)
-    model = settings.voice.model
-    default_style = settings.voice.default_style
-    speed = settings.voice.speed
-    pitch = settings.voice.pitch
-    enabled = settings.voice.enabled
-    return {
-        "model": model,
-        "model_path": model_path,
-        "default_style": default_style,
-        "speed": speed,
-        "pitch": pitch,
-        "enabled": enabled
-    }
-
-from fastapi import Body
-
-@app.post("/api/settings/voice")
-async def update_voice_settings(
-    model: str = Body(None, embed=True, description="Voice model name (without extension)"),
-    model_path: str = Body(None, embed=True, description="Path or directory to Piper voice model")
-):
-    """Update AI voice model name and/or path setting."""
-    db = DatabaseManager()
-    result = {}
-    if model is not None:
-        db.save_setting('voice_model', model)
-        result['voice_model'] = model
-    if model_path is not None:
-        db.save_setting('voice_model_path', model_path)
-        result['voice_model_path'] = model_path
-    if not result:
-        return {"success": False, "error": "No model or model_path provided."}
-    return {"success": True, **result}
-
-# DELETE endpoint to clear both settings
-@app.delete("/api/settings/voice")
-async def delete_voice_settings():
-    """Delete AI voice model and model_path settings from the database."""
-    db = DatabaseManager()
-    db.delete_setting('voice_model')
-    db.delete_setting('voice_model_path')
-    return {"success": True, "message": "Voice model and model_path deleted."}
 #!/usr/bin/env python3
 """
 Simple Personal Dashboard with News Filtering
@@ -210,6 +156,58 @@ except ImportError as e:
 logging.basicConfig(level=logging.INFO)
 
 app = FastAPI(title="Simple Personal Dashboard")
+
+# ================= AI Voice Settings API =================
+from database import DatabaseManager
+from config.settings import Settings
+from fastapi import Body
+
+@app.get("/api/settings/voice")
+async def get_voice_settings():
+    """Get AI voice configuration settings."""
+    db = DatabaseManager()
+    settings = Settings()
+    # Get from DB, fallback to settings
+    model_path = db.get_setting('voice_model_path', None)
+    model = settings.voice.model
+    default_style = settings.voice.default_style
+    speed = settings.voice.speed
+    pitch = settings.voice.pitch
+    enabled = settings.voice.enabled
+    return {
+        "model": model,
+        "model_path": model_path,
+        "default_style": default_style,
+        "speed": speed,
+        "pitch": pitch,
+        "enabled": enabled
+    }
+
+@app.post("/api/settings/voice")
+async def update_voice_settings(
+    model: str = Body(None, embed=True, description="Voice model name (without extension)"),
+    model_path: str = Body(None, embed=True, description="Path or directory to Piper voice model")
+):
+    """Update AI voice model name and/or path setting."""
+    db = DatabaseManager()
+    result = {}
+    if model is not None:
+        db.save_setting('voice_model', model)
+        result['voice_model'] = model
+    if model_path is not None:
+        db.save_setting('voice_model_path', model_path)
+        result['voice_model_path'] = model_path
+    if not result:
+        return {"success": False, "error": "No model or model_path provided."}
+    return {"success": True, **result}
+
+@app.delete("/api/settings/voice")
+async def delete_voice_settings():
+    """Delete AI voice model and model_path settings from the database."""
+    db = DatabaseManager()
+    db.delete_setting('voice_model')
+    db.delete_setting('voice_model_path')
+    return {"success": True, "message": "Voice model and model_path deleted."}
 
 # Register custom module routers
 try:

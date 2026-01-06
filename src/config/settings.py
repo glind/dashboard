@@ -12,6 +12,8 @@ import yaml
 
 class VoiceSettings(BaseSettings):
     """Voice system configuration for AI assistant."""
+    model_config = {'protected_namespaces': ()}
+    
     model: str = Field(default="en_US-ryan-high", description="Voice model name (without extension)")
     model_path: Optional[str] = Field(default=None, description="Path or directory to Piper voice model. Can be a directory or full file path.")
     default_style: str = Field(default="droid", description="Default voice style/effect")

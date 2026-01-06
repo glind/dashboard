@@ -3866,8 +3866,9 @@
                 const resp = await fetch('/api/comics/favorites');
                 const data = await resp.json();
                 if (data.success && data.favorites && data.favorites.length > 0) {
+                    window.comicArchiveList = data.favorites;
                     content.innerHTML = data.favorites.map(comic => `
-                        <div class="bg-gray-900 rounded-lg border border-orange-600 overflow-hidden cursor-pointer hover:opacity-90 transition-opacity" onclick="openComicViewer('${comic.title || 'Comic'}', '${comic.image_url}', '${comic.link || '#'}', '${comic.date || ''}')">
+                        <div class="bg-gray-900 rounded-lg border border-orange-600 overflow-hidden cursor-pointer hover:opacity-90 transition-opacity" onclick="openComicFromArchive(${data.favorites.indexOf(comic)})">
                             <img src="${comic.image_url}" alt="Comic" class="w-full h-40 object-cover">
                             <div class="p-2 text-xs text-orange-300">${comic.date || ''}</div>
                         </div>
@@ -3878,6 +3879,15 @@
             } catch (e) {
                 console.error('Archive error:', e);
             }
+        }
+
+        function openComicFromArchive(index) {
+            const list = window.comicArchiveList || [];
+            if (!list.length) return;
+            const normalized = list.map(normalizeComicItem);
+            const idx = Math.max(0, Math.min(index, normalized.length - 1));
+            const item = normalized[idx];
+            openComicViewer(item.title, item.imageUrl, item.sourceLink, item.date, normalized, idx);
         }
 
         function closeGarfieldArchive() {
@@ -3897,15 +3907,27 @@
             comicList: []
         };
 
-        function openComicViewer(title, imageUrl, sourceLink, date) {
+        function normalizeComicItem(item = {}) {
+            return {
+                title: item.title || 'Comic',
+                imageUrl: item.image_url || item.imageUrl || item.image || '',
+                sourceLink: item.link || item.page_url || item.sourceLink || '#',
+                date: item.date || item.id || ''
+            };
+        }
+
+        function openComicViewer(title, imageUrl, sourceLink, date, list = null, index = 0) {
+            const comicList = list ? list.map(normalizeComicItem) : [normalizeComicItem({ title, image_url: imageUrl, link: sourceLink, date })];
+            if (index < 0 || index >= comicList.length) index = 0;
+            const active = comicList[index];
             currentComicData = {
-                title: title || 'Comic',
-                imageUrl: imageUrl,
-                sourceLink: sourceLink,
-                date: date || '',
-                index: 0,
-                totalComics: 1,
-                comicList: [{ title, imageUrl, sourceLink, date }]
+                title: active.title,
+                imageUrl: active.imageUrl,
+                sourceLink: active.sourceLink,
+                date: active.date,
+                index,
+                totalComics: comicList.length,
+                comicList
             };
             updateComicViewer();
             document.getElementById('comic-viewer-modal').classList.remove('hidden');

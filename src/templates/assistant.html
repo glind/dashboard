@@ -300,7 +300,9 @@
             document.getElementById('typing-indicator').classList.remove('hidden');
 
             try {
-                // Call the AI endpoint
+                // Call the AI endpoint with timeout and robust parsing
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 20000); // 20s client-side timeout
                 const response = await fetch('/api/ai/chat', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -308,15 +310,35 @@
                         message: message,
                         history: conversationHistory.slice(-10),  // Last 10 messages for context
                         persona: currentSkin?.name || 'roger'
-                    })
+                    }),
+                    signal: controller.signal
                 });
+                clearTimeout(timeoutId);
 
-                const data = await response.json();
+                const contentType = response.headers.get('content-type') || '';
+                let data = null;
+                if (response.ok && contentType.includes('application/json')) {
+                    data = await response.json();
+                } else if (response.ok) {
+                    // Non-JSON successful response (unexpected); treat as text
+                    const text = await response.text();
+                    data = { response: text };
+                } else {
+                    // Error response; try to parse JSON error, else use text
+                    let errorText = 'Error contacting AI service';
+                    try {
+                        const errJson = contentType.includes('application/json') ? await response.json() : null;
+                        errorText = errJson?.error || errorText;
+                    } catch {
+                        try { errorText = await response.text(); } catch {}
+                    }
+                    throw new Error(errorText);
+                }
                 
                 // Hide typing indicator
                 document.getElementById('typing-indicator').classList.add('hidden');
 
-                if (data.response) {
+                if (data && data.response) {
                     addMessageToUI('assistant', data.response);
                     conversationHistory.push({ role: 'assistant', content: data.response });
                     saveConversation();

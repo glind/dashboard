@@ -1,3 +1,15 @@
+"""
+Application settings and configuration management.
+"""
+
+import os
+from pathlib import Path
+from typing import Optional, Dict, Any
+from pydantic_settings import BaseSettings
+from pydantic import Field
+import yaml
+
+
 class VoiceSettings(BaseSettings):
     """Voice system configuration for AI assistant."""
     model: str = Field(default="en_US-ryan-high", description="Voice model name (without extension)")
@@ -11,17 +23,6 @@ class VoiceSettings(BaseSettings):
     announce_on_error: bool = Field(default=False, description="Announce on error")
     wake_words: list = Field(default_factory=lambda: ["rogr", "roger"], description="Wake words for voice commands")
     signature_phrase: str = Field(default="roger, roger", description="Signature phrase for announcements")
-
-"""
-Application settings and configuration management.
-"""
-
-import os
-from pathlib import Path
-from typing import Optional, Dict, Any
-from pydantic_settings import BaseSettings
-from pydantic import Field
-import yaml
 
 
 class OllamaSettings(BaseSettings):

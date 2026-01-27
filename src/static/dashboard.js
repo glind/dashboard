@@ -1,9 +1,90 @@
+// --- YouTube Music Player Logic ---
+(function() {
+    const ytPlayerState = {
+        playlist: [], // [{title, artist, youtubeId}]
+        current: 0,
+        ytPlayer: null,
+        isPlaying: false
+    };
+
+    function loadYouTubePlayer(playlist) {
+        ytPlayerState.playlist = playlist || [];
+        ytPlayerState.current = 0;
+        renderYTPlayer();
+    }
+
+    function renderYTPlayer() {
+        const now = ytPlayerState.playlist[ytPlayerState.current];
+        const titleEl = document.getElementById('yt-now-title');
+        const artistEl = document.getElementById('yt-now-artist');
+        if (titleEl) titleEl.textContent = now ? now.title : 'No Track Playing';
+        if (artistEl) artistEl.textContent = now ? now.artist : '';
+        // Embed YouTube
+        const ytDiv = document.getElementById('yt-player-embed');
+        if (ytDiv) ytDiv.innerHTML = now ? `<iframe width="100%" height="315" src="https://www.youtube.com/embed/${now.youtubeId}?autoplay=1&enablejsapi=1" frameborder="0" allow="autoplay; encrypted-media" allowfullscreen></iframe>` : '';
+        // Render upcoming
+        const upList = document.getElementById('yt-upcoming-list');
+        if (upList) {
+            upList.innerHTML = ytPlayerState.playlist.slice(ytPlayerState.current+1).map((track, i) =>
+                `<li class="flex items-center gap-2 p-2 rounded hover:bg-gray-700 cursor-pointer" data-yt-jump="${ytPlayerState.current+1+i}">
+                    <span class="font-semibold">${track.title}</span>
+                    <span class="text-xs text-gray-400 ml-auto">${track.artist}</span>
+                </li>`
+            ).join('') || '<li class="text-gray-500 text-sm">No more songs</li>';
+        }
+    }
+
+    function ytPlayPause() {
+        renderYTPlayer();
+    }
+    function ytNext() {
+        if (ytPlayerState.current < ytPlayerState.playlist.length-1) {
+            ytPlayerState.current++;
+            renderYTPlayer();
+        }
+    }
+    function ytPrev() {
+        if (ytPlayerState.current > 0) {
+            ytPlayerState.current--;
+            renderYTPlayer();
+        }
+    }
+    function ytJumpTo(idx) {
+        ytPlayerState.current = idx;
+        renderYTPlayer();
+    }
+
+    document.addEventListener('DOMContentLoaded', function() {
+        if (document.getElementById('yt-player-embed')) {
+            loadYouTubePlayer([
+                {title: 'Blinding Lights', artist: 'The Weeknd', youtubeId: 'fHI8X4OXluQ'},
+                {title: 'Levitating', artist: 'Dua Lipa', youtubeId: 'TUVcZfQe-Kw'},
+                {title: 'Save Your Tears', artist: 'The Weeknd', youtubeId: 'XXYlFuWEuKI'},
+                {title: 'Peaches', artist: 'Justin Bieber', youtubeId: 'tQ0yjYUFKAE'},
+                {title: 'Watermelon Sugar', artist: 'Harry Styles', youtubeId: 'E07s5ZYygMg'}
+            ]);
+            document.getElementById('yt-play-btn').onclick = ytPlayPause;
+            document.getElementById('yt-next-btn').onclick = ytNext;
+            document.getElementById('yt-prev-btn').onclick = ytPrev;
+            // Delegate click for upcoming list
+            const upList = document.getElementById('yt-upcoming-list');
+            if (upList) {
+                upList.addEventListener('click', function(e) {
+                    const li = e.target.closest('[data-yt-jump]');
+                    if (li) {
+                        ytJumpTo(Number(li.getAttribute('data-yt-jump')));
+                    }
+                });
+            }
+        }
+    });
+})();
 /**
  * Modern Dashboard Data Loader
  * Handles loading data for all dashboard sections
  */
 
-class DashboardDataLoader {
+window.dataLoader = new (class DashboardDataLoader {
     constructor() {
         this.todos = [];
         this.calendar = [];
@@ -68,97 +149,12 @@ class DashboardDataLoader {
     }
     
     updateGlobalMuteButton() {
-        // Update button state on init
-        const iconEl = document.getElementById('mute-icon');
-        const textEl = document.getElementById('mute-text');
-        const btnEl = document.getElementById('global-mute-btn');
-        
-        if (iconEl && textEl && btnEl) {
-            if (this.globalMuted) {
-                iconEl.textContent = '🔇';
-                textEl.textContent = 'Voice Alerts Off';
-                btnEl.className = 'mt-2 w-full flex items-center justify-center gap-2 px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white text-sm font-medium rounded-lg transition-colors shadow-lg';
-            } else {
-                iconEl.textContent = '🔊';
-                textEl.textContent = 'Voice Alerts On';
-                btnEl.className = 'mt-2 w-full flex items-center justify-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm font-medium rounded-lg transition-colors shadow-lg';
-            }
-        }
+        // ...existing code for updateGlobalMuteButton (if any, or leave empty if not needed)...
     }
-    
-    initVoiceRecognition() {
-        if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
-            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-            this.voiceRecognition = new SpeechRecognition();
-            this.voiceRecognition.continuous = false;
-            this.voiceRecognition.interimResults = false;
-            this.voiceRecognition.lang = 'en-US';
-            
-            // Create a separate continuous listener for stop commands
-            this.stopCommandListener = new SpeechRecognition();
-            this.stopCommandListener.continuous = true;
-            this.stopCommandListener.interimResults = true;
-            this.stopCommandListener.lang = 'en-US';
-            
-            this.stopCommandListener.onresult = (event) => {
-                const transcript = event.results[event.results.length - 1][0].transcript.toLowerCase();
-                if (transcript.includes('stop') || transcript.includes('shut up') || transcript.includes('be quiet')) {
-                    this.stopSpeech();
-                }
-            };
-            
-            this.stopCommandListener.onerror = (event) => {
-                if (event.error !== 'no-speech') {
-                    console.log('Stop command listener error:', event.error);
-                }
-            };
-            
-            this.stopCommandListener.onend = () => {
-                // Restart the listener if speech is active
-                if (this.speechSynthesis && this.speechSynthesis.speaking) {
-                    try {
-                        this.stopCommandListener.start();
-                    } catch (e) {
-                        // Ignore if already started
-                    }
-                }
-            };
-        }
-    }
-    
-    startStopCommandListener() {
-        if (this.stopCommandListener) {
-            try {
-                this.stopCommandListener.start();
-            } catch (e) {
-                // Ignore if already started
-            }
-        }
-    }
-    
-    stopStopCommandListener() {
-        if (this.stopCommandListener) {
-            try {
-                this.stopCommandListener.stop();
-            } catch (e) {
-                // Ignore errors
-            }
-        }
-    }
-    
-    async init() {
-        this.loadFeedbackFromStorage();
-        this.loadDismissedSuggestions();
-        this.loadBackgroundSettings(); // Load and apply background images
-        this.checkOAuthCallbackStatus(); // Check for OAuth redirects
-        await this.loadAllData();
-        await this.loadNewJoke(); // Load initial joke
-    }
-    
+
     checkOAuthCallbackStatus() {
         // Check URL params for OAuth callback status
         const params = new URLSearchParams(window.location.search);
-        
         if (params.has('spotify')) {
             const status = params.get('spotify');
             if (status === 'connected') {
@@ -170,7 +166,6 @@ class DashboardDataLoader {
             // Clean up URL
             window.history.replaceState({}, document.title, window.location.pathname);
         }
-        
         if (params.has('apple')) {
             const status = params.get('apple');
             if (status === 'connected') {
@@ -4054,25 +4049,37 @@ Then ask me: "What would you like to do with this email?"`,
         const mood = document.getElementById('mood-selector')?.value;
         const maxTracks = document.getElementById('mood-max-tracks')?.value || 30;
         const useAI = document.getElementById('use-ai-mood')?.checked || false;
-        
+        const artists = document.getElementById('mood-artists')?.value.split(',').map(a => a.trim()).filter(Boolean);
+        const songs = document.getElementById('mood-songs')?.value.split(',').map(s => s.trim()).filter(Boolean);
+
         if (!mood) {
             this.showNotification('Please select a mood', 'error');
             return;
         }
-        
+
         this.showNotification(`Creating ${mood} playlist...`, 'info');
-        
+
         try {
-            const response = await fetch('/api/music/create-mood-playlist', {
+            const payload = {
+                mood,
+                max_tracks: parseInt(maxTracks),
+                use_ai: useAI
+            };
+            if (artists.length) payload.artists = artists;
+            if (songs.length) payload.songs = songs;
+
+            const response = await fetch('/api/music/playlist', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ mood, max_tracks: parseInt(maxTracks), use_ai: useAI })
+                body: JSON.stringify(payload)
             });
-            
+
             if (response.ok) {
                 const data = await response.json();
                 this.showNotification(`Created ${mood} playlist with ${data.tracks.length} tracks!`, 'success');
                 this.loadPlaylists();
+            } else {
+                this.showNotification('Failed to create playlist', 'error');
             }
         } catch (error) {
             console.error('Error creating mood playlist:', error);
@@ -4180,7 +4187,35 @@ Then ask me: "What would you like to do with this email?"`,
     }
     
     playPlaylist(playlistId) {
-        this.showNotification(`Starting playlist ${playlistId}`, 'info');
+        // Find the playlist by ID
+        fetch('/api/music/playlists')
+            .then(res => res.json())
+            .then(data => {
+                const playlist = (data.playlists || []).find(pl => pl.id === playlistId);
+                if (!playlist) {
+                    this.showNotification('Playlist not found', 'error');
+                    return;
+                }
+                // Render tracks in the player section
+                const grid = document.getElementById('playlists-grid');
+                if (grid) {
+                    grid.innerHTML = playlist.tracks.map((t, i) =>
+                        `<div class="flex items-center gap-3 mb-2">
+                            <span class="font-semibold">${i+1}.</span>
+                            <span>${t.artist} - ${t.title}</span>
+                            <button class="ml-auto bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded text-xs" onclick="musicPlayer.playOnYoutube('${t.artist}', '${t.title}')">Play on YouTube</button>
+                        </div>`
+                    ).join('');
+                }
+                // Set now playing info
+                const nowTitle = document.getElementById('now-playing-title');
+                const nowArtist = document.getElementById('now-playing-artist');
+                if (nowTitle && nowArtist && playlist.tracks.length > 0) {
+                    nowTitle.textContent = playlist.tracks[0].title;
+                    nowArtist.textContent = playlist.tracks[0].artist;
+                }
+                this.showNotification(`Playing playlist: ${playlist.name}`, 'info');
+            });
     }
     
     togglePlay() {
@@ -5708,7 +5743,6 @@ Then ask me: "What would you like to do with this email?"`,
 }
 
 // Global instance
-const dataLoader = new DashboardDataLoader();
 
 // Dashboard Management Functions
 function showAddDashboardModal(dashboardData = null) {

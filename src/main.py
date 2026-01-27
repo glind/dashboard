@@ -78,6 +78,26 @@ logging.basicConfig(level=logging.INFO)
 
 app = FastAPI(title="Simple Personal Dashboard")
 
+
+# Serve static files for PWA and frontend assets from both locations
+from fastapi.staticfiles import StaticFiles
+import os
+static_dirs = ["static", "src/static"]
+for static_dir in static_dirs:
+    if os.path.isdir(static_dir):
+        app.mount(f"/static", StaticFiles(directory=static_dir), name=f"static-{static_dir}")
+
+# Register music playlist router
+try:
+    from modules.music.endpoints import router as music_router
+    app.include_router(music_router)
+    logging.info("✅ Music playlist router registered")
+except ImportError as e:
+    logging.warning(f"Could not load music playlist router: {e}")
+
+
+# Register new music playlist endpoint (to be implemented)
+
 # Register custom module routers
 try:
     from modules.music_news.endpoints import router as music_news_router
@@ -140,7 +160,8 @@ async def health_check():
         "service": "personal-dashboard"
     }
 
-
+    from fastapi import FastAPI, HTTPException, Request
+    from modules.lastfm.endpoints import router as lastfm_router
 class BackgroundDataManager:
     """Manages background data collection and caching."""
     

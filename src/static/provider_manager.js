@@ -1,23 +1,55 @@
-/**
- * Provider Management UI
- * Handles authentication and configuration for Google, Microsoft, and Proton providers
- */
+    savePlaylistLocally(data) {
+        if (!data || !data.tracks) return;
+        const playlists = JSON.parse(localStorage.getItem('savedPlaylists') || '[]');
+        const playlist = {
+            timestamp: Date.now(),
+            mood: data.mood,
+            artists: data.artists,
+            songs: data.songs,
+            tracks: data.tracks
+        };
+        playlists.push(playlist);
+        localStorage.setItem('savedPlaylists', JSON.stringify(playlists));
+        alert('Playlist saved locally!');
+    },
 
-class ProviderManager {
-    constructor() {
-        this.providers = [];
-        this.init();
-    }
+    likeSong(track, context) {
+        // track: {artist, title}, context: {mood, artists, songs}
+        const likedSongs = JSON.parse(localStorage.getItem('likedSongs') || '[]');
+        likedSongs.push({
+            ...track,
+            context,
+            timestamp: Date.now()
+        });
+        localStorage.setItem('likedSongs', JSON.stringify(likedSongs));
+        alert(`Liked: ${track.artist} - ${track.title}`);
+    },
 
-    async init() {
-        await this.loadProviders();
-    }
-
+    getAIContext() {
+        // Gather liked songs, moods, and suggestions for future AI requests
+        const likedSongs = JSON.parse(localStorage.getItem('likedSongs') || '[]');
+        const playlists = JSON.parse(localStorage.getItem('savedPlaylists') || '[]');
+        return {
+            likedSongs,
+            playlists
+        };
+    },
+// --- Mood/Artist/Song Music Player ---
     async loadProviders() {
         try {
-            const response = await fetch('/api/providers/list');
+            const response = await fetch('/api/email/accounts');
             const data = await response.json();
-            this.providers = data.providers || [];
+            // Flatten providers into a single array with type
+            this.providers = [];
+            ['google', 'microsoft'].forEach(type => {
+                (data[type] || []).forEach(acc => {
+                    this.providers.push({
+                        name: acc.name,
+                        type: type,
+                        authenticated: true // Assume configured accounts are connected for now
+                    });
+                });
+            });
             this.renderProviders();
         } catch (error) {
             console.error('Error loading providers:', error);
@@ -49,10 +81,6 @@ class ProviderManager {
         const statusColor = provider.authenticated ? 'bg-green-600' : 'bg-red-600';
         const statusText = provider.authenticated ? 'Connected' : 'Not Connected';
         const providerIcon = this.getProviderIcon(provider.type);
-        const capabilities = provider.capabilities.map(cap => 
-            `<span class="text-xs bg-gray-700 px-2 py-1 rounded">${cap}</span>`
-        ).join(' ');
-
         return `
             <div class="bg-gray-800 border border-gray-700 rounded-lg p-4">
                 <div class="flex items-start justify-between mb-3">
@@ -65,34 +93,30 @@ class ProviderManager {
                     </div>
                     <span class="text-xs ${statusColor} px-2 py-1 rounded">${statusText}</span>
                 </div>
-                
-                <div class="flex gap-2 mb-3">
-                    ${capabilities}
-                </div>
-                
                 <div class="flex gap-2">
-                    ${!provider.authenticated ? `
-                        <button onclick="providerManager.authenticateProvider('${provider.id}', '${provider.type}')" 
-                                class="bg-blue-600 hover:bg-blue-700 text-white text-sm px-3 py-1 rounded">
-                            Connect
-                        </button>
-                    ` : `
-                        <button onclick="providerManager.testProvider('${provider.id}')" 
-                                class="bg-green-600 hover:bg-green-700 text-white text-sm px-3 py-1 rounded">
-                            Test
-                        </button>
-                    `}
-                    <button onclick="providerManager.removeProvider('${provider.id}')" 
-                            class="bg-red-600 hover:bg-red-700 text-white text-sm px-3 py-1 rounded">
-                        Remove
+                    <button onclick="providerManager.switchToProvider('${provider.type}', '${provider.name}')" 
+                            class="bg-blue-600 hover:bg-blue-700 text-white text-sm px-3 py-1 rounded">
+                        Switch
                     </button>
                 </div>
-                
-                ${provider.last_auth ? `
-                    <p class="text-xs text-gray-500 mt-2">Last authenticated: ${new Date(provider.last_auth).toLocaleString()}</p>
-                ` : ''}
             </div>
         `;
+    }
+
+    async switchToProvider(type, name) {
+        try {
+            // Fetch emails for this provider/account
+            const response = await fetch(`/api/email/${type}/${encodeURIComponent(name)}`);
+            const data = await response.json();
+            // You can now update the UI to show emails for this account
+            if (window.dataLoader && typeof window.dataLoader.showEmailsForAccount === 'function') {
+                window.dataLoader.showEmailsForAccount(data);
+            } else {
+                alert(`Switched to ${type}: ${name}. Emails loaded.`);
+            }
+        } catch (error) {
+            this.showNotification('Failed to load emails for this account', 'error');
+        }
     }
 
     getProviderIcon(type) {
@@ -106,93 +130,16 @@ class ProviderManager {
 
     showAddProviderModal() {
         const modal = document.getElementById('add-provider-modal') || this.createAddProviderModal();
-        modal.classList.remove('hidden');
-    }
 
-    createAddProviderModal() {
-        const modal = document.createElement('div');
-        modal.id = 'add-provider-modal';
-        modal.className = 'hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4';
-        modal.innerHTML = `
-            <div class="bg-gray-900 border border-gray-700 rounded-lg max-w-md w-full p-6">
-                <div class="flex items-center justify-between mb-4">
-                    <h2 class="text-xl font-bold text-white">Add Email Provider</h2>
-                    <button onclick="providerManager.closeAddProviderModal()" class="text-gray-400 hover:text-white">
-                        ✕
-                    </button>
-                </div>
-                
-                <form id="add-provider-form" onsubmit="providerManager.submitAddProvider(event)">
-                    <div class="mb-4">
-                        <label class="block text-sm font-medium text-gray-300 mb-2">Provider Type</label>
-                        <select id="provider-type" class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white" required>
-                            <option value="">Select provider...</option>
-                            <option value="google">Google (Gmail, Calendar, Drive)</option>
-                            <option value="microsoft">Microsoft (Outlook, Office 365)</option>
-                            <option value="proton">Proton (ProtonMail via Bridge)</option>
-                        </select>
-                    </div>
-                    
-                    <div class="mb-4">
-                        <label class="block text-sm font-medium text-gray-300 mb-2">Name This Account</label>
-                        <input type="text" id="provider-name" 
-                               placeholder="e.g., Work Email, Personal Gmail"
-                               class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white" required>
-                        <p class="text-xs text-gray-500 mt-1">Give this account a name to identify it</p>
-                    </div>
-                    
-                    <div class="flex gap-2">
-                        <button type="submit" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded">
-                            Add Provider
-                        </button>
-                        <button type="button" onclick="providerManager.closeAddProviderModal()" 
-                                class="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded">
-                            Cancel
-                        </button>
-                    </div>
-                </form>
-            </div>
-        `;
-        document.body.appendChild(modal);
-        return modal;
-    }
-
-    closeAddProviderModal() {
-        const modal = document.getElementById('add-provider-modal');
-        if (modal) modal.classList.add('hidden');
-    }
-
-    async submitAddProvider(event) {
-        event.preventDefault();
-        
-        const type = document.getElementById('provider-type').value;
-        const name = document.getElementById('provider-name').value;
-        
-        try {
-            const response = await fetch('/api/providers/add', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    provider_type: type,
-                    provider_name: name,
-                    config: {}
-                })
-            });
-            
-            const data = await response.json();
-            
-            if (!response.ok) {
-                // Show detailed error if available
-                if (data.detail && typeof data.detail === 'object') {
-                    if (window.showDetailedError) {
-                        window.showDetailedError(data.detail);
-                        return;
-                    }
-                }
-                throw new Error(typeof data.detail === 'string' ? data.detail : 'Failed to add provider');
-            }
-            
-            this.showNotification('Provider added successfully!', 'success');
+        // Add Provider UI is disabled. Show instructions instead.
+        showAddProviderModal() {
+            alert(
+              'To add a new email provider, edit config/config.yaml and config/credentials.yaml, then restart the dashboard.\n\n' +
+              'For Google: Add a new entry under email_accounts.google\n' +
+              'For Microsoft: Add a new entry under email_accounts.microsoft\n' +
+              'After saving, run ./ops/startup.sh restart to apply changes.'
+            );
+        }
             this.closeAddProviderModal();
             await this.loadProviders();
             
@@ -383,8 +330,11 @@ class ProviderManager {
     }
 }
 
-// Initialize provider manager
+// Initialize provider manager and Last.fm music player
 let providerManager;
 document.addEventListener('DOMContentLoaded', () => {
     providerManager = new ProviderManager();
-});
+    // Attach Last.fm login button event
+    const lastfmBtn = document.getElementById('lastfm-login-btn');
+    if (lastfmBtn) {
+

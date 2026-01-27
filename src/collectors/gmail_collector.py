@@ -35,12 +35,20 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+
 class GmailCollector:
-    """Collects emails from Gmail using Google API."""
-    
-    def __init__(self, settings):
-        """Initialize Gmail collector with settings."""
-        self.settings = settings
+    """Collects emails from Gmail using Google API, supports multiple accounts."""
+
+    def __init__(self, account_config: Dict[str, Any]):
+        """
+        Initialize Gmail collector for a specific account.
+        account_config: {
+            'name': str,
+            'credentials_file': str,
+            'scopes': List[str]
+        }
+        """
+        self.account = account_config
         self.service = None
         
     async def collect_emails(self, start_date: datetime, end_date: datetime) -> List[Dict[str, Any]]:
@@ -186,55 +194,30 @@ class GmailCollector:
             }
     
     async def _authenticate(self):
-        """Authenticate with Google Gmail API."""
-        logger.info("Starting Google Gmail authentication")
+        """Authenticate with Google Gmail API for this account."""
+        logger.info(f"Authenticating Gmail account: {self.account['name']}")
         creds = None
-        
-        # Get project root (two levels up from collectors/)
-        project_root = Path(__file__).parent.parent.parent
-        
-        # Try to load from the tokens file (our OAuth flow stores credentials here)
-        # Check both absolute and relative paths
-        token_paths = [
-            project_root / "tokens" / "google_credentials.json",
-            Path(os.path.expanduser('~/Projects/me/dashboard/tokens/google_credentials.json')),
-            Path(self.settings.google.credentials_file) if hasattr(self.settings, 'google') and hasattr(self.settings.google, 'credentials_file') and self.settings.google.credentials_file else None
-        ]
-        
-        for token_file in token_paths:
-            if token_file and token_file.exists():
-                try:
-                    # Get scopes from settings or use default
-                    scopes = None
-                    if hasattr(self.settings, 'google') and hasattr(self.settings.google, 'scopes'):
-                        scopes = self.settings.google.scopes
-                    else:
-                        # Default scopes for Gmail and Calendar
-                        scopes = [
-                            'https://www.googleapis.com/auth/gmail.readonly',
-                            'https://www.googleapis.com/auth/calendar.readonly'
-                        ]
-                    
-                    creds = Credentials.from_authorized_user_file(
-                        token_file,
-                        scopes
-                    )
-                    logger.info(f"Loaded credentials from {token_file}")
-                    break
-                except Exception as e:
-                    logger.warning(f"Could not load credentials from {token_file}: {e}")
-                    continue
-        
-        if not creds:
-            logger.error("No Google credentials file found")
+        token_file = Path(self.account['credentials_file'])
+        scopes = self.account.get('scopes', [
+            'https://www.googleapis.com/auth/gmail.readonly',
+            'https://www.googleapis.com/auth/calendar.readonly'
+        ])
+
+        if token_file.exists():
+            try:
+                creds = Credentials.from_authorized_user_file(token_file, scopes)
+                logger.info(f"Loaded credentials from {token_file}")
+            except Exception as e:
+                logger.warning(f"Could not load credentials from {token_file}: {e}")
+        else:
+            logger.error(f"No Google credentials file found for account: {self.account['name']}")
             return
-        
+
         # If credentials are expired, try to refresh
-        if creds.expired and creds.refresh_token:
+        if creds and creds.expired and creds.refresh_token:
             try:
                 creds.refresh(Request())
                 logger.info("Refreshed expired credentials")
-                
                 # Save refreshed credentials back to file
                 try:
                     with open(token_file, 'w') as f:

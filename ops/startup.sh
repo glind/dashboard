@@ -332,18 +332,23 @@ check_config() {
     
     # Create config directories if they don't exist
     mkdir -p "$PROJECT_ROOT/config" "$PROJECT_ROOT/tokens" "$PROJECT_ROOT/data"
-    
-    # Check for example config files
-    if [ ! -f "$PROJECT_ROOT/config/config.yaml" ] && [ -f "$PROJECT_ROOT/config/config.yaml.example" ]; then
-        echo -e "${YELLOW}   ⚠️  Copying example config (please customize)${NC}"
-        cp "$PROJECT_ROOT/config/config.yaml.example" "$PROJECT_ROOT/config/config.yaml"
+
+    # Check for required config files
+    if [ ! -f "$PROJECT_ROOT/config/config.yaml" ]; then
+        echo -e "${RED}❌ config.yaml not found in $PROJECT_ROOT/config${NC}"
+        echo -e "${YELLOW}   Please copy config.yaml.example to config.yaml and customize it manually.${NC}"
+        exit 1
     fi
-    
-    if [ ! -f "$PROJECT_ROOT/config/credentials.yaml" ] && [ -f "$PROJECT_ROOT/config/credentials.yaml.example" ]; then
-        echo -e "${YELLOW}   ⚠️  Copying example credentials (please add your API keys)${NC}"
-        cp "$PROJECT_ROOT/config/credentials.yaml.example" "$PROJECT_ROOT/config/credentials.yaml"
+
+    if [ ! -f "$PROJECT_ROOT/config/credentials.yaml" ]; then
+        echo -e "${RED}❌ credentials.yaml not found in $PROJECT_ROOT/config${NC}"
+        echo -e "${YELLOW}   Please copy credentials.yaml.example to credentials.yaml and add your API keys manually.${NC}"
+        exit 1
     fi
-    
+
+    # Restrict permissions on credentials.yaml
+    chmod 600 "$PROJECT_ROOT/config/credentials.yaml" 2>/dev/null || true
+
     echo -e "${GREEN}   ✅ Configuration ready${NC}"
 }
 

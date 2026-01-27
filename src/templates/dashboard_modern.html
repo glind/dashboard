@@ -1,10 +1,13 @@
 <!DOCTYPE html>
 <html lang="en" class="h-full">
 <head>
+        <script src="/static/provider_manager.js?v=1"></script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Personal Dashboard - Buildly</title>
-    <link rel="icon" href="/assets/images/forge-logo.png" type="image/png">
+    <link rel="icon" href="/assets/images/icon-192.png" type="image/png">
+    <link rel="manifest" href="/static/manifest.json">
+    <meta name="theme-color" content="#2563eb">
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         /* Custom scrollbar */
@@ -479,57 +482,6 @@
                     <span id="google-auth-text">Connect Google</span>
                 </button>
                 
-                <!-- Global Voice Mute Button -->
-                <button id="global-mute-btn" onclick="dataLoader.toggleGlobalMute()" class="
-                    mt-2 w-full flex items-center justify-center gap-2 
-                    px-4 py-2 bg-purple-600 hover:bg-purple-700 
-                    text-white text-sm font-medium rounded-lg 
-                    transition-colors shadow-lg
-                ">
-                    <span id="mute-icon">🔊</span>
-                    <span id="mute-text">Voice Alerts On</span>
-                </button>
-            </div>
-            
-            <!-- Navigation -->
-            <nav class="flex-1 p-4 space-y-1 overflow-y-auto">
-                <a href="#" onclick="showSection('overview'); return false;" 
-                   class="nav-link flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-gray-700 text-gray-300 hover:text-white active">
-                    <span>🏠</span>
-                    <span>Overview</span>
-                </a>
-                
-                <a href="#" onclick="showSection('leads'); return false;" 
-                   class="nav-link flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-gray-700 text-gray-300 hover:text-white">
-                    <span>🎯</span>
-                    <span>Leads</span>
-                    <span class="ml-auto bg-purple-600 text-white text-xs px-2 py-1 rounded" id="leads-count">0</span>
-                </a>
-                
-                <a href="#" onclick="showSection('todos'); return false;" 
-                   class="nav-link flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-gray-700 text-gray-300 hover:text-white">
-                    <span>✅</span>
-                    <span>Tasks</span>
-                    <span class="ml-auto bg-orange-600 text-white text-xs px-2 py-1 rounded" id="todos-count">0</span>
-                </a>
-                
-                <a href="#" onclick="showSection('calendar'); return false;" 
-                   class="nav-link flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-gray-700 text-gray-300 hover:text-white">
-                    <span>📅</span>
-                    <span>Calendar</span>
-                </a>
-                
-                <a href="#" onclick="showSection('emails'); return false;" 
-                   class="nav-link flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-gray-700 text-gray-300 hover:text-white">
-                    <span>📧</span>
-                    <span>Emails</span>
-                    <span class="ml-auto bg-red-600 text-white text-xs px-2 py-1 rounded" id="emails-count">0</span>
-                </a>
-                
-                <a href="#" onclick="showSection('news'); return false;" 
-                   class="nav-link flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-gray-700 text-gray-300 hover:text-white">
-                    <span>📰</span>
-                    <span>News</span>
                 </a>
                 
                 <a href="#" onclick="showSection('weather'); return false;" 
@@ -552,7 +504,7 @@
                 <a href="#" onclick="showSection('music'); return false;" 
                    class="nav-link flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-gray-700 text-gray-300 hover:text-white">
                     <span>🎵</span>
-                    <span>Music News</span>
+                    <span>Music</span>
                 </a>
                 
                 <a href="#" onclick="showSection('vanity'); return false;" 
@@ -623,145 +575,6 @@
                     <!-- Stats Grid -->
                     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
                         <div class="bg-gray-800 p-6 rounded-xl border border-gray-700">
-                            <div class="text-gray-400 text-sm mb-1">Active Leads</div>
-                            <div class="text-3xl font-bold text-purple-400" id="stat-leads">0</div>
-                        </div>
-                        <div class="bg-gray-800 p-6 rounded-xl border border-gray-700">
-                            <div class="text-gray-400 text-sm mb-1">Running Projects</div>
-                            <div class="text-3xl font-bold text-green-400" id="stat-projects">0</div>
-                        </div>
-                        <div class="bg-gray-800 p-6 rounded-xl border border-gray-700">
-                            <div class="text-gray-400 text-sm mb-1">Pending Tasks</div>
-                            <div class="text-3xl font-bold text-orange-400" id="stat-tasks">0</div>
-                        </div>
-                        <div class="bg-gray-800 p-6 rounded-xl border border-gray-700">
-                            <div class="text-gray-400 text-sm mb-1">Unread Emails</div>
-                            <div class="text-3xl font-bold text-red-400" id="stat-emails">0</div>
-                        </div>
-                    </div>
-                    
-                    <!-- Auto-Refresh Status -->
-                    <div id="auto-refresh-status" class="bg-gray-800 rounded-xl border border-gray-700 p-4 mb-8 text-sm text-gray-400">
-                        <span>📡</span>
-                        <span id="refresh-status-text">Auto-refresh: Loading...</span>
-                    </div>
-                    
-                    <!-- Daily Joke -->
-                    <div class="bg-gray-800 rounded-xl border border-gray-700 p-6 mb-8">
-                        <div class="flex justify-between items-center mb-3">
-                            <h3 class="text-xl font-semibold">😄 Daily Joke</h3>
-                            <div class="flex gap-2">
-                                <button onclick="dataLoader.loadNewJoke()" 
-                                        class="bg-purple-600 hover:bg-purple-700 px-3 py-1 rounded text-sm">
-                                    🔄 New Joke
-                                </button>
-                                <button onclick="dataLoader.readJokeAloud()" 
-                                        class="bg-blue-600 hover:bg-blue-700 px-3 py-1 rounded text-sm">
-                                    🔊 Read Joke
-                                </button>
-                                <button id="speech-stop-btn" 
-                                        onclick="dataLoader.stopSpeech()" 
-                                        class="bg-red-600 hover:bg-red-700 px-3 py-1 rounded text-sm hidden"
-                                        style="animation: pulse 1s infinite;">
-                                    🛑 Stop Speaking
-                                </button>
-                            </div>
-                        </div>
-                        <p id="joke-content" class="text-gray-300 italic mb-4">Loading...</p>
-                        <div class="flex items-center gap-3 pt-3 border-t border-gray-700">
-                            <span class="text-sm text-gray-400">Rate this joke:</span>
-                            <button onclick="dataLoader.giveJokeFeedback('up')" 
-                                    class="bg-gray-700 hover:bg-green-600 px-4 py-2 rounded text-2xl">
-                                👍
-                            </button>
-                            <button onclick="dataLoader.giveJokeFeedback('neutral')" 
-                                    class="bg-gray-700 hover:bg-yellow-600 px-4 py-2 rounded text-2xl">
-                                👌
-                            </button>
-                            <button onclick="dataLoader.giveJokeFeedback('down')" 
-                                    class="bg-gray-700 hover:bg-red-600 px-4 py-2 rounded text-2xl">
-                                👎
-                            </button>
-                        </div>
-                    </div>
-                    
-                    <!-- Quick Actions -->
-                    <div class="bg-gray-800 rounded-xl border border-gray-700 p-6 mb-8">
-                        <h3 class="text-xl font-semibold mb-4">Quick Actions</h3>
-                        <div class="flex flex-wrap gap-3">
-                            <button onclick="generateLeads()" 
-                                    class="bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded-lg flex items-center gap-2">
-                                <span>🎯</span>
-                                <span>Collect Leads</span>
-                            </button>
-                            <button onclick="refreshAllData()" 
-                                    class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg flex items-center gap-2">
-                                <span>🔄</span>
-                                <span>Refresh Data</span>
-                            </button>
-                        </div>
-                    </div>
-                    
-                    <!-- Recent Activity Grid -->
-                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                        <div class="bg-gray-800 rounded-xl border border-gray-700 p-6">
-                            <h3 class="text-xl font-semibold mb-4">📅 Today's Events</h3>
-                            <div id="overview-calendar" class="space-y-2"></div>
-                        </div>
-                        
-                        <div class="bg-gray-800 rounded-xl border border-gray-700 p-6">
-                            <h3 class="text-xl font-semibold mb-4">✅ Top Tasks</h3>
-                            <div id="overview-tasks" class="space-y-2"></div>
-                        </div>
-                    </div>
-                </div>
-            </section>
-            
-            <!-- Leads Section -->
-            <section id="section-leads" class="section-content hidden p-8">
-                <div class="max-w-7xl mx-auto">
-                    <!-- Notification area -->
-                    <div id="leads-notification" class="hidden mb-4 p-4 rounded-lg">
-                        <div class="flex items-center gap-3">
-                            <div class="flex-shrink-0">
-                                <div id="leads-notification-icon"></div>
-                            </div>
-                            <div class="flex-1">
-                                <p id="leads-notification-text" class="font-medium"></p>
-                            </div>
-                            <button onclick="document.getElementById('leads-notification').classList.add('hidden')" class="text-white hover:text-gray-300">
-                                <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                                    <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"></path>
-                                </svg>
-                            </button>
-                        </div>
-                    </div>
-                    
-                    <div class="flex justify-between items-center mb-6">
-                        <div>
-                            <h2 class="text-3xl font-bold">Lead Collection</h2>
-                            <p class="text-sm text-gray-400 mt-1">
-                                Last collected: <span id="last-collection-time" class="text-purple-400">Never</span>
-                            </p>
-                        </div>
-                        <button onclick="generateLeads()" id="collect-leads-btn"
-                                class="bg-purple-600 hover:bg-purple-700 px-6 py-3 rounded-lg font-semibold flex items-center gap-2 transition-all">
-                            <span id="collect-leads-icon">📥</span>
-                            <span id="collect-leads-text">Collect New Leads</span>
-                        </button>
-                    </div>
-                    
-                    <div id="leads-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
-                </div>
-            </section>
-            
-            <!-- Other sections (collapsed for brevity) -->
-            <section id="section-todos" class="section-content hidden p-8">
-                <div class="max-w-7xl mx-auto">
-                    <div class="flex justify-between items-center mb-6">
-                        <div>
-                            <h2 class="text-3xl font-bold">Tasks</h2>
-                            <p class="text-sm text-gray-400 mt-1">
                                 Last collected: <span id="last-task-collection-time" class="text-purple-400">Never</span>
                             </p>
                         </div>
@@ -936,7 +749,27 @@
                                 </button>
                             </div>
                         </div>
+        <script>
+        // Register service worker for PWA
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', function() {
+                navigator.serviceWorker.register('/static/service-worker.js').then(function(reg) {
+                    console.log('Service Worker registered:', reg);
+                }).catch(function(err) {
+                    console.error('Service Worker registration failed:', err);
+                });
+            });
+        }
 
+        // Request notification permission
+        if ('Notification' in window) {
+            Notification.requestPermission().then(function(permission) {
+                if (permission === 'granted') {
+                    console.log('Notifications enabled');
+                }
+            });
+        }
+        </script>
                         <!-- Platform Stats -->
                         <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
                             <div class="bg-gray-750 rounded-lg p-4 relative" id="linkedin-stat">
@@ -1045,11 +878,6 @@
                             <h2 class="text-3xl font-bold">🔌 Email & Calendar Providers</h2>
                             <p class="text-sm text-gray-400 mt-1">Connect your Google, Microsoft, or Proton accounts</p>
                         </div>
-                        <button onclick="providerManager.showAddProviderModal()" 
-                                class="bg-blue-600 hover:bg-blue-700 px-6 py-3 rounded-lg font-semibold flex items-center gap-2">
-                            <span>➕</span>
-                            <span>Add Provider</span>
-                        </button>
                     </div>
                     
                     <!-- Info Banner -->
@@ -1389,105 +1217,27 @@
             </section>
             
             <section id="section-music" class="section-content hidden p-8">
-                <div class="max-w-7xl mx-auto">
-                    <h2 class="text-3xl font-bold mb-6">🎵 Universal Music Player</h2>
-                    
-                    <!-- Service Configuration -->
+                <div class="max-w-3xl mx-auto">
+                    <h2 class="text-3xl font-bold mb-6">🎵 YouTube Music Player</h2>
                     <div class="bg-gray-800 rounded-xl border border-gray-700 p-6 mb-6">
-                        <h3 class="text-xl font-semibold mb-4">🔗 Connected Services</h3>
-                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                            <div id="spotify-service" class="service-card bg-gray-750 p-4 rounded-lg border border-gray-600">
-                                <div class="flex items-center justify-between mb-3">
-                                    <div class="flex items-center gap-2">
-                                        <span class="text-2xl">🟢</span>
-                                        <span class="font-semibold">Spotify</span>
-                                    </div>
-                                    <button onclick="dataLoader.connectService('spotify')" 
-                                            class="bg-green-600 hover:bg-green-700 px-3 py-1 rounded text-sm">
-                                        Connect
-                                    </button>
+                        <div class="flex flex-col md:flex-row gap-6">
+                            <div class="flex-1">
+                                <h3 class="text-xl font-semibold mb-2" id="yt-now-title">No Track Playing</h3>
+                                <p class="text-gray-400 text-sm mb-4" id="yt-now-artist"></p>
+                                <div id="yt-player-embed" class="w-full aspect-video bg-black rounded-lg overflow-hidden mb-4"></div>
+                                <div class="flex items-center gap-4 mt-2">
+                                    <button id="yt-prev-btn" class="p-3 bg-gray-700 hover:bg-gray-600 rounded-full transition">⏮️</button>
+                                    <button id="yt-play-btn" class="p-4 bg-blue-600 hover:bg-blue-700 rounded-full text-2xl transition">▶️</button>
+                                    <button id="yt-next-btn" class="p-3 bg-gray-700 hover:bg-gray-600 rounded-full transition">⏭️</button>
                                 </div>
-                                <div class="text-xs text-gray-400">Status: <span class="spotify-status">Not Connected</span></div>
                             </div>
-                            
-                            <div id="apple-service" class="service-card bg-gray-750 p-4 rounded-lg border border-gray-600">
-                                <div class="flex items-center justify-between mb-3">
-                                    <div class="flex items-center gap-2">
-                                        <span class="text-2xl">🍎</span>
-                                        <span class="font-semibold">Apple Music</span>
-                                    </div>
-                                    <button onclick="dataLoader.connectService('apple')" 
-                                            class="bg-red-600 hover:bg-red-700 px-3 py-1 rounded text-sm">
-                                        Connect
-                                    </button>
-                                </div>
-                                <div class="text-xs text-gray-400">Status: <span class="apple-status">Not Connected</span></div>
-                            </div>
-                            
-                            <div id="amazon-service" class="service-card bg-gray-750 p-4 rounded-lg border border-gray-600">
-                                <div class="flex items-center justify-between mb-3">
-                                    <div class="flex items-center gap-2">
-                                        <span class="text-2xl">🔷</span>
-                                        <span class="font-semibold">Amazon Music</span>
-                                    </div>
-                                    <button onclick="dataLoader.connectService('amazon')" 
-                                            class="bg-blue-600 hover:bg-blue-700 px-3 py-1 rounded text-sm">
-                                        Connect
-                                    </button>
-                                </div>
-                                <div class="text-xs text-gray-400">Status: <span class="amazon-status">Not Connected</span></div>
+                            <div class="w-full md:w-72">
+                                <h4 class="text-lg font-semibold mb-2">Upcoming Songs</h4>
+                                <ul id="yt-upcoming-list" class="space-y-2 max-h-80 overflow-y-auto bg-gray-900 rounded-lg p-3 border border-gray-700"></ul>
                             </div>
                         </div>
                     </div>
-                    
-                    <!-- Music Player -->
-                    <div class="bg-gray-800 rounded-xl border border-gray-700 p-6 mb-6">
-                        <div class="flex items-center justify-between mb-4">
-                            <div>
-                                <h3 class="text-xl font-semibold" id="now-playing-title">No Track Playing</h3>
-                                <p class="text-gray-400 text-sm" id="now-playing-artist"></p>
-                            </div>
-                            <div class="flex items-center gap-2">
-                                <span class="service-badge hidden" id="playing-service"></span>
-                            </div>
-                        </div>
-                        
-                        <!-- Player Controls -->
-                        <div class="flex items-center justify-center gap-4 mb-4">
-                            <button onclick="dataLoader.previousTrack()" 
-                                    class="p-3 bg-gray-700 hover:bg-gray-600 rounded-full transition">
-                                ⏮️
-                            </button>
-                            <button onclick="dataLoader.togglePlay()" id="play-pause-btn"
-                                    class="p-4 bg-blue-600 hover:bg-blue-700 rounded-full text-2xl transition">
-                                ▶️
-                            </button>
-                            <button onclick="dataLoader.nextTrack()" 
-                                    class="p-3 bg-gray-700 hover:bg-gray-600 rounded-full transition">
-                                ⏭️
-                            </button>
-                        </div>
-                        
-                        <!-- Progress Bar -->
-                        <div class="mb-4">
-                            <div class="bg-gray-700 h-2 rounded-full overflow-hidden">
-                                <div id="progress-bar" class="bg-blue-600 h-full w-0 transition-all"></div>
-                            </div>
-                            <div class="flex justify-between text-xs text-gray-400 mt-1">
-                                <span id="current-time">0:00</span>
-                                <span id="total-time">0:00</span>
-                            </div>
-                        </div>
-                        
-                        <!-- Volume Control -->
-                        <div class="flex items-center gap-3">
-                            <span class="text-xl">🔊</span>
-                            <input type="range" id="volume-control" min="0" max="100" value="70" 
-                                   onchange="dataLoader.setVolume(this.value)"
-                                   class="flex-1 h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer">
-                            <span id="volume-display" class="text-sm text-gray-400 w-10">70%</span>
-                        </div>
-                    </div>
+                </div>
                     
                     <!-- Playlist Creator -->
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
@@ -1512,13 +1262,21 @@
                                     </select>
                                 </div>
                                 <div>
+                                    <label class="block text-sm font-medium mb-2">Artists (comma separated)</label>
+                                    <input type="text" id="mood-artists" placeholder="Artist 1, Artist 2"
+                                           class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 text-white">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium mb-2">Songs (comma separated)</label>
+                                    <input type="text" id="mood-songs" placeholder="Song 1, Song 2"
+                                           class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 text-white">
+                                </div>
+                                <div>
                                     <label class="block text-sm font-medium mb-2">Max Tracks</label>
                                     <input type="number" id="mood-max-tracks" value="30" min="10" max="100"
                                            class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 text-white">
                                 </div>
                                 <div class="flex items-center gap-2">
-                                    <input type="checkbox" id="use-ai-mood" class="w-4 h-4">
-                                    <label for="use-ai-mood" class="text-sm">Use AI recommendations</label>
                                 </div>
                                 <button onclick="dataLoader.createMoodPlaylist()" 
                                         class="w-full bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded-lg transition">
@@ -1572,6 +1330,38 @@
                                 </button>
                             </div>
                             <div id="unified-library" class="space-y-2 max-h-96 overflow-y-auto"></div>
+                            <script>
+                            document.addEventListener('DOMContentLoaded', function() {
+                                function renderLibrary() {
+                                    const playlists = JSON.parse(localStorage.getItem('savedPlaylists') || '[]');
+                                    const likedSongs = JSON.parse(localStorage.getItem('likedSongs') || '[]');
+                                    const libDiv = document.getElementById('unified-library');
+                                    let html = '';
+                                    if (playlists.length) {
+                                        html += `<h4 class='font-semibold text-lg mb-2'>Saved Playlists</h4>`;
+                                        playlists.forEach((pl, idx) => {
+                                            html += `<div class='mb-4 p-3 bg-gray-700 rounded'>
+                                                <div class='font-bold mb-1'>Playlist #${idx+1} (${pl.mood || 'Custom'})</div>
+                                                <div class='text-xs text-gray-400 mb-2'>Artists: ${(pl.artists||[]).join(', ')} | Songs: ${(pl.songs||[]).join(', ')}</div>
+                                                <div>${pl.tracks.map((t,i) => `<div class='flex items-center gap-2'><span>${i+1}.</span><span>${t.artist} - ${t.title}</span><button class='ml-auto bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded text-xs' onclick='musicPlayer.playOnYoutube("${t.artist}", "${t.title}")'>Play</button></div>`).join('')}</div>
+                                            </div>`;
+                                        });
+                                    }
+                                    if (likedSongs.length) {
+                                        html += `<h4 class='font-semibold text-lg mt-6 mb-2'>Favorited Songs</h4>`;
+                                        likedSongs.forEach((song, idx) => {
+                                            html += `<div class='mb-2 p-2 bg-gray-800 rounded flex items-center gap-2'><span>${song.artist} - ${song.title}</span><button class='ml-auto bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded text-xs' onclick='musicPlayer.playOnYoutube("${song.artist}", "${song.title}")'>Play</button></div>`;
+                                        });
+                                    }
+                                    if (!playlists.length && !likedSongs.length) {
+                                        html = `<div class='text-gray-400'>No saved playlists or favorited songs yet.</div>`;
+                                    }
+                                    libDiv.innerHTML = html;
+                                }
+                                renderLibrary();
+                                document.querySelector('[onclick="dataLoader.loadUnifiedLibrary()"]')?.addEventListener('click', renderLibrary);
+                            });
+                            </script>
                         </div>
                         
                         <!-- Music News -->
@@ -1643,7 +1433,6 @@
     <script src="/static/dashboard.js?v=5"></script>
     <script src="/static/leads_modern.js?v=5"></script>
     <script src="/static/trust_layer_ui.js?v=1"></script>
-    <script src="/static/provider_manager.js?v=1"></script>
     
     <script>
         // Navigation

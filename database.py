@@ -39,15 +39,46 @@ class DatabaseManager:
         self.init_database()
     
     def init_database(self):
-        """Initialize database tables."""
+        """Initialize database tables and run migrations."""
         try:
             # Ensure the directory exists for the database file
             db_dir = Path(self.db_path).parent
             db_dir.mkdir(parents=True, exist_ok=True)
-            
+
             conn = sqlite3.connect(self.db_path)
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
+
+            # Schema versioning table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS schema_version (
+                    version INTEGER PRIMARY KEY,
+                    applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    description TEXT
+                )
+            """)
+
+            # Get current schema version
+            cursor.execute("SELECT MAX(version) as v FROM schema_version")
+            row = cursor.fetchone()
+            current_version = row['v'] if row and row['v'] is not None else 0
+
+            # List of migrations: (version, SQL, description)
+            migrations = [
+                (1, None, "Initial tables (see below)"),
+                # Example: (2, "ALTER TABLE emails ADD COLUMN is_flagged INTEGER DEFAULT 0", "Add is_flagged to emails"),
+                # Add future migrations here
+            ]
+
+            # Apply migrations
+            for version, sql, desc in migrations:
+                if version > current_version:
+                    if sql:
+                        cursor.execute(sql)
+                    cursor.execute("INSERT INTO schema_version (version, description) VALUES (?, ?)", (version, desc))
+                    conn.commit()
+
+            # ...existing code...
             
             # Credentials table
             cursor.execute("""

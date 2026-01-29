@@ -71,11 +71,22 @@ class OllamaProvider(AIProvider):
     async def chat(self, messages: List[Dict[str, str]], stream: bool = False) -> str:
         """Send chat messages to Ollama."""
         try:
+            # Log incoming messages structure
+            logger.info(f"Ollama chat called with {len(messages)} messages")
+            if messages and messages[0].get('role') == 'system':
+                system_content = messages[0].get('content', '')
+                logger.info(f"System message present, length: {len(system_content)}, starts with: {system_content[:100]}")
+            else:
+                logger.info("No system message present, will add default")
+                
             # Add system message if not present
             if not messages or messages[0].get('role') != 'system':
                 messages.insert(0, {'role': 'system', 'content': self.system_prompt})
             
-            async with aiohttp.ClientSession() as session:
+            # Set timeout for LLM requests (these can take a while, especially for model loading)
+            # 600 seconds = 10 minutes to allow for cold start model loading
+            timeout = aiohttp.ClientTimeout(total=600, connect=30)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
                 # Try /api/chat first (newer Ollama versions)
                 payload = {
                     'model': self.model_name,
@@ -120,8 +131,14 @@ class OllamaProvider(AIProvider):
                 if response.status == 404:
                     return await self._chat_with_generate(session, messages, stream)
                         
+        except asyncio.TimeoutError:
+            logger.error(f"Timeout communicating with Ollama at {self.base_url}")
+            return "Error: Ollama request timed out. The model may be loading or the context is very large."
+        except aiohttp.ClientConnectorError as e:
+            logger.error(f"Connection error to Ollama at {self.base_url}: {e}")
+            return f"Error: Could not connect to Ollama server at {self.base_url}"
         except Exception as e:
-            logger.error(f"Error communicating with Ollama: {e}")
+            logger.error(f"Error communicating with Ollama: {type(e).__name__}: {e}")
             return f"Error: Could not connect to Ollama server"
     
     async def _chat_with_generate(self, session: aiohttp.ClientSession, messages: List[Dict[str, str]], stream: bool = False) -> str:

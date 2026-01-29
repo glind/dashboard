@@ -1,10 +1,34 @@
 # Optional voice system dependencies
 # These are NOT included in main requirements.txt because they require system packages
 
+# ============================================
 # Voice input (microphone/speech recognition)
+# ============================================
 # Requires: sudo apt install portaudio19-dev
 SpeechRecognition==3.10.0
 PyAudio==0.2.14
 
-# Note: Voice output (TTS) works without these packages
+# ============================================
+# PersonaPlex (NVIDIA full-duplex voice AI)
+# ============================================
+# Requires:
+#   - sudo apt install libopus-dev
+#   - HuggingFace account with accepted model license
+#   - Run: ./scripts/setup_personaplex.sh
+#
+# PersonaPlex provides:
+#   - Real-time speech-to-speech conversation
+#   - Full duplex (can interrupt and respond naturally)
+#   - Voice conditioning (16 voice presets)
+#   - Persona control via text prompts
+#
+websockets>=11.0
+
+# Note: The personaplex moshi package is installed separately by setup_personaplex.sh
+# It requires NVIDIA GPU with 8GB+ VRAM (or use --cpu-offload for CPU)
+
+# ============================================
+# Legacy Piper TTS (fallback)
+# ============================================
+# Note: Piper TTS works without these packages as it's a separate binary
 # Only voice commands (listening) require PyAudio

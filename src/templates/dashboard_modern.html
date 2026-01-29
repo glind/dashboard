@@ -454,15 +454,15 @@
         }
     </style>
 </head>
-<body class="h-full bg-gray-900 text-gray-100">
+<body class="h-full bg-gray-900 text-gray-100 overflow-hidden">
     
     <!-- Main Container with Sidebar -->
-    <div class="flex h-full">
+    <div class="flex h-full overflow-hidden">
         
         <!-- Sidebar -->
-        <aside class="w-64 bg-gray-800 border-r border-gray-700 flex flex-col">
+        <aside class="w-64 bg-gray-800 border-r border-gray-700 flex flex-col h-full overflow-hidden">
             <!-- Header -->
-            <div class="p-6 border-b border-gray-700">
+            <div class="p-6 border-b border-gray-700 flex-shrink-0">
                 <div class="flex items-center gap-3 mb-2">
                     <img src="/assets/images/forge-logo.png" alt="Buildly Logo" class="w-8 h-8 rounded">
                     <h1 class="text-2xl font-bold text-white">Dashboard</h1>
@@ -481,8 +481,55 @@
                     </svg>
                     <span id="google-auth-text">Connect Google</span>
                 </button>
+            </div>
+            
+            <!-- Navigation - Scrollable -->
+            <nav class="flex-1 overflow-y-auto py-4">
+                <!-- MAIN SECTION -->
+                <div class="mb-2 px-4">
+                    <span class="text-xs font-semibold text-gray-500 uppercase tracking-wider">Main</span>
+                </div>
                 
+                <a href="#" onclick="showSection('overview'); return false;" 
+                   class="nav-link flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-gray-700 text-gray-300 hover:text-white">
+                    <span>📊</span>
+                    <span>Overview</span>
                 </a>
+                
+                <a href="#" onclick="showSection('emails'); return false;" 
+                   class="nav-link flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-gray-700 text-gray-300 hover:text-white">
+                    <span>📧</span>
+                    <span>Email</span>
+                </a>
+                
+                <a href="#" onclick="showSection('calendar'); return false;" 
+                   class="nav-link flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-gray-700 text-gray-300 hover:text-white">
+                    <span>📅</span>
+                    <span>Calendar</span>
+                </a>
+                
+                <a href="#" onclick="showSection('todos'); return false;" 
+                   class="nav-link flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-gray-700 text-gray-300 hover:text-white">
+                    <span>✅</span>
+                    <span>Tasks</span>
+                </a>
+                
+                <a href="#" onclick="showSection('github'); return false;" 
+                   class="nav-link flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-gray-700 text-gray-300 hover:text-white">
+                    <span>🐙</span>
+                    <span>GitHub</span>
+                </a>
+                
+                <a href="#" onclick="showSection('news'); return false;" 
+                   class="nav-link flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-gray-700 text-gray-300 hover:text-white">
+                    <span>📰</span>
+                    <span>News</span>
+                </a>
+                
+                <!-- DATA SECTION -->
+                <div class="mt-6 mb-2 px-4">
+                    <span class="text-xs font-semibold text-gray-500 uppercase tracking-wider">Data</span>
+                </div>
                 
                 <a href="#" onclick="showSection('weather'); return false;" 
                    class="nav-link flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-gray-700 text-gray-300 hover:text-white">
@@ -550,8 +597,8 @@
             </nav>
             
             <!-- Footer -->
-            <div class="p-4 border-t border-gray-700">
-                <button onclick="dataLoader.toggleEditMode()" id="edit-mode-btn"
+            <div class="p-4 border-t border-gray-700 flex-shrink-0">
+                <button onclick="window.dataLoader && dataLoader.toggleEditMode()" id="edit-mode-btn"
                         class="w-full bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded-lg text-sm flex items-center justify-center gap-2 mb-2">
                     <span>⚙️</span>
                     <span>Edit Dashboard</span>
@@ -570,14 +617,33 @@
             <!-- Overview Section -->
             <section id="section-overview" class="section-content p-8">
                 <div class="max-w-7xl mx-auto">
-                    <!-- Header image will be inserted here by JavaScript -->
+                    <h2 class="text-3xl font-bold mb-6">📊 Dashboard Overview</h2>
                     
                     <!-- Stats Grid -->
                     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
                         <div class="bg-gray-800 p-6 rounded-xl border border-gray-700">
+                            <div class="text-3xl font-bold text-blue-400 mb-2" id="tasks-count">0</div>
+                            <p class="text-gray-400">
                                 Last collected: <span id="last-task-collection-time" class="text-purple-400">Never</span>
                             </p>
                         </div>
+                        <div class="bg-gray-800 p-6 rounded-xl border border-gray-700">
+                            <div class="text-3xl font-bold text-green-400 mb-2" id="calendar-count">0</div>
+                            <p class="text-gray-400">Upcoming Events</p>
+                        </div>
+                        <div class="bg-gray-800 p-6 rounded-xl border border-gray-700">
+                            <div class="text-3xl font-bold text-orange-400 mb-2" id="email-count">0</div>
+                            <p class="text-gray-400">Unread Emails</p>
+                        </div>
+                        <div class="bg-gray-800 p-6 rounded-xl border border-gray-700">
+                            <div class="text-3xl font-bold text-red-400 mb-2" id="github-count">0</div>
+                            <p class="text-gray-400">GitHub Updates</p>
+                        </div>
+                    </div>
+                    
+                    <!-- Task Collection Controls -->
+                    <div class="bg-gray-800 p-6 rounded-xl border border-gray-700 mb-6">
+                        <h3 class="text-xl font-semibold mb-4">🎯 Task Collection</h3>
                         <button onclick="collectTasks()" id="collect-tasks-btn"
                                 class="bg-purple-600 hover:bg-purple-700 px-6 py-3 rounded-lg font-semibold flex items-center gap-2 transition-all">
                             <span id="collect-tasks-icon">📋</span>
@@ -630,22 +696,84 @@
             
             <section id="section-emails" class="section-content hidden p-8">
                 <div class="max-w-7xl mx-auto">
-                    <div class="flex justify-between items-center mb-6">
-                        <h2 class="text-3xl font-bold">Emails</h2>
+                    <!-- Email Header with Actions -->
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="text-3xl font-bold">📧 Email</h2>
                         <div class="flex gap-2">
-                            <button onclick="dataLoader.showScanEmailsModal()" 
+                            <button onclick="window.emailClient && emailClient.showComposeModal()" 
+                                    class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg font-semibold flex items-center gap-2">
+                                <span>✏️</span>
+                                <span>Compose</span>
+                            </button>
+                            <button onclick="window.dataLoader && dataLoader.showScanEmailsModal()" 
                                     class="bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded-lg font-semibold flex items-center gap-2">
                                 <span>🔍</span>
                                 <span>Scan for Tasks</span>
                             </button>
-                            <button onclick="dataLoader.refreshEmails()" 
-                                    class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg font-semibold flex items-center gap-2">
+                            <button onclick="window.dataLoader && dataLoader.refreshEmails()" 
+                                    class="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded-lg font-semibold flex items-center gap-2">
                                 <span>🔄</span>
                                 <span>Refresh</span>
                             </button>
+                            <button onclick="window.dataLoader && dataLoader.showManageClientsModal()" 
+                                    class="bg-yellow-600 hover:bg-yellow-700 px-4 py-2 rounded-lg font-semibold flex items-center gap-2">
+                                <span>⭐</span>
+                                <span>Manage Clients</span>
+                            </button>
                         </div>
                     </div>
-                    <div id="emails-grid" class="grid grid-cols-1 gap-3"></div>
+                    
+                    <!-- Email Stats Bar -->
+                    <div class="grid grid-cols-4 gap-4 mb-4" id="email-stats">
+                        <div class="bg-gray-800 border border-gray-700 rounded-lg p-3 text-center">
+                            <div class="text-2xl font-bold text-white" id="email-total-count">0</div>
+                            <div class="text-xs text-gray-400">Total</div>
+                        </div>
+                        <div class="bg-gray-800 border border-blue-500/30 rounded-lg p-3 text-center">
+                            <div class="text-2xl font-bold text-blue-400" id="email-unread-count">0</div>
+                            <div class="text-xs text-gray-400">Unread</div>
+                        </div>
+                        <div class="bg-gray-800 border border-yellow-500/30 rounded-lg p-3 text-center">
+                            <div class="text-2xl font-bold text-yellow-400" id="email-starred-count">0</div>
+                            <div class="text-xs text-gray-400">Starred</div>
+                        </div>
+                        <div class="bg-gray-800 border border-red-500/30 rounded-lg p-3 text-center">
+                            <div class="text-2xl font-bold text-red-400" id="email-highrisk-count">0</div>
+                            <div class="text-xs text-gray-400">High Risk</div>
+                        </div>
+                    </div>
+                    
+                    <!-- Email Toolbar - Sticky -->
+                    <div class="bg-gray-800 border border-gray-700 rounded-lg p-2 mb-4 flex items-center gap-2 flex-wrap sticky top-0 z-10">
+                        <input type="checkbox" id="email-select-all" class="w-4 h-4 rounded" 
+                               onchange="window.emailClient && emailClient.toggleSelectAll(this.checked)">
+                        <span id="email-selected-count" class="text-xs text-gray-400 min-w-[60px]">0 selected</span>
+                        <div class="border-l border-gray-600 h-6 mx-2"></div>
+                        <button onclick="window.emailClient && emailClient.archiveSelected()" 
+                                class="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-sm" title="Archive">
+                            📥 Archive
+                        </button>
+                        <button onclick="window.emailClient && emailClient.deleteSelected()" 
+                                class="px-3 py-1 bg-gray-700 hover:bg-red-600 rounded text-sm" title="Delete">
+                            🗑️ Delete
+                        </button>
+                        <button onclick="window.emailClient && emailClient.markSelectedRead()" 
+                                class="px-3 py-1 bg-gray-700 hover:bg-green-600 rounded text-sm" title="Mark Read">
+                            ✓ Mark Read
+                        </button>
+                        <button onclick="window.emailClient && emailClient.markSelectedUnread()" 
+                                class="px-3 py-1 bg-gray-700 hover:bg-blue-600 rounded text-sm" title="Mark Unread">
+                            ○ Mark Unread
+                        </button>
+                        <div class="border-l border-gray-600 h-6 mx-2"></div>
+                        <select id="email-label-select" onchange="window.emailClient && emailClient.applyLabelToSelected(this.value)" 
+                                class="bg-gray-700 border border-gray-600 rounded px-2 py-1 text-sm">
+                            <option value="">Apply Label...</option>
+                        </select>
+                    </div>
+                    
+                    <!-- Email List -->
+                    <div id="emails-grid" class="grid grid-cols-1 gap-2"></div>
                 </div>
             </section>
             
@@ -661,7 +789,7 @@
                 <div class="max-w-7xl mx-auto">
                     <div class="flex items-center justify-between mb-6">
                         <h2 class="text-3xl font-bold">News</h2>
-                        <button onclick="dataLoader.showNewsSourcesModal()" 
+                        <button onclick="window.dataLoader && dataLoader.showNewsSourcesModal()" 
                                 class="bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded-lg text-sm">
                             ⚙️ Manage Sources
                         </button>
@@ -749,27 +877,6 @@
                                 </button>
                             </div>
                         </div>
-        <script>
-        // Register service worker for PWA
-        if ('serviceWorker' in navigator) {
-            window.addEventListener('load', function() {
-                navigator.serviceWorker.register('/static/service-worker.js').then(function(reg) {
-                    console.log('Service Worker registered:', reg);
-                }).catch(function(err) {
-                    console.error('Service Worker registration failed:', err);
-                });
-            });
-        }
-
-        // Request notification permission
-        if ('Notification' in window) {
-            Notification.requestPermission().then(function(permission) {
-                if (permission === 'granted') {
-                    console.log('Notifications enabled');
-                }
-            });
-        }
-        </script>
                         <!-- Platform Stats -->
                         <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
                             <div class="bg-gray-750 rounded-lg p-4 relative" id="linkedin-stat">
@@ -1217,27 +1324,54 @@
             </section>
             
             <section id="section-music" class="section-content hidden p-8">
-                <div class="max-w-3xl mx-auto">
-                    <h2 class="text-3xl font-bold mb-6">🎵 YouTube Music Player</h2>
-                    <div class="bg-gray-800 rounded-xl border border-gray-700 p-6 mb-6">
-                        <div class="flex flex-col md:flex-row gap-6">
-                            <div class="flex-1">
-                                <h3 class="text-xl font-semibold mb-2" id="yt-now-title">No Track Playing</h3>
-                                <p class="text-gray-400 text-sm mb-4" id="yt-now-artist"></p>
-                                <div id="yt-player-embed" class="w-full aspect-video bg-black rounded-lg overflow-hidden mb-4"></div>
-                                <div class="flex items-center gap-4 mt-2">
-                                    <button id="yt-prev-btn" class="p-3 bg-gray-700 hover:bg-gray-600 rounded-full transition">⏮️</button>
-                                    <button id="yt-play-btn" class="p-4 bg-blue-600 hover:bg-blue-700 rounded-full text-2xl transition">▶️</button>
-                                    <button id="yt-next-btn" class="p-3 bg-gray-700 hover:bg-gray-600 rounded-full transition">⏭️</button>
+                <div class="max-w-6xl mx-auto">
+                    <h2 class="text-3xl font-bold mb-6">🎵 Music Player</h2>
+                    
+                    <!-- Simple Player -->
+                    <div class="bg-gradient-to-br from-blue-900 to-gray-900 rounded-xl border border-blue-700 p-6 mb-6">
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                            <!-- Now Playing -->
+                            <div class="md:col-span-2">
+                                <h3 class="text-sm font-semibold text-blue-300 mb-2">NOW PLAYING</h3>
+                                <!-- YouTube Player Embed -->
+                                <div id="youtube-player-container" class="bg-black rounded-lg mb-4 aspect-video">
+                                    <div id="youtube-player" class="w-full h-full flex items-center justify-center text-gray-500">
+                                        Click a track or press Play to start
+                                    </div>
+                                </div>
+                                <div class="bg-black bg-opacity-50 rounded-lg p-4 mb-4">
+                                    <div class="text-2xl font-bold mb-2" id="player-title">Select a playlist to start</div>
+                                    <div class="text-gray-400 text-sm" id="player-artist"></div>
+                                </div>
+                                <div class="flex items-center gap-3">
+                                    <button onclick="musicPlayer.previous()" class="p-3 bg-gray-700 hover:bg-gray-600 rounded-full" title="Previous">⏮️</button>
+                                    <button onclick="musicPlayer.playCurrentTrack()" class="p-4 bg-blue-600 hover:bg-blue-700 rounded-full text-xl" title="Play"><span id="play-btn-text">▶️</span></button>
+                                    <button onclick="musicPlayer.next()" class="p-3 bg-gray-700 hover:bg-gray-600 rounded-full" title="Next">⏭️</button>
+                                    <div class="border-l border-gray-600 h-8 mx-2"></div>
+                                    <button onclick="musicPlayer.likeCurrent()" class="p-3 bg-green-700 hover:bg-green-600 rounded-full" title="Like this song" id="like-btn">👍</button>
+                                    <button onclick="musicPlayer.dislikeCurrent()" class="p-3 bg-red-700 hover:bg-red-600 rounded-full" title="Dislike & skip" id="dislike-btn">👎</button>
+                                    <div class="flex-1 text-right text-sm text-gray-400">
+                                        <span id="track-count">0 / 0</span>
+                                    </div>
                                 </div>
                             </div>
-                            <div class="w-full md:w-72">
-                                <h4 class="text-lg font-semibold mb-2">Upcoming Songs</h4>
-                                <ul id="yt-upcoming-list" class="space-y-2 max-h-80 overflow-y-auto bg-gray-900 rounded-lg p-3 border border-gray-700"></ul>
+                            
+                            <!-- Queue -->
+                            <div>
+                                <div class="flex items-center justify-between mb-2">
+                                    <h3 class="text-sm font-semibold text-blue-300">QUEUE</h3>
+                                    <button onclick="musicPlayer.clearQueue()" 
+                                            class="text-xs text-red-400 hover:text-red-300 px-2 py-1 rounded hover:bg-gray-700"
+                                            title="Clear queue">
+                                        🗑️ Clear
+                                    </button>
+                                </div>
+                                <ul id="player-queue" class="space-y-1 max-h-64 overflow-y-auto bg-black bg-opacity-30 rounded-lg p-3 border border-gray-700 text-xs">
+                                    <li class="text-gray-500">Add tracks to see queue...</li>
+                                </ul>
                             </div>
                         </div>
                     </div>
-                </div>
                     
                     <!-- Playlist Creator -->
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
@@ -1278,9 +1412,9 @@
                                 </div>
                                 <div class="flex items-center gap-2">
                                 </div>
-                                <button onclick="dataLoader.createMoodPlaylist()" 
+                                <button onclick="musicPlayer.createAndPlayMoodPlaylist()" 
                                         class="w-full bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded-lg transition">
-                                    Create Playlist
+                                    Create & Play
                                 </button>
                             </div>
                         </div>
@@ -1310,9 +1444,9 @@
                                                class="flex-1 h-2 bg-gray-700 rounded-lg">
                                     </div>
                                 </div>
-                                <button onclick="dataLoader.createCustomPlaylist()" 
+                                <button onclick="musicPlayer.createAndPlayCustomPlaylist()" 
                                         class="w-full bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg transition">
-                                    Create Playlist
+                                    Create & Play
                                 </button>
                             </div>
                         </div>
@@ -1324,42 +1458,181 @@
                         <div class="bg-gray-800 rounded-xl border border-gray-700 p-6">
                             <div class="flex items-center justify-between mb-4">
                                 <h3 class="text-xl font-semibold">📚 Your Music Library</h3>
-                                <button onclick="dataLoader.loadUnifiedLibrary()" 
+                                <button id="unified-library-btn" onclick="renderMusicLibrary()" 
                                         class="bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded text-sm">
                                     Refresh
                                 </button>
                             </div>
                             <div id="unified-library" class="space-y-2 max-h-96 overflow-y-auto"></div>
                             <script>
-                            document.addEventListener('DOMContentLoaded', function() {
-                                function renderLibrary() {
-                                    const playlists = JSON.parse(localStorage.getItem('savedPlaylists') || '[]');
-                                    const likedSongs = JSON.parse(localStorage.getItem('likedSongs') || '[]');
-                                    const libDiv = document.getElementById('unified-library');
+                            // Global function to render library - now uses database via API
+                            window.renderMusicLibrary = async function() {
+                                const libDiv = document.getElementById('unified-library');
+                                libDiv.innerHTML = '<div class="text-gray-400 text-center py-4">Loading...</div>';
+                                
+                                try {
+                                    // Fetch playlists from database
+                                    const playlistsRes = await fetch('/api/music/playlists');
+                                    const playlistsData = await playlistsRes.json();
+                                    const playlists = playlistsData.playlists || [];
+                                    
+                                    // Fetch liked songs from database
+                                    const likedRes = await fetch('/api/music/liked-songs');
+                                    const likedData = await likedRes.json();
+                                    const likedSongs = likedData.songs || [];
+                                    
                                     let html = '';
+                                    
                                     if (playlists.length) {
-                                        html += `<h4 class='font-semibold text-lg mb-2'>Saved Playlists</h4>`;
+                                        html += `<h4 class='font-semibold text-lg mb-2'>Saved Playlists (${playlists.length})</h4>`;
                                         playlists.forEach((pl, idx) => {
-                                            html += `<div class='mb-4 p-3 bg-gray-700 rounded'>
-                                                <div class='font-bold mb-1'>Playlist #${idx+1} (${pl.mood || 'Custom'})</div>
-                                                <div class='text-xs text-gray-400 mb-2'>Artists: ${(pl.artists||[]).join(', ')} | Songs: ${(pl.songs||[]).join(', ')}</div>
-                                                <div>${pl.tracks.map((t,i) => `<div class='flex items-center gap-2'><span>${i+1}.</span><span>${t.artist} - ${t.title}</span><button class='ml-auto bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded text-xs' onclick='musicPlayer.playOnYoutube("${t.artist}", "${t.title}")'>Play</button></div>`).join('')}</div>
+                                            const playlistName = pl.name || `Playlist #${idx+1}`;
+                                            const moodLabel = pl.mood ? `(${pl.mood})` : '';
+                                            const trackCount = pl.tracks?.length || 0;
+                                            const createdDate = pl.created_at ? new Date(pl.created_at).toLocaleDateString() : '';
+                                            
+                                            html += `<div class='mb-4 p-3 bg-gray-700 rounded' id='playlist-${pl.id}'>
+                                                <div class='flex items-center justify-between mb-2'>
+                                                    <div>
+                                                        <span class='font-bold'>${playlistName} ${moodLabel}</span>
+                                                        <span class='text-xs text-gray-400 ml-2'>${trackCount} tracks</span>
+                                                        ${createdDate ? `<span class='text-xs text-gray-500 ml-2'>${createdDate}</span>` : ''}
+                                                    </div>
+                                                    <div class='flex gap-2'>
+                                                        <button onclick='loadPlaylistById("${pl.id}")' 
+                                                                class='bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded text-xs'>
+                                                            ▶️ Load
+                                                        </button>
+                                                        <button onclick='deletePlaylistById("${pl.id}")' 
+                                                                class='bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded text-xs'>
+                                                            🗑️ Delete
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                                <div class='text-xs text-gray-400 mb-2'>
+                                                    ${(pl.artists||[]).length ? `Artists: ${pl.artists.join(', ')}` : ''}
+                                                    ${(pl.genres||[]).length ? `Genres: ${pl.genres.join(', ')}` : ''}
+                                                </div>
+                                                <details class='text-sm'>
+                                                    <summary class='cursor-pointer text-blue-400 hover:text-blue-300'>Show tracks</summary>
+                                                    <div class='mt-2 max-h-40 overflow-y-auto'>
+                                                        ${(pl.tracks||[]).map((t,i) => `
+                                                            <div class='flex items-center gap-2 py-1 hover:bg-gray-600 rounded px-1'>
+                                                                <span class='text-gray-500 w-6'>${i+1}.</span>
+                                                                <span class='flex-1'>${t.artist} - ${t.title}</span>
+                                                                <button class='bg-blue-600 hover:bg-blue-700 text-white px-2 py-0.5 rounded text-xs' 
+                                                                        onclick='event.stopPropagation(); musicPlayer.playOnYoutube("${t.artist.replace(/'/g, "\\'")}","${t.title.replace(/'/g, "\\'")}");'>
+                                                                    ▶️
+                                                                </button>
+                                                            </div>
+                                                        `).join('')}
+                                                    </div>
+                                                </details>
                                             </div>`;
                                         });
                                     }
+                                    
                                     if (likedSongs.length) {
-                                        html += `<h4 class='font-semibold text-lg mt-6 mb-2'>Favorited Songs</h4>`;
-                                        likedSongs.forEach((song, idx) => {
-                                            html += `<div class='mb-2 p-2 bg-gray-800 rounded flex items-center gap-2'><span>${song.artist} - ${song.title}</span><button class='ml-auto bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded text-xs' onclick='musicPlayer.playOnYoutube("${song.artist}", "${song.title}")'>Play</button></div>`;
+                                        html += `<h4 class='font-semibold text-lg mt-6 mb-2'>Favorited Songs (${likedSongs.length})</h4>`;
+                                        likedSongs.forEach((song) => {
+                                            html += `<div class='mb-2 p-2 bg-gray-800 rounded flex items-center gap-2'>
+                                                <span class='flex-1'>${song.artist} - ${song.title}</span>
+                                                <button class='bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded text-xs' 
+                                                        onclick='musicPlayer.playOnYoutube("${song.artist.replace(/'/g, "\\'")}","${song.title.replace(/'/g, "\\'")}");'>
+                                                    ▶️
+                                                </button>
+                                                <button class='bg-red-600 hover:bg-red-700 text-white px-2 py-1 rounded text-xs' 
+                                                        onclick='deleteLikedSong("${song.artist.replace(/'/g, "\\'")}","${song.title.replace(/'/g, "\\'")}");'>
+                                                    🗑️
+                                                </button>
+                                            </div>`;
                                         });
                                     }
+                                    
                                     if (!playlists.length && !likedSongs.length) {
-                                        html = `<div class='text-gray-400'>No saved playlists or favorited songs yet.</div>`;
+                                        html = `<div class='text-gray-400 text-center py-8'>
+                                            <div class='text-4xl mb-2'>🎵</div>
+                                            <p>No saved playlists yet.</p>
+                                            <p class='text-sm mt-2'>Create a mood or custom playlist above!</p>
+                                        </div>`;
                                     }
+                                    
                                     libDiv.innerHTML = html;
+                                } catch (error) {
+                                    console.error('Error loading music library:', error);
+                                    libDiv.innerHTML = `<div class='text-red-400 text-center py-4'>Error loading library: ${error.message}</div>`;
                                 }
-                                renderLibrary();
-                                document.querySelector('[onclick="dataLoader.loadUnifiedLibrary()"]')?.addEventListener('click', renderLibrary);
+                            };
+                            
+                            // Load a playlist by ID from database
+                            window.loadPlaylistById = async function(playlistId, autoPlay = true) {
+                                try {
+                                    const res = await fetch(`/api/music/playlists/${playlistId}`);
+                                    const data = await res.json();
+                                    if (data.playlist && data.playlist.tracks) {
+                                        // Use setPlaylist with playlist info - this saves to server automatically
+                                        musicPlayer.setPlaylist(
+                                            data.playlist.tracks, 
+                                            playlistId, 
+                                            data.playlist.name || playlistId
+                                        );
+                                        if (autoPlay) {
+                                            musicPlayer.playCurrentTrack();
+                                        }
+                                        console.log(`✅ Loaded playlist: ${data.playlist.name || playlistId}`);
+                                        return true;
+                                    }
+                                    return false;
+                                } catch (error) {
+                                    console.error('Error loading playlist:', error);
+                                    if (autoPlay) {
+                                        alert('Failed to load playlist');
+                                    }
+                                    return false;
+                                }
+                            };
+                            
+                            // Delete a playlist by ID from database
+                            window.deletePlaylistById = async function(playlistId) {
+                                if (!confirm('Delete this playlist?')) return;
+                                try {
+                                    const res = await fetch(`/api/music/playlists/${playlistId}`, { method: 'DELETE' });
+                                    if (res.ok) {
+                                        renderMusicLibrary();
+                                        console.log(`🗑️ Deleted playlist: ${playlistId}`);
+                                    }
+                                } catch (error) {
+                                    console.error('Error deleting playlist:', error);
+                                }
+                            };
+                            
+                            // Delete a liked song from database
+                            window.deleteLikedSong = async function(artist, title) {
+                                try {
+                                    const res = await fetch('/api/music/liked-songs', {
+                                        method: 'DELETE',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({ artist, title })
+                                    });
+                                    if (res.ok) {
+                                        renderMusicLibrary();
+                                    }
+                                } catch (error) {
+                                    console.error('Error deleting liked song:', error);
+                                }
+                            };
+                            
+                            // Legacy function for backwards compatibility
+                            window.loadPlaylist = function(idx) {
+                                console.warn('loadPlaylist(idx) is deprecated, use loadPlaylistById(id)');
+                            };
+                            
+                            window.deletePlaylist = function(idx) {
+                                console.warn('deletePlaylist(idx) is deprecated, use deletePlaylistById(id)');
+                            };
+                            
+                            document.addEventListener('DOMContentLoaded', function() {
+                                renderMusicLibrary();
                             });
                             </script>
                         </div>
@@ -1375,7 +1648,7 @@
                     <div class="bg-gray-800 rounded-xl border border-gray-700 p-6">
                         <div class="flex items-center justify-between mb-4">
                             <h3 class="text-xl font-semibold">🎵 Your Playlists</h3>
-                            <button onclick="dataLoader.loadPlaylists()" 
+                            <button onclick="window.dataLoader && dataLoader.loadPlaylists()" 
                                     class="bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded text-sm">
                                 Refresh
                             </button>
@@ -1393,11 +1666,11 @@
                     <div class="bg-gray-800 rounded-xl border border-gray-700 p-6 mb-8">
                         <h3 class="text-xl font-semibold mb-4">💬 Chat with AI</h3>
                         <div class="flex gap-2 mb-4">
-                            <button onclick="dataLoader.toggleAIVoice()" id="ai-voice-toggle"
+                            <button onclick="window.dataLoader && dataLoader.toggleAIVoice()" id="ai-voice-toggle"
                                     class="bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded-lg text-sm">
                                 🔊 Voice On
                             </button>
-                            <button onclick="dataLoader.startVoicePrompt()" id="ai-voice-prompt"
+                            <button onclick="window.dataLoader && dataLoader.startVoicePrompt()" id="ai-voice-prompt"
                                     class="bg-green-600 hover:bg-green-700 px-4 py-2 rounded-lg text-sm">
                                 🎤 Voice Prompt
                             </button>
@@ -1408,7 +1681,7 @@
                                    placeholder="Ask me anything..."
                                    class="flex-1 bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 text-white"
                                    onkeypress="if(event.key==='Enter') dataLoader.sendAIMessage()">
-                            <button onclick="dataLoader.sendAIMessage()" 
+                            <button onclick="window.dataLoader && dataLoader.sendAIMessage()" 
                                     class="bg-blue-600 hover:bg-blue-700 px-6 py-2 rounded-lg">
                                 Send
                             </button>
@@ -1435,6 +1708,664 @@
     <script src="/static/trust_layer_ui.js?v=1"></script>
     
     <script>
+        // ========================================
+        // MUSIC PLAYER - Simple Playlist Manager
+        // ========================================
+        window.musicPlayer = {
+            tracks: [],
+            currentIndex: 0,
+            isPlaying: false,
+            currentPlaylistId: null,
+            currentPlaylistName: 'Current Queue',
+            saveTimeout: null,
+            
+            setPlaylist(tracks, playlistId = null, playlistName = 'Current Queue') {
+                this.tracks = tracks || [];
+                this.currentIndex = 0;
+                this.currentPlaylistId = playlistId;
+                this.currentPlaylistName = playlistName;
+                this.updateUI();
+                this.saveStateToServer();
+                console.log(`✅ Loaded ${tracks.length} tracks`);
+            },
+            
+            addTracks(tracks) {
+                this.tracks = this.tracks.concat(tracks || []);
+                this.updateUI();
+                this.saveStateToServer();
+                console.log(`✅ Added ${tracks.length} tracks (${this.tracks.length} total)`);
+            },
+            
+            togglePlay() {
+                if (!this.tracks.length) {
+                    alert('No tracks loaded');
+                    return;
+                }
+                this.isPlaying = !this.isPlaying;
+                document.getElementById('play-btn-text').textContent = this.isPlaying ? '⏸️' : '▶️';
+            },
+            
+            // Play current track on YouTube
+            playCurrentTrack() {
+                const track = this.tracks[this.currentIndex];
+                if (track) {
+                    this.playOnYoutube(track.artist, track.title);
+                    // Save current index to server
+                    this.saveIndexToServer();
+                } else {
+                    alert('No track selected');
+                }
+            },
+            
+            // Save playback state to server (debounced)
+            saveStateToServer() {
+                // Debounce saves to avoid too many requests
+                if (this.saveTimeout) clearTimeout(this.saveTimeout);
+                this.saveTimeout = setTimeout(async () => {
+                    try {
+                        await fetch('/api/music/playback-state', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                playlist_id: this.currentPlaylistId,
+                                playlist_name: this.currentPlaylistName,
+                                tracks: this.tracks,
+                                current_index: this.currentIndex
+                            })
+                        });
+                        console.log('💾 Playback state saved to server');
+                    } catch (error) {
+                        console.error('Error saving playback state:', error);
+                    }
+                }, 500);
+            },
+            
+            // Save just the current index to server
+            async saveIndexToServer() {
+                try {
+                    await fetch('/api/music/playback-state/index', {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ index: this.currentIndex })
+                    });
+                } catch (error) {
+                    console.error('Error saving playback index:', error);
+                }
+            },
+            
+            // Load state from server
+            async loadStateFromServer() {
+                try {
+                    const response = await fetch('/api/music/playback-state');
+                    const data = await response.json();
+                    if (data.success && data.state && data.state.tracks && data.state.tracks.length > 0) {
+                        this.tracks = data.state.tracks;
+                        this.currentIndex = data.state.current_index || 0;
+                        this.currentPlaylistId = data.state.playlist_id;
+                        this.currentPlaylistName = data.state.playlist_name || 'Current Queue';
+                        this.updateUI();
+                        console.log(`✅ Restored playback state: ${this.currentPlaylistName} (${this.tracks.length} tracks)`);
+                        return true;
+                    }
+                    return false;
+                } catch (error) {
+                    console.error('Error loading playback state:', error);
+                    return false;
+                }
+            },
+            
+            // Initialize YouTube IFrame API for auto-advance
+            initYouTubeAPI() {
+                if (window.YT && window.YT.Player) return; // Already loaded
+                
+                // Load YouTube IFrame API
+                const tag = document.createElement('script');
+                tag.src = 'https://www.youtube.com/iframe_api';
+                const firstScriptTag = document.getElementsByTagName('script')[0];
+                firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
+                
+                // Define callback for when API is ready
+                window.onYouTubeIframeAPIReady = () => {
+                    console.log('YouTube IFrame API ready');
+                    this.ytApiReady = true;
+                };
+            },
+            
+            // Handle YouTube player state changes
+            onYouTubePlayerStateChange(event) {
+                // YT.PlayerState.ENDED = 0
+                if (event.data === 0) {
+                    console.log('🎵 Song ended, auto-advancing to next track');
+                    this.next();
+                }
+            },
+            
+            // Play a song on YouTube by searching for it
+            async playOnYoutube(artist, title) {
+                const query = encodeURIComponent(`${artist} ${title}`);
+                const playerDiv = document.getElementById('youtube-player');
+                
+                // Ensure YouTube API is loaded
+                this.initYouTubeAPI();
+                
+                if (playerDiv) {
+                    // Show loading state
+                    playerDiv.innerHTML = `<div class="w-full h-full flex items-center justify-center text-gray-400">
+                        <div class="text-center">
+                            <div class="text-2xl mb-2">🔍</div>
+                            <div>Searching YouTube...</div>
+                        </div>
+                    </div>`;
+                    
+                    document.getElementById('player-title').textContent = title;
+                    document.getElementById('player-artist').textContent = artist;
+                    
+                    try {
+                        // Try to get video ID from our backend
+                        const response = await fetch(`/api/youtube/search?q=${query}`);
+                        
+                        if (response.ok) {
+                            const data = await response.json();
+                            if (data.videoId) {
+                                // Clear the div and create a container for the player
+                                playerDiv.innerHTML = '<div id="yt-player-container"></div>';
+                                
+                                // Use YouTube IFrame API for state change detection
+                                if (window.YT && window.YT.Player) {
+                                    // Destroy existing player if any
+                                    if (this.ytPlayer) {
+                                        this.ytPlayer.destroy();
+                                    }
+                                    
+                                    this.ytPlayer = new YT.Player('yt-player-container', {
+                                        width: '100%',
+                                        height: '100%',
+                                        videoId: data.videoId,
+                                        playerVars: {
+                                            autoplay: 1,
+                                            rel: 0,
+                                            modestbranding: 1
+                                        },
+                                        events: {
+                                            onStateChange: (event) => this.onYouTubePlayerStateChange(event),
+                                            onError: (event) => {
+                                                console.warn('YouTube player error:', event.data);
+                                                // Skip to next on error
+                                                setTimeout(() => this.next(), 2000);
+                                            }
+                                        }
+                                    });
+                                } else {
+                                    // Fallback to regular iframe if API not ready
+                                    playerDiv.innerHTML = `<iframe 
+                                        id="yt-iframe"
+                                        width="100%" 
+                                        height="100%" 
+                                        src="https://www.youtube.com/embed/${data.videoId}?autoplay=1&rel=0&enablejsapi=1" 
+                                        frameborder="0" 
+                                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" 
+                                        allowfullscreen>
+                                    </iframe>`;
+                                }
+                                
+                                this.isPlaying = true;
+                                document.getElementById('play-btn-text').textContent = '⏸️';
+                                console.log(`🎵 Playing: ${artist} - ${title} (${data.videoId})`);
+                                return;
+                            }
+                        }
+                    } catch (e) {
+                        console.warn('YouTube search API not available:', e);
+                    }
+                    
+                    // Fallback: Show player with link to open YouTube
+                    const youtubeSearchUrl = `https://www.youtube.com/results?search_query=${query}`;
+                    playerDiv.innerHTML = `<div class="w-full h-full flex flex-col items-center justify-center bg-gray-900 rounded-lg p-4">
+                        <div class="text-xl mb-4">🎵 ${title}</div>
+                        <div class="text-gray-400 mb-4">by ${artist}</div>
+                        <a href="${youtubeSearchUrl}" target="_blank" 
+                           class="bg-red-600 hover:bg-red-700 text-white px-6 py-3 rounded-lg flex items-center gap-2 transition">
+                            <span>▶️</span> Play on YouTube
+                        </a>
+                        <p class="text-xs text-gray-500 mt-4">Opens in new tab</p>
+                    </div>`;
+                    
+                    this.isPlaying = true;
+                    document.getElementById('play-btn-text').textContent = '⏸️';
+                    console.log(`🎵 Ready: ${artist} - ${title}`);
+                }
+            },
+            
+            // Like the current track - saves to database
+            async likeCurrent() {
+                const track = this.tracks[this.currentIndex];
+                if (!track) {
+                    alert('No track playing');
+                    return;
+                }
+                
+                try {
+                    // Check if already liked via API
+                    const checkRes = await fetch(`/api/music/liked-songs/check?artist=${encodeURIComponent(track.artist)}&title=${encodeURIComponent(track.title)}`);
+                    const checkData = await checkRes.json();
+                    
+                    if (checkData.liked) {
+                        alert('Already in your liked songs!');
+                        return;
+                    }
+                    
+                    // Add to liked songs via API
+                    const res = await fetch('/api/music/liked-songs', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            artist: track.artist,
+                            title: track.title
+                        })
+                    });
+                    
+                    if (res.ok) {
+                        // Visual feedback
+                        const likeBtn = document.getElementById('like-btn');
+                        if (likeBtn) {
+                            likeBtn.textContent = '💚';
+                            setTimeout(() => { likeBtn.textContent = '👍'; }, 1500);
+                        }
+                        
+                        // Refresh library if visible
+                        if (typeof renderMusicLibrary === 'function') {
+                            renderMusicLibrary();
+                        }
+                        
+                        console.log(`💚 Liked: ${track.artist} - ${track.title}`);
+                    }
+                } catch (error) {
+                    console.error('Error liking song:', error);
+                    alert('Failed to save like');
+                }
+            },
+            
+            // Dislike current track and skip to next
+            dislikeCurrent() {
+                const track = this.tracks[this.currentIndex];
+                if (!track) return;
+                
+                // Store disliked songs locally (for filtering - could be moved to database later)
+                const dislikedSongs = JSON.parse(localStorage.getItem('dislikedSongs') || '[]');
+                
+                const exists = dislikedSongs.some(s => 
+                    s.artist.toLowerCase() === track.artist.toLowerCase() && 
+                    s.title.toLowerCase() === track.title.toLowerCase()
+                );
+                
+                if (!exists) {
+                    dislikedSongs.push({
+                        artist: track.artist,
+                        title: track.title,
+                        dislikedAt: new Date().toISOString()
+                    });
+                    localStorage.setItem('dislikedSongs', JSON.stringify(dislikedSongs));
+                }
+                
+                // Visual feedback
+                const dislikeBtn = document.getElementById('dislike-btn');
+                if (dislikeBtn) {
+                    dislikeBtn.textContent = '💔';
+                    setTimeout(() => { dislikeBtn.textContent = '👎'; }, 500);
+                }
+                
+                console.log(`👎 Disliked: ${track.artist} - ${track.title}`);
+                
+                // Skip to next track
+                this.next();
+            },
+            
+            next() {
+                if (!this.tracks.length) return;
+                this.currentIndex = (this.currentIndex + 1) % this.tracks.length;
+                this.updateUI();
+                this.playCurrentTrack();
+            },
+            
+            previous() {
+                if (!this.tracks.length) return;
+                this.currentIndex = (this.currentIndex - 1 + this.tracks.length) % this.tracks.length;
+                this.updateUI();
+                this.playCurrentTrack();
+            },
+            
+            updateUI() {
+                const track = this.tracks[this.currentIndex];
+                document.getElementById('player-title').textContent = track ? track.title : 'No track';
+                document.getElementById('player-artist').textContent = track ? track.artist : '';
+                document.getElementById('track-count').textContent = this.tracks.length > 0 ? `${this.currentIndex + 1} / ${this.tracks.length}` : '0 / 0';
+                
+                // Update queue with proper controls
+                const queueEl = document.getElementById('player-queue');
+                if (queueEl) {
+                    if (this.tracks.length === 0) {
+                        queueEl.innerHTML = '<li class="text-gray-500 p-2">No tracks in queue</li>';
+                    } else {
+                        queueEl.innerHTML = this.tracks.map((t, i) => {
+                            const isActive = i === this.currentIndex;
+                            const activeClass = isActive ? 'bg-blue-600 text-white' : 'hover:bg-gray-600';
+                            const nowPlaying = isActive ? '<span class="text-green-400 mr-1">▶</span>' : '';
+                            return `<li class='p-2 rounded flex items-center gap-2 ${activeClass}' data-track-index='${i}'>
+                                <span class='flex-1 cursor-pointer' onclick='musicPlayer.playTrackAt(${i})'>
+                                    ${nowPlaying}${i + 1}. ${t.artist} - ${t.title}
+                                </span>
+                                <button onclick='event.stopPropagation(); musicPlayer.removeTrack(${i})' 
+                                        class='text-red-400 hover:text-red-300 px-1' title='Remove'>✕</button>
+                            </li>`;
+                        }).join('');
+                    }
+                }
+                
+                // State is saved to server via saveStateToServer() calls - no localStorage needed
+            },
+            
+            // Play a specific track by index
+            playTrackAt(index) {
+                if (index >= 0 && index < this.tracks.length) {
+                    this.currentIndex = index;
+                    this.updateUI();
+                    this.playCurrentTrack();
+                }
+            },
+            
+            // Remove a track from the queue
+            removeTrack(index) {
+                if (index < 0 || index >= this.tracks.length) return;
+                
+                // Remove the track
+                this.tracks.splice(index, 1);
+                
+                // Adjust currentIndex if needed
+                if (this.tracks.length === 0) {
+                    this.currentIndex = 0;
+                } else if (index < this.currentIndex) {
+                    // Removed track was before current, shift index down
+                    this.currentIndex--;
+                } else if (index === this.currentIndex) {
+                    // Removed the current track, stay at same index (now next track)
+                    if (this.currentIndex >= this.tracks.length) {
+                        this.currentIndex = this.tracks.length - 1;
+                    }
+                }
+                
+                this.updateUI();
+                this.saveStateToServer();
+                console.log(`🗑️ Removed track at index ${index}, ${this.tracks.length} tracks remaining`);
+            },
+            
+            // Clear entire queue
+            clearQueue() {
+                this.tracks = [];
+                this.currentIndex = 0;
+                this.currentPlaylistId = null;
+                this.currentPlaylistName = 'Current Queue';
+                this.updateUI();
+                this.saveStateToServer();
+                document.getElementById('youtube-player').innerHTML = '<div class="w-full h-full flex items-center justify-center text-gray-500">Queue cleared</div>';
+                console.log('🗑️ Queue cleared');
+            },
+            
+            async createAndPlayMoodPlaylist() {
+                const mood = document.getElementById('mood-selector')?.value;
+                const artistsInput = document.getElementById('mood-artists')?.value || '';
+                const songsInput = document.getElementById('mood-songs')?.value || '';
+                const maxTracks = parseInt(document.getElementById('mood-max-tracks')?.value) || 20;
+                
+                if (!mood) { alert('Select a mood'); return; }
+                
+                // Show loading state
+                const btn = document.querySelector('[onclick="musicPlayer.createAndPlayMoodPlaylist()"]');
+                const originalText = btn?.textContent;
+                if (btn) {
+                    btn.textContent = '🔄 Generating with AI...';
+                    btn.disabled = true;
+                }
+                
+                try {
+                    // Build prompt for AI
+                    const seedArtists = artistsInput.split(',').map(a => a.trim()).filter(Boolean);
+                    const seedSongs = songsInput.split(',').map(s => s.trim()).filter(Boolean);
+                    
+                    // Build artist instruction - heavily feature requested artists
+                    let artistInstruction = '';
+                    if (seedArtists.length) {
+                        const songsPerArtist = Math.ceil(maxTracks * 0.6 / seedArtists.length); // 60% from requested artists
+                        artistInstruction = `IMPORTANT: Include at least ${songsPerArtist} songs BY EACH of these artists: ${seedArtists.join(', ')}. 
+The remaining ${Math.floor(maxTracks * 0.4)} songs should be from similar artists in the same style/genre.`;
+                    }
+                    
+                    const prompt = `Generate a playlist of ${maxTracks} songs for a "${mood}" mood.
+${artistInstruction}
+${seedSongs.length ? `Also include songs similar in style to: ${seedSongs.join(', ')}` : ''}
+
+Return ONLY a JSON array. No markdown, no explanation, no code blocks.
+Format: [{"artist": "Artist Name", "title": "Song Title"}, {"artist": "Artist2", "title": "Song2"}]
+Use simple ASCII characters only - no special quotes or unicode.`;
+
+                    // Call the dedicated playlist generation endpoint
+                    const response = await fetch('/api/ai/generate-playlist', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            mood: mood,
+                            liked_artists: seedArtists.slice(0, 3),
+                            seed_songs: seedSongs.slice(0, 3),
+                            max_tracks: maxTracks
+                        })
+                    });
+                    
+                    if (!response.ok) {
+                        const errorData = await response.json().catch(() => ({}));
+                        throw new Error(errorData.detail || 'AI request failed');
+                    }
+                    
+                    const data = await response.json();
+                    console.log('AI Playlist Response:', data);
+                    
+                    // The new endpoint returns tracks directly
+                    let tracks = data.tracks;
+                    
+                    if (!tracks || !Array.isArray(tracks) || tracks.length === 0) {
+                        throw new Error('AI did not return a valid playlist. Try again.');
+                    }
+                    
+                    if (!Array.isArray(tracks) || tracks.length === 0) {
+                        throw new Error('No tracks generated');
+                    }
+                    
+                    // Filter to only valid tracks
+                    tracks = tracks.filter(t => t && t.artist && t.title);
+                    
+                    if (tracks.length === 0) {
+                        throw new Error('No valid tracks in response');
+                    }
+                    
+                    // Set the playlist
+                    this.setPlaylist(tracks);
+                    
+                    // Save to database via API
+                    const playlistName = `${mood.charAt(0).toUpperCase() + mood.slice(1)} Playlist`;
+                    try {
+                        await fetch('/api/music/playlists', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                name: playlistName,
+                                mood: mood,
+                                artists: seedArtists,
+                                tracks: tracks
+                            })
+                        });
+                        // Refresh the music library to show the new playlist
+                        if (window.renderMusicLibrary) renderMusicLibrary();
+                    } catch (saveError) {
+                        console.warn('Failed to save playlist to database:', saveError);
+                    }
+                    
+                    // Start playing first track
+                    this.playCurrentTrack();
+                    
+                    console.log(`✅ Created ${mood} playlist with ${tracks.length} tracks using AI!`);
+                    
+                } catch (error) {
+                    console.error('Error creating playlist:', error);
+                    alert(`Failed to create playlist: ${error.message}. Make sure Ollama is running.`);
+                } finally {
+                    if (btn) {
+                        btn.textContent = originalText || 'Create & Play';
+                        btn.disabled = false;
+                    }
+                }
+            },
+            
+            async createAndPlayCustomPlaylist() {
+                const genres = document.getElementById('custom-genres')?.value.split(',').map(g => g.trim()).filter(Boolean);
+                const artists = document.getElementById('custom-artists')?.value.split(',').map(a => a.trim()).filter(Boolean);
+                
+                if (!genres.length && !artists.length) { 
+                    alert('Enter at least one genre or artist'); 
+                    return; 
+                }
+                
+                // Show loading state
+                const btn = document.querySelector('[onclick="musicPlayer.createAndPlayCustomPlaylist()"]');
+                const originalText = btn?.textContent;
+                if (btn) {
+                    btn.textContent = '🔄 Generating with AI...';
+                    btn.disabled = true;
+                }
+                
+                try {
+                    // Use the dedicated playlist generation endpoint
+                    const response = await fetch('/api/ai/generate-playlist', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            mood: 'custom',
+                            genres: genres,
+                            liked_artists: artists,
+                            max_tracks: 20
+                        })
+                    });
+                    
+                    if (!response.ok) {
+                        const errorData = await response.json().catch(() => ({}));
+                        throw new Error(errorData.detail || 'AI request failed');
+                    }
+                    
+                    const data = await response.json();
+                    console.log('AI Custom Playlist Response:', data);
+                    
+                    let tracks = data.tracks;
+                    
+                    if (!tracks || !Array.isArray(tracks) || tracks.length === 0) {
+                        throw new Error('AI did not return a valid playlist. Try again.');
+                    }
+                    
+                    // Filter to only valid tracks
+                    tracks = tracks.filter(t => t && t.artist && t.title);
+                    
+                    if (tracks.length === 0) {
+                        throw new Error('No valid tracks in response');
+                    }
+                    
+                    this.setPlaylist(tracks);
+                    
+                    // Save to database via API
+                    const playlistName = genres.length ? `${genres[0]} Playlist` : artists.length ? `${artists[0]} Mix` : 'Custom Playlist';
+                    try {
+                        await fetch('/api/music/playlists', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                name: playlistName,
+                                mood: 'custom',
+                                genres: genres,
+                                artists: artists,
+                                tracks: tracks
+                            })
+                        });
+                        // Refresh the music library to show the new playlist
+                        if (window.renderMusicLibrary) renderMusicLibrary();
+                    } catch (saveError) {
+                        console.warn('Failed to save playlist to database:', saveError);
+                    }
+                    
+                    // Start playing
+                    this.playCurrentTrack();
+                    
+                    console.log(`✅ Created custom playlist with ${tracks.length} tracks!`);
+                    
+                } catch (error) {
+                    console.error('Error creating playlist:', error);
+                    alert(`Failed to create playlist: ${error.message}. Make sure Ollama is running.`);
+                } finally {
+                    if (btn) {
+                        btn.textContent = originalText || 'Create & Play';
+                        btn.disabled = false;
+                    }
+                }
+            },
+            
+            // Legacy function - now loads from server
+            loadFromStorage() {
+                // This is now handled by loadStateFromServer()
+                console.log('loadFromStorage() is deprecated - use loadStateFromServer()');
+            }
+        };
+        
+        // Load saved playlist on page load and initialize YouTube API
+        document.addEventListener('DOMContentLoaded', async () => {
+            // Pre-load YouTube API for auto-advance functionality
+            musicPlayer.initYouTubeAPI();
+            
+            // Load playback state from server (this is the new primary method)
+            const loaded = await musicPlayer.loadStateFromServer();
+            if (loaded) {
+                console.log('✅ Music player restored from server');
+            } else {
+                console.log('ℹ️ No saved playback state found');
+            }
+        });
+        
+        // Google Authentication Handler
+        async function handleGoogleAuth() {
+            try {
+                window.location.href = '/auth/google';
+            } catch (error) {
+                console.error('Error during Google auth:', error);
+                showNotification('error', 'Failed to initiate Google authentication');
+            }
+        }
+        
+        // Update Google Auth Button
+        async function updateGoogleAuthButton() {
+            try {
+                const response = await fetch('/api/auth/status');
+                if (response.ok) {
+                    const data = await response.json();
+                    const btn = document.getElementById('google-auth-btn');
+                    const text = document.getElementById('google-auth-text');
+                    
+                    if (btn && text) {
+                        if (data.authenticated) {
+                            btn.classList.remove('bg-blue-600', 'hover:bg-blue-700');
+                            btn.classList.add('bg-green-600', 'hover:bg-green-700');
+                            text.textContent = '✓ Google Connected';
+                            btn.disabled = true;
+                        }
+                    }
+                }
+            } catch (error) {
+                console.warn('Could not check auth status:', error);
+            }
+        }
+        
         // Navigation
         function showSection(sectionName) {
             // Hide all sections
@@ -1472,7 +2403,92 @@
             loadSectionData(sectionName);
         }
         
+        let dashboardInitialized = false;
+        let initRetries = 0;
+        const MAX_INIT_RETRIES = 20; // Max retries over ~10 seconds
+        
+        function initializeDashboard() {
+            // Prevent multiple initialization attempts
+            if (dashboardInitialized) {
+                console.log('Dashboard already initialized, skipping...');
+                return;
+            }
+            
+            console.log(`Initializing dashboard (attempt ${initRetries + 1}/${MAX_INIT_RETRIES})...`);
+            
+            // Check if dataLoader exists
+            if (typeof window.dataLoader === 'undefined') {
+                initRetries++;
+                
+                if (initRetries >= MAX_INIT_RETRIES) {
+                    console.error('❌ Failed to initialize dashboard: dataLoader not available after multiple retries');
+                    console.error('dataLoader should be created by dashboard.js');
+                    // Show user-friendly error
+                    alert('Dashboard failed to load. Please refresh the page.');
+                    return;
+                }
+                
+                console.warn(`dataLoader not available yet, retrying in 500ms (attempt ${initRetries}/${MAX_INIT_RETRIES})...`);
+                setTimeout(initializeDashboard, 500);
+                return;
+            }
+            
+            console.log('✅ dataLoader is ready');
+            dashboardInitialized = true;
+            
+            // Call init if it exists, but don't wait for it
+            if (typeof window.dataLoader.init === 'function') {
+                window.dataLoader.init().catch(err => console.error('Error in dataLoader.init():', err));
+            }
+            
+            // Load overview section by default
+            setTimeout(() => {
+                if (typeof showSection === 'function') {
+                    showSection('overview');
+                } else {
+                    console.warn('showSection function not available yet');
+                }
+            }, 100);
+        }
+        
+        // Initialize when document is ready - only once
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initializeDashboard, { once: true });
+        } else {
+            // Already loaded
+            setTimeout(initializeDashboard, 100);
+        }
+        
+        // Track retries for each section to prevent infinite loops
+        const sectionRetries = {};
+        const MAX_SECTION_RETRIES = 5; // Retry max 5 times (2.5 seconds total)
+        
         function loadSectionData(sectionName) {
+            // Initialize retry counter for this section
+            if (!sectionRetries[sectionName]) {
+                sectionRetries[sectionName] = 0;
+            }
+            
+            // Wait for dataLoader to be ready
+            if (typeof window.dataLoader === 'undefined') {
+                sectionRetries[sectionName]++;
+                
+                if (sectionRetries[sectionName] > MAX_SECTION_RETRIES) {
+                    console.error(`❌ Failed to load ${sectionName}: dataLoader not available after ${MAX_SECTION_RETRIES} retries`);
+                    // Reset for next attempt
+                    sectionRetries[sectionName] = 0;
+                    return;
+                }
+                
+                console.warn(`dataLoader not ready for ${sectionName}, retrying... (${sectionRetries[sectionName]}/${MAX_SECTION_RETRIES})`);
+                setTimeout(() => loadSectionData(sectionName), 500);
+                return;
+            }
+            
+            // Reset retry counter on success
+            sectionRetries[sectionName] = 0;
+            console.log(`📂 Loading section: ${sectionName}`);
+            
             switch(sectionName) {
                 case 'leads':
                     if (typeof leadManager !== 'undefined') {
@@ -1480,45 +2496,75 @@
                     }
                     break;
                 case 'emails':
-                    dataLoader.loadEmails();
+                    console.log('  → Loading emails...');
+                    if (dataLoader.loadEmails) dataLoader.loadEmails();
                     break;
                 case 'todos':
-                    dataLoader.loadTodos();
+                    console.log('  → Loading todos...');
+                    if (dataLoader.loadTodos) dataLoader.loadTodos();
                     // Also load suggested todos
                     if (typeof loadSuggestedTodos === 'function') {
                         loadSuggestedTodos();
                     }
                     break;
                 case 'calendar':
-                    dataLoader.loadCalendar();
+                    console.log('  → Loading calendar...');
+                    if (dataLoader.loadCalendar) dataLoader.loadCalendar();
                     break;
                 case 'github':
-                    dataLoader.loadGithub();
+                    if (dataLoader.loadGithub) dataLoader.loadGithub();
                     break;
                 case 'news':
-                    dataLoader.loadNews();
+                    if (dataLoader.loadNews) dataLoader.loadNews();
                     break;
                 case 'weather':
-                    dataLoader.loadWeather();
+                    if (dataLoader.loadWeather) dataLoader.loadWeather();
                     break;
                 case 'notes':
-                    dataLoader.loadNotes();
+                    if (dataLoader.loadNotes) dataLoader.loadNotes();
                     break;
                 case 'ai':
-                    dataLoader.loadAISuggestions();
-                    dataLoader.renderAIChat();
+                    if (dataLoader.loadAISuggestions) dataLoader.loadAISuggestions();
+                    if (dataLoader.renderAIChat) dataLoader.renderAIChat();
                     break;
                 case 'vanity':
-                    dataLoader.loadVanityAlerts();
+                    if (dataLoader.loadVanityAlerts) dataLoader.loadVanityAlerts();
                     break;
                 case 'settings':
                     loadNotesSettings();
                     break;
                 case 'liked':
-                    dataLoader.loadLikedItems();
+                    if (dataLoader.loadLikedItems) dataLoader.loadLikedItems();
                     break;
                 case 'music':
-                    dataLoader.loadMusicNews();
+                    if (dataLoader.loadMusicNews) dataLoader.loadMusicNews();
+                    if (dataLoader.loadPlaylists) dataLoader.loadPlaylists();
+                    if (dataLoader.loadUnifiedLibrary) dataLoader.loadUnifiedLibrary();
+                    
+                    // The music player state is already loaded from server on DOMContentLoaded
+                    // Only load default if there's nothing in the queue
+                    if (window.musicPlayer && musicPlayer.tracks.length === 0) {
+                        // Try to load state from server first (in case it wasn't loaded yet)
+                        musicPlayer.loadStateFromServer().then(loaded => {
+                            if (!loaded) {
+                                // No saved state, load default sample playlist
+                                loadDefaultPlaylist();
+                            }
+                        });
+                    }
+                    
+                    function loadDefaultPlaylist() {
+                        const sampleTracks = [
+                            { artist: 'The Weeknd', title: 'Blinding Lights' },
+                            { artist: 'Dua Lipa', title: 'Levitating' },
+                            { artist: 'The Weeknd', title: 'Save Your Tears' },
+                            { artist: 'Billie Eilish', title: 'Happier Than Ever' },
+                            { artist: 'Taylor Swift', title: 'Anti-Hero' },
+                            { artist: 'The Weeknd', title: 'After Hours' }
+                        ];
+                        musicPlayer.setPlaylist(sampleTracks, 'default', 'Sample Playlist');
+                        console.log('✅ Music player loaded with default sample playlist');
+                    }
                     break;
                 case 'comms':
                     // Communications widget initializes itself via comms_widget.html
@@ -1528,6 +2574,29 @@
                     if (typeof loadConnectionStatus === 'function') {
                         loadConnectionStatus();
                     }
+                    break;
+                case 'providers':
+                    console.log('  → Loading providers...');
+                    // Load email and calendar providers
+                    if (window.providerManager && providerManager.loadProviders) {
+                        providerManager.loadProviders();
+                    } else {
+                        console.warn('  ⚠️  providerManager not available');
+                    }
+                    break;
+                case 'overview':
+                    // Load all dashboard data for overview
+                    if (dataLoader.loadAllData) dataLoader.loadAllData();
+                    if (dataLoader.loadTodos) dataLoader.loadTodos();
+                    if (dataLoader.loadCalendar) dataLoader.loadCalendar();
+                    if (dataLoader.loadEmails) dataLoader.loadEmails();
+                    if (dataLoader.loadGithub) dataLoader.loadGithub();
+                    if (dataLoader.loadNews) dataLoader.loadNews();
+                    break;
+                case 'vanity':
+                case 'ai':
+                case 'comms':
+                    // These sections handle their own loading
                     break;
                 // Add other section loaders
             }
@@ -1566,14 +2635,14 @@
                         // Set model after dropdown is populated
                         setTimeout(() => {
                             const select = document.getElementById('setting-ollama-model');
-                            const savedModel = settings.ollama_model || 'llama3.2:1b';
+                            const savedModel = settings.ollama_model || 'deepseek-r1:latest';
                             if (Array.from(select.options).some(opt => opt.value === savedModel)) {
                                 select.value = savedModel;
                             }
                         }, 500);
                     } else {
                         // Just set the value directly if not Ollama
-                        document.getElementById('setting-ollama-model').value = settings.ollama_model || 'llama3.2:1b';
+                        document.getElementById('setting-ollama-model').value = settings.ollama_model || 'deepseek-r1:latest';
                     }
                     
                     // OpenAI settings
@@ -3199,6 +4268,689 @@ ${stackTrace}
             }, 500);
         }
     });
+    </script>
+    
+    <!-- Email Compose Modal -->
+    <div id="email-compose-modal" class="hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+        <div class="bg-gray-800 rounded-xl border border-gray-700 w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col">
+            <div class="p-4 border-b border-gray-700 flex justify-between items-center">
+                <h3 class="text-xl font-semibold" id="compose-modal-title">New Message</h3>
+                <button onclick="window.emailClient && emailClient.closeComposeModal()" class="text-gray-400 hover:text-white text-2xl">&times;</button>
+            </div>
+            <div class="p-4 flex-1 overflow-y-auto">
+                <form id="email-compose-form" class="space-y-3">
+                    <input type="hidden" id="compose-reply-to-id" value="">
+                    <input type="hidden" id="compose-thread-id" value="">
+                    <input type="hidden" id="compose-mode" value="new">
+                    
+                    <div class="flex items-center gap-2">
+                        <label class="w-16 text-gray-400 text-sm">To:</label>
+                        <input type="email" id="compose-to" required 
+                               class="flex-1 bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white focus:border-blue-500 focus:outline-none"
+                               placeholder="recipient@example.com">
+                    </div>
+                    
+                    <div class="flex items-center gap-2">
+                        <label class="w-16 text-gray-400 text-sm">Cc:</label>
+                        <input type="text" id="compose-cc" 
+                               class="flex-1 bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white focus:border-blue-500 focus:outline-none"
+                               placeholder="cc@example.com">
+                    </div>
+                    
+                    <div class="flex items-center gap-2">
+                        <label class="w-16 text-gray-400 text-sm">Bcc:</label>
+                        <input type="text" id="compose-bcc" 
+                               class="flex-1 bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white focus:border-blue-500 focus:outline-none"
+                               placeholder="bcc@example.com">
+                    </div>
+                    
+                    <div class="flex items-center gap-2">
+                        <label class="w-16 text-gray-400 text-sm">Subject:</label>
+                        <input type="text" id="compose-subject" required 
+                               class="flex-1 bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white focus:border-blue-500 focus:outline-none"
+                               placeholder="Email subject">
+                    </div>
+                    
+                    <div>
+                        <textarea id="compose-body" rows="12" required
+                                  class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white focus:border-blue-500 focus:outline-none resize-y"
+                                  placeholder="Write your message here..."></textarea>
+                    </div>
+                    
+                    <div class="flex items-center gap-2">
+                        <label class="text-gray-400 text-sm">Attachments:</label>
+                        <input type="file" id="compose-attachments" multiple 
+                               class="text-sm text-gray-400 file:mr-4 file:py-1 file:px-3 file:rounded file:border-0 file:bg-blue-600 file:text-white file:cursor-pointer">
+                    </div>
+                </form>
+            </div>
+            <div class="p-4 border-t border-gray-700 flex justify-between items-center">
+                <div class="flex gap-2">
+                    <button type="button" onclick="window.emailClient && emailClient.saveDraft()" 
+                            class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg">
+                        💾 Save Draft
+                    </button>
+                </div>
+                <div class="flex gap-2">
+                    <button type="button" onclick="window.emailClient && emailClient.closeComposeModal()" 
+                            class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg">
+                        Cancel
+                    </button>
+                    <button type="button" onclick="window.emailClient && emailClient.sendEmail()" 
+                            class="px-6 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg font-semibold flex items-center gap-2">
+                        <span>📤</span>
+                        <span>Send</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Email Detail Modal -->
+    <div id="email-detail-modal" class="hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+        <div class="bg-gray-800 rounded-xl border border-gray-700 w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+            <div class="p-4 border-b border-gray-700 flex justify-between items-center">
+                <h3 class="text-xl font-semibold truncate flex-1" id="email-detail-subject">Email Subject</h3>
+                <button onclick="window.emailClient && emailClient.closeDetailModal()" class="text-gray-400 hover:text-white text-2xl ml-4">&times;</button>
+            </div>
+            
+            <!-- Email Actions Bar -->
+            <div class="p-2 border-b border-gray-700 flex items-center gap-2 flex-wrap bg-gray-750">
+                <button onclick="window.emailClient && emailClient.replyToEmail()" 
+                        class="px-3 py-1 bg-blue-600 hover:bg-blue-700 rounded text-sm flex items-center gap-1">
+                    ↩️ Reply
+                </button>
+                <button onclick="window.emailClient && emailClient.replyAllToEmail()" 
+                        class="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-sm flex items-center gap-1">
+                    ↩️↩️ Reply All
+                </button>
+                <button onclick="window.emailClient && emailClient.forwardEmail()" 
+                        class="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-sm flex items-center gap-1">
+                    ➡️ Forward
+                </button>
+                <div class="border-l border-gray-600 h-6 mx-1"></div>
+                <button onclick="window.emailClient && emailClient.archiveCurrentEmail()" 
+                        class="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-sm" title="Archive">
+                    📥 Archive
+                </button>
+                <button onclick="window.emailClient && emailClient.deleteCurrentEmail()" 
+                        class="px-3 py-1 bg-gray-700 hover:bg-red-600 rounded text-sm" title="Delete">
+                    🗑️ Delete
+                </button>
+                <button onclick="window.emailClient && emailClient.toggleStarCurrentEmail()" 
+                        class="px-3 py-1 bg-gray-700 hover:bg-yellow-600 rounded text-sm" title="Star" id="email-detail-star-btn">
+                    ⭐ Star
+                </button>
+                <button onclick="window.emailClient && emailClient.toggleReadCurrentEmail()" 
+                        class="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-sm" title="Toggle Read" id="email-detail-read-btn">
+                    ○ Mark Unread
+                </button>
+            </div>
+            
+            <!-- Email Header Info -->
+            <div class="p-4 border-b border-gray-700 bg-gray-750/50">
+                <div class="flex items-start gap-4">
+                    <div class="w-12 h-12 bg-blue-600 rounded-full flex items-center justify-center text-xl font-bold" id="email-detail-avatar">?</div>
+                    <div class="flex-1 min-w-0">
+                        <div class="font-semibold text-white" id="email-detail-from">From</div>
+                        <div class="text-sm text-gray-400" id="email-detail-to">To: recipient</div>
+                        <div class="text-sm text-gray-500" id="email-detail-date">Date</div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Email Body -->
+            <div class="flex-1 overflow-y-auto p-4">
+                <div id="email-detail-body" class="prose prose-invert max-w-none text-gray-200">
+                    Loading...
+                </div>
+                
+                <!-- Attachments -->
+                <div id="email-detail-attachments" class="hidden mt-4 border-t border-gray-700 pt-4">
+                    <h4 class="text-sm font-semibold text-gray-400 mb-2">📎 Attachments</h4>
+                    <div id="email-detail-attachments-list" class="flex flex-wrap gap-2"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Email Client JavaScript -->
+    <script>
+    window.emailClient = {
+        currentEmail: null,
+        selectedEmails: new Set(),
+        labels: [],
+        
+        async init() {
+            await this.loadLabels();
+        },
+        
+        async loadLabels() {
+            try {
+                const response = await fetch('/api/email/labels/list');
+                if (response.ok) {
+                    const data = await response.json();
+                    this.labels = data.labels || [];
+                    this.updateLabelDropdown();
+                }
+            } catch (error) {
+                console.error('Failed to load labels:', error);
+            }
+        },
+        
+        updateLabelDropdown() {
+            const select = document.getElementById('email-label-select');
+            if (select && this.labels.length > 0) {
+                select.innerHTML = '<option value="">Apply Label...</option>' +
+                    this.labels
+                        .filter(l => l.type === 'user')
+                        .map(l => `<option value="${l.id}">${l.name}</option>`)
+                        .join('');
+            }
+        },
+        
+        showComposeModal(mode = 'new', email = null) {
+            const modal = document.getElementById('email-compose-modal');
+            const title = document.getElementById('compose-modal-title');
+            const form = document.getElementById('email-compose-form');
+            
+            // Reset form
+            form.reset();
+            document.getElementById('compose-reply-to-id').value = '';
+            document.getElementById('compose-thread-id').value = '';
+            document.getElementById('compose-mode').value = mode;
+            
+            if (mode === 'new') {
+                title.textContent = 'New Message';
+            } else if (mode === 'reply' && email) {
+                title.textContent = 'Reply';
+                document.getElementById('compose-to').value = email.from || '';
+                document.getElementById('compose-subject').value = 
+                    email.subject.startsWith('Re:') ? email.subject : `Re: ${email.subject}`;
+                document.getElementById('compose-reply-to-id').value = email.id;
+                document.getElementById('compose-thread-id').value = email.thread_id || '';
+                document.getElementById('compose-body').value = 
+                    `\n\n---\nOn ${email.date}, ${email.from} wrote:\n> ${(email.body || email.snippet || '').replace(/\n/g, '\n> ')}`;
+            } else if (mode === 'reply-all' && email) {
+                title.textContent = 'Reply All';
+                document.getElementById('compose-to').value = email.from || '';
+                document.getElementById('compose-cc').value = email.cc || '';
+                document.getElementById('compose-subject').value = 
+                    email.subject.startsWith('Re:') ? email.subject : `Re: ${email.subject}`;
+                document.getElementById('compose-reply-to-id').value = email.id;
+                document.getElementById('compose-thread-id').value = email.thread_id || '';
+                document.getElementById('compose-body').value = 
+                    `\n\n---\nOn ${email.date}, ${email.from} wrote:\n> ${(email.body || email.snippet || '').replace(/\n/g, '\n> ')}`;
+            } else if (mode === 'forward' && email) {
+                title.textContent = 'Forward';
+                document.getElementById('compose-subject').value = 
+                    email.subject.startsWith('Fwd:') ? email.subject : `Fwd: ${email.subject}`;
+                document.getElementById('compose-body').value = 
+                    `\n\n---------- Forwarded message ---------\nFrom: ${email.from}\nDate: ${email.date}\nSubject: ${email.subject}\n\n${email.body || email.snippet || ''}`;
+            }
+            
+            modal.classList.remove('hidden');
+            document.getElementById('compose-to').focus();
+        },
+        
+        closeComposeModal() {
+            document.getElementById('email-compose-modal').classList.add('hidden');
+        },
+        
+        async sendEmail() {
+            const mode = document.getElementById('compose-mode').value;
+            const to = document.getElementById('compose-to').value;
+            const cc = document.getElementById('compose-cc').value;
+            const bcc = document.getElementById('compose-bcc').value;
+            const subject = document.getElementById('compose-subject').value;
+            const body = document.getElementById('compose-body').value;
+            const replyToId = document.getElementById('compose-reply-to-id').value;
+            
+            if (!to || !subject) {
+                alert('Please fill in recipient and subject');
+                return;
+            }
+            
+            try {
+                let endpoint = '/api/email/send';
+                let payload = { to, cc, bcc, subject, body };
+                
+                if (mode === 'reply' || mode === 'reply-all') {
+                    endpoint = '/api/email/reply';
+                    payload = { 
+                        message_id: replyToId, 
+                        body, 
+                        reply_all: mode === 'reply-all' 
+                    };
+                } else if (mode === 'forward') {
+                    endpoint = '/api/email/forward';
+                    payload = { message_id: replyToId, to, body };
+                }
+                
+                const response = await fetch(endpoint, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    this.showNotification('✅ Email sent successfully!', 'success');
+                    this.closeComposeModal();
+                    if (window.dataLoader) dataLoader.loadEmails();
+                } else {
+                    this.showNotification('❌ Failed to send email: ' + (result.detail || 'Unknown error'), 'error');
+                }
+            } catch (error) {
+                console.error('Error sending email:', error);
+                this.showNotification('❌ Error sending email', 'error');
+            }
+        },
+        
+        async showEmailDetail(emailId) {
+            try {
+                const response = await fetch(`/api/email/${emailId}`);
+                const data = await response.json();
+                
+                if (!data.success) {
+                    this.showNotification('Failed to load email', 'error');
+                    return;
+                }
+                
+                this.currentEmail = data.email;
+                
+                // Update modal content
+                document.getElementById('email-detail-subject').textContent = data.email.subject;
+                document.getElementById('email-detail-from').textContent = data.email.from;
+                document.getElementById('email-detail-to').textContent = `To: ${data.email.to}`;
+                document.getElementById('email-detail-date').textContent = data.email.date;
+                
+                // Set avatar initial
+                const fromName = data.email.from.split('<')[0].trim() || data.email.from;
+                document.getElementById('email-detail-avatar').textContent = fromName.charAt(0).toUpperCase();
+                
+                // Set body (prefer HTML)
+                const bodyEl = document.getElementById('email-detail-body');
+                if (data.email.html_body) {
+                    bodyEl.innerHTML = data.email.html_body;
+                } else {
+                    bodyEl.innerHTML = `<pre class="whitespace-pre-wrap font-sans">${this.escapeHtml(data.email.body || data.email.snippet)}</pre>`;
+                }
+                
+                // Handle attachments
+                const attachmentsDiv = document.getElementById('email-detail-attachments');
+                const attachmentsList = document.getElementById('email-detail-attachments-list');
+                if (data.email.attachments && data.email.attachments.length > 0) {
+                    attachmentsDiv.classList.remove('hidden');
+                    attachmentsList.innerHTML = data.email.attachments.map(att => `
+                        <a href="/api/email/${emailId}/attachment/${att.attachment_id}" 
+                           class="flex items-center gap-2 bg-gray-700 hover:bg-gray-600 px-3 py-2 rounded text-sm" 
+                           download="${att.filename}">
+                            📎 ${att.filename} (${this.formatSize(att.size)})
+                        </a>
+                    `).join('');
+                } else {
+                    attachmentsDiv.classList.add('hidden');
+                }
+                
+                // Update button states
+                document.getElementById('email-detail-star-btn').textContent = 
+                    data.email.is_starred ? '⭐ Unstar' : '☆ Star';
+                document.getElementById('email-detail-read-btn').textContent = 
+                    !data.email.read ? '✓ Mark Read' : '○ Mark Unread';
+                
+                // Show modal
+                document.getElementById('email-detail-modal').classList.remove('hidden');
+                
+                // Mark as read automatically if unread
+                if (!data.email.read) {
+                    this.markEmailRead(emailId, true);
+                    data.email.read = true;  // Update local state
+                }
+                
+            } catch (error) {
+                console.error('Error loading email detail:', error);
+                this.showNotification('Error loading email', 'error');
+            }
+        },
+        
+        closeDetailModal() {
+            document.getElementById('email-detail-modal').classList.add('hidden');
+            this.currentEmail = null;
+        },
+        
+        replyToEmail() {
+            if (this.currentEmail) {
+                this.closeDetailModal();
+                this.showComposeModal('reply', this.currentEmail);
+            }
+        },
+        
+        replyAllToEmail() {
+            if (this.currentEmail) {
+                this.closeDetailModal();
+                this.showComposeModal('reply-all', this.currentEmail);
+            }
+        },
+        
+        forwardEmail() {
+            if (this.currentEmail) {
+                this.closeDetailModal();
+                this.showComposeModal('forward', this.currentEmail);
+            }
+        },
+        
+        async archiveCurrentEmail() {
+            if (this.currentEmail) {
+                await this.archiveEmail(this.currentEmail.id);
+                this.closeDetailModal();
+            }
+        },
+        
+        async deleteCurrentEmail() {
+            if (this.currentEmail && confirm('Move this email to trash?')) {
+                await this.deleteEmail(this.currentEmail.id);
+                this.closeDetailModal();
+            }
+        },
+        
+        async toggleStarCurrentEmail() {
+            if (this.currentEmail) {
+                const newState = !this.currentEmail.is_starred;
+                await this.starEmail(this.currentEmail.id, newState);
+                this.currentEmail.is_starred = newState;
+                document.getElementById('email-detail-star-btn').textContent = 
+                    newState ? '⭐ Unstar' : '☆ Star';
+            }
+        },
+        
+        async toggleReadCurrentEmail() {
+            if (this.currentEmail) {
+                // Toggle: if currently read, mark unread (read=false); if unread, mark read (read=true)
+                const markAsRead = !this.currentEmail.read;
+                await this.markEmailRead(this.currentEmail.id, markAsRead);
+                this.currentEmail.read = markAsRead;
+                document.getElementById('email-detail-read-btn').textContent = 
+                    markAsRead ? '○ Mark Unread' : '✓ Mark Read';
+            }
+        },
+        
+        // Bulk operations
+        toggleSelectAll(checked) {
+            document.querySelectorAll('.email-checkbox').forEach(cb => {
+                cb.checked = checked;
+                if (checked) {
+                    this.selectedEmails.add(cb.value);
+                } else {
+                    this.selectedEmails.delete(cb.value);
+                }
+            });
+        },
+        
+        toggleEmailSelection(emailId, checked) {
+            if (checked) {
+                this.selectedEmails.add(emailId);
+            } else {
+                this.selectedEmails.delete(emailId);
+            }
+            this.updateSelectionCount();
+        },
+        
+        updateSelectionCount() {
+            const countEl = document.getElementById('email-selected-count');
+            if (countEl) {
+                const count = this.selectedEmails.size;
+                countEl.textContent = `${count} selected`;
+                countEl.className = count > 0 ? 'text-xs text-blue-400 font-semibold min-w-[60px]' : 'text-xs text-gray-400 min-w-[60px]';
+            }
+        },
+        
+        toggleSelectAll(checked) {
+            const checkboxes = document.querySelectorAll('[data-email-checkbox]');
+            checkboxes.forEach(cb => {
+                cb.checked = checked;
+                const emailId = cb.getAttribute('data-email-checkbox');
+                if (emailId) {
+                    if (checked) {
+                        this.selectedEmails.add(emailId);
+                    } else {
+                        this.selectedEmails.delete(emailId);
+                    }
+                }
+            });
+            this.updateSelectionCount();
+        },
+        
+        async archiveSelected() {
+            if (this.selectedEmails.size === 0) {
+                this.showNotification('No emails selected', 'warning');
+                return;
+            }
+            const count = this.selectedEmails.size;
+            for (const id of this.selectedEmails) {
+                await this.archiveEmail(id);
+            }
+            this.selectedEmails.clear();
+            this.updateSelectionCount();
+            document.getElementById('email-select-all').checked = false;
+            this.showNotification(`Archived ${count} email(s)`, 'success');
+            if (window.dataLoader) dataLoader.loadEmails();
+        },
+        
+        async deleteSelected() {
+            if (this.selectedEmails.size === 0) {
+                this.showNotification('No emails selected', 'warning');
+                return;
+            }
+            if (!confirm(`Delete ${this.selectedEmails.size} email(s)?`)) return;
+            const count = this.selectedEmails.size;
+            for (const id of this.selectedEmails) {
+                await this.deleteEmail(id);
+            }
+            this.selectedEmails.clear();
+            this.updateSelectionCount();
+            document.getElementById('email-select-all').checked = false;
+            this.showNotification(`Deleted ${count} email(s)`, 'success');
+            if (window.dataLoader) dataLoader.loadEmails();
+        },
+        
+        async markSelectedRead() {
+            if (this.selectedEmails.size === 0) {
+                this.showNotification('No emails selected', 'warning');
+                return;
+            }
+            const count = this.selectedEmails.size;
+            for (const id of this.selectedEmails) {
+                await this.markEmailRead(id, true);
+            }
+            this.selectedEmails.clear();
+            this.updateSelectionCount();
+            document.getElementById('email-select-all').checked = false;
+            this.showNotification(`Marked ${count} email(s) as read`, 'success');
+            if (window.dataLoader) dataLoader.loadEmails();
+        },
+        
+        async markSelectedUnread() {
+            if (this.selectedEmails.size === 0) {
+                this.showNotification('No emails selected', 'warning');
+                return;
+            }
+            const count = this.selectedEmails.size;
+            for (const id of this.selectedEmails) {
+                await this.markEmailRead(id, false);
+            }
+            this.selectedEmails.clear();
+            this.updateSelectionCount();
+            document.getElementById('email-select-all').checked = false;
+            this.showNotification(`Marked ${count} email(s) as unread`, 'success');
+            if (window.dataLoader) dataLoader.loadEmails();
+        },
+        
+        async applyLabelToSelected(labelId) {
+            if (!labelId || this.selectedEmails.size === 0) {
+                if (this.selectedEmails.size === 0 && labelId) {
+                    this.showNotification('No emails selected', 'warning');
+                }
+                document.getElementById('email-label-select').value = '';
+                return;
+            }
+            const count = this.selectedEmails.size;
+            for (const id of this.selectedEmails) {
+                await this.applyLabel(id, labelId);
+            }
+            this.selectedEmails.clear();
+            this.updateSelectionCount();
+            document.getElementById('email-select-all').checked = false;
+            document.getElementById('email-label-select').value = '';
+            this.showNotification(`Applied label to ${count} email(s)`, 'success');
+            if (window.dataLoader) dataLoader.loadEmails();
+        },
+        
+        // API methods
+        async archiveEmail(emailId) {
+            try {
+                await fetch('/api/email/archive', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message_id: emailId })
+                });
+                this.showNotification('Email archived', 'success');
+            } catch (e) { console.error(e); }
+        },
+        
+        async deleteEmail(emailId) {
+            try {
+                await fetch('/api/email/delete', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message_id: emailId })
+                });
+                this.showNotification('Email moved to trash', 'success');
+            } catch (e) { console.error(e); }
+        },
+        
+        async markEmailRead(emailId, read) {
+            try {
+                const response = await fetch('/api/email/mark-read', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message_id: emailId, read })
+                });
+                
+                if (response.ok) {
+                    // Update local email data
+                    if (window.dataLoader && window.dataLoader.emails) {
+                        const email = window.dataLoader.emails.find(e => e.id === emailId);
+                        if (email) {
+                            email.read = read;
+                        }
+                    }
+                    
+                    // Update the UI card
+                    const card = document.querySelector(`[data-email-id="${emailId}"]`);
+                    if (card) {
+                        if (read) {
+                            card.classList.add('opacity-70', 'bg-gray-800');
+                            card.classList.remove('bg-gray-750', 'border-l-4', 'border-l-blue-500');
+                            // Update read indicator
+                            const indicator = card.querySelector('.text-blue-400');
+                            if (indicator) {
+                                indicator.outerHTML = '<span class="text-gray-500 text-xs">✓</span>';
+                            }
+                        } else {
+                            card.classList.remove('opacity-70', 'bg-gray-800');
+                            card.classList.add('bg-gray-750', 'border-l-4', 'border-l-blue-500');
+                            // Update read indicator
+                            const indicator = card.querySelector('.text-gray-500.text-xs');
+                            if (indicator && indicator.textContent === '✓') {
+                                indicator.outerHTML = '<span class="flex items-center gap-1 text-blue-400 text-xs font-semibold"><span class="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></span></span>';
+                            }
+                        }
+                    }
+                    
+                    // Update stats
+                    if (window.dataLoader) {
+                        window.dataLoader.updateEmailStats();
+                    }
+                    
+                    this.showNotification(`Email marked as ${read ? 'read' : 'unread'}`, 'success');
+                }
+            } catch (e) { 
+                console.error(e); 
+                this.showNotification('Failed to update email', 'error');
+            }
+        },
+        
+        async starEmail(emailId, starred) {
+            try {
+                await fetch('/api/email/star', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message_id: emailId, starred })
+                });
+                this.showNotification(starred ? 'Email starred' : 'Email unstarred', 'success');
+            } catch (e) { console.error(e); }
+        },
+        
+        async applyLabel(emailId, labelId) {
+            try {
+                await fetch('/api/email/labels/apply', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message_id: emailId, add_labels: [labelId] })
+                });
+            } catch (e) { console.error(e); }
+        },
+        
+        escapeHtml(text) {
+            if (!text) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        },
+        
+        formatSize(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+            return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+        },
+        
+        showNotification(message, type = 'info') {
+            if (window.showNotification) {
+                window.showNotification(message, type);
+            } else {
+                alert(message);
+            }
+        }
+    };
+    
+    // Initialize email client
+    document.addEventListener('DOMContentLoaded', () => {
+        if (window.emailClient) window.emailClient.init();
+    });
+    </script>
+    
+    <script>
+    // Register service worker for PWA
+    if ('serviceWorker' in navigator) {
+        window.addEventListener('load', function() {
+            navigator.serviceWorker.register('/static/service-worker.js').then(function(reg) {
+                console.log('Service Worker registered:', reg);
+            }).catch(function(err) {
+                console.error('Service Worker registration failed:', err);
+            });
+        });
+    }
+
+    // Request notification permission
+    if ('Notification' in window) {
+        Notification.requestPermission().then(function(permission) {
+            if (permission === 'granted') {
+                console.log('Notifications enabled');
+            }
+        });
+    }
     </script>
 </body>
 </html>

@@ -284,6 +284,32 @@ class DatabaseManager:
                 )
             """)
             
+            # Music playlists table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS music_playlists (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    mood TEXT,
+                    artists TEXT,
+                    genres TEXT,
+                    tracks TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Liked songs table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS liked_songs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    artist TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    youtube_id TEXT,
+                    liked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(artist, title)
+                )
+            """)
+            
             # Add new columns if they don't exist (migration)
             try:
                 cursor.execute("ALTER TABLE dashboard_projects ADD COLUMN production_url TEXT")
@@ -1615,6 +1641,206 @@ class DatabaseManager:
                 return True
         except Exception as e:
             logger.error(f"Error saving music content: {e}")
+            return False
+
+    # ==================== PLAYLIST METHODS ====================
+    
+    def save_playlist(self, playlist_data: Dict[str, Any]) -> bool:
+        """Save a music playlist to the database."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT OR REPLACE INTO music_playlists 
+                    (id, name, mood, artists, genres, tracks, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    playlist_data.get('id'),
+                    playlist_data.get('name'),
+                    playlist_data.get('mood'),
+                    json.dumps(playlist_data.get('artists', [])),
+                    json.dumps(playlist_data.get('genres', [])),
+                    json.dumps(playlist_data.get('tracks', [])),
+                    datetime.now().isoformat()
+                ))
+                conn.commit()
+                logger.info(f"Saved playlist: {playlist_data.get('name')}")
+                return True
+        except Exception as e:
+            logger.error(f"Error saving playlist: {e}")
+            return False
+
+    def get_playlists(self) -> List[Dict[str, Any]]:
+        """Get all saved playlists from the database."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT id, name, mood, artists, genres, tracks, created_at, updated_at
+                    FROM music_playlists
+                    ORDER BY created_at DESC
+                """)
+                rows = cursor.fetchall()
+                playlists = []
+                for row in rows:
+                    playlists.append({
+                        'id': row[0],
+                        'name': row[1],
+                        'mood': row[2],
+                        'artists': json.loads(row[3]) if row[3] else [],
+                        'genres': json.loads(row[4]) if row[4] else [],
+                        'tracks': json.loads(row[5]) if row[5] else [],
+                        'created_at': row[6],
+                        'updated_at': row[7]
+                    })
+                return playlists
+        except Exception as e:
+            logger.error(f"Error getting playlists: {e}")
+            return []
+
+    def get_playlist(self, playlist_id: str) -> Optional[Dict[str, Any]]:
+        """Get a single playlist by ID."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT id, name, mood, artists, genres, tracks, created_at, updated_at
+                    FROM music_playlists WHERE id = ?
+                """, (playlist_id,))
+                row = cursor.fetchone()
+                if row:
+                    return {
+                        'id': row[0],
+                        'name': row[1],
+                        'mood': row[2],
+                        'artists': json.loads(row[3]) if row[3] else [],
+                        'genres': json.loads(row[4]) if row[4] else [],
+                        'tracks': json.loads(row[5]) if row[5] else [],
+                        'created_at': row[6],
+                        'updated_at': row[7]
+                    }
+                return None
+        except Exception as e:
+            logger.error(f"Error getting playlist: {e}")
+            return None
+
+    def delete_playlist(self, playlist_id: str) -> bool:
+        """Delete a playlist from the database."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM music_playlists WHERE id = ?", (playlist_id,))
+                conn.commit()
+                logger.info(f"Deleted playlist: {playlist_id}")
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error deleting playlist: {e}")
+            return False
+
+    # ==================== LIKED SONGS METHODS ====================
+    
+    def save_liked_song(self, artist: str, title: str, youtube_id: str = None) -> bool:
+        """Save a liked song to the database."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT OR REPLACE INTO liked_songs (artist, title, youtube_id, liked_at)
+                    VALUES (?, ?, ?, ?)
+                """, (artist, title, youtube_id, datetime.now().isoformat()))
+                conn.commit()
+                logger.info(f"Saved liked song: {artist} - {title}")
+                return True
+        except Exception as e:
+            logger.error(f"Error saving liked song: {e}")
+            return False
+
+    def remove_liked_song(self, artist: str, title: str) -> bool:
+        """Remove a song from liked songs."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM liked_songs WHERE artist = ? AND title = ?", (artist, title))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error removing liked song: {e}")
+            return False
+
+    def get_liked_songs(self) -> List[Dict[str, Any]]:
+        """Get all liked songs from the database."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT artist, title, youtube_id, liked_at
+                    FROM liked_songs ORDER BY liked_at DESC
+                """)
+                rows = cursor.fetchall()
+                return [{'artist': row[0], 'title': row[1], 'youtube_id': row[2], 'liked_at': row[3]} for row in rows]
+        except Exception as e:
+            logger.error(f"Error getting liked songs: {e}")
+            return []
+
+    def is_song_liked(self, artist: str, title: str) -> bool:
+        """Check if a song is liked."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT 1 FROM liked_songs WHERE artist = ? AND title = ?", (artist, title))
+                return cursor.fetchone() is not None
+        except Exception as e:
+            logger.error(f"Error checking liked song: {e}")
+            return False
+
+    # ==================== MUSIC PLAYBACK STATE METHODS ====================
+    
+    def save_playback_state(self, playlist_id: str, playlist_name: str, tracks: List[Dict[str, Any]], 
+                           current_index: int = 0) -> bool:
+        """Save the current music playback state to database."""
+        try:
+            # Save as settings for persistence
+            self.save_setting('music_last_playlist_id', playlist_id)
+            self.save_setting('music_last_playlist_name', playlist_name)
+            self.save_setting('music_current_tracks', json.dumps(tracks))
+            self.save_setting('music_current_index', str(current_index))
+            self.save_setting('music_last_updated', datetime.now().isoformat())
+            logger.info(f"Saved playback state: {playlist_name} ({len(tracks)} tracks, index {current_index})")
+            return True
+        except Exception as e:
+            logger.error(f"Error saving playback state: {e}")
+            return False
+    
+    def get_playback_state(self) -> Optional[Dict[str, Any]]:
+        """Get the last music playback state from database."""
+        try:
+            playlist_id = self.get_setting('music_last_playlist_id')
+            playlist_name = self.get_setting('music_last_playlist_name')
+            tracks_json = self.get_setting('music_current_tracks')
+            current_index = self.get_setting('music_current_index', '0')
+            last_updated = self.get_setting('music_last_updated')
+            
+            if not tracks_json:
+                return None
+            
+            return {
+                'playlist_id': playlist_id,
+                'playlist_name': playlist_name,
+                'tracks': json.loads(tracks_json),
+                'current_index': int(current_index),
+                'last_updated': last_updated
+            }
+        except Exception as e:
+            logger.error(f"Error getting playback state: {e}")
+            return None
+    
+    def update_playback_index(self, index: int) -> bool:
+        """Update just the current track index."""
+        try:
+            self.save_setting('music_current_index', str(index))
+            return True
+        except Exception as e:
+            logger.error(f"Error updating playback index: {e}")
             return False
 
     def like_content(self, content_type: str, content_id: str, is_liked: bool = True) -> bool:

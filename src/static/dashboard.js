@@ -7,72 +7,129 @@
         isPlaying: false
     };
 
-    function loadYouTubePlayer(playlist) {
+    window.loadYouTubePlayer = function(playlist) {
         ytPlayerState.playlist = playlist || [];
         ytPlayerState.current = 0;
         renderYTPlayer();
+    };
+
+    async function searchYouTubeVideo(artist, title) {
+        const query = encodeURIComponent(`${artist} ${title}`);
+        try {
+            const response = await fetch(`/api/youtube/search?q=${query}`);
+            if (response.ok) {
+                const data = await response.json();
+                return data.videoId;
+            }
+        } catch (e) {
+            console.warn('YouTube search failed:', e);
+        }
+        return null;
     }
 
-    function renderYTPlayer() {
+    async function renderYTPlayer() {
         const now = ytPlayerState.playlist[ytPlayerState.current];
         const titleEl = document.getElementById('yt-now-title');
         const artistEl = document.getElementById('yt-now-artist');
         if (titleEl) titleEl.textContent = now ? now.title : 'No Track Playing';
         if (artistEl) artistEl.textContent = now ? now.artist : '';
+        
         // Embed YouTube
         const ytDiv = document.getElementById('yt-player-embed');
-        if (ytDiv) ytDiv.innerHTML = now ? `<iframe width="100%" height="315" src="https://www.youtube.com/embed/${now.youtubeId}?autoplay=1&enablejsapi=1" frameborder="0" allow="autoplay; encrypted-media" allowfullscreen></iframe>` : '';
+        if (ytDiv && now) {
+            // Show loading
+            ytDiv.innerHTML = '<div class="w-full h-full flex items-center justify-center text-gray-400">🔍 Loading...</div>';
+            
+            // If we have a youtubeId, try it first, otherwise search
+            let videoId = now.youtubeId;
+            
+            // Always search to get a fresh, valid video ID
+            const searchedId = await searchYouTubeVideo(now.artist, now.title);
+            if (searchedId) {
+                videoId = searchedId;
+            }
+            
+            if (videoId) {
+                ytDiv.innerHTML = `<iframe width="100%" height="315" src="https://www.youtube.com/embed/${videoId}?autoplay=1&enablejsapi=1" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>`;
+            } else {
+                // Fallback: link to YouTube search
+                const searchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(now.artist + ' ' + now.title)}`;
+                ytDiv.innerHTML = `<div class="w-full h-full flex flex-col items-center justify-center bg-gray-800 rounded p-4">
+                    <p class="mb-4 text-center">${now.title} - ${now.artist}</p>
+                    <a href="${searchUrl}" target="_blank" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded">▶️ Play on YouTube</a>
+                </div>`;
+            }
+        } else if (ytDiv) {
+            ytDiv.innerHTML = '';
+        }
+        
         // Render upcoming
         const upList = document.getElementById('yt-upcoming-list');
         if (upList) {
             upList.innerHTML = ytPlayerState.playlist.slice(ytPlayerState.current+1).map((track, i) =>
                 `<li class="flex items-center gap-2 p-2 rounded hover:bg-gray-700 cursor-pointer" data-yt-jump="${ytPlayerState.current+1+i}">
-                    <span class="font-semibold">${track.title}</span>
+                    <span class="font-semibold text-sm">${i+1}. ${track.title}</span>
                     <span class="text-xs text-gray-400 ml-auto">${track.artist}</span>
                 </li>`
-            ).join('') || '<li class="text-gray-500 text-sm">No more songs</li>';
+            ).join('') || '<li class="text-gray-500 text-sm p-2">No more songs</li>';
+            
+            // Add click listeners for upcoming songs
+            upList.querySelectorAll('[data-yt-jump]').forEach(li => {
+                li.onclick = () => {
+                    const idx = parseInt(li.getAttribute('data-yt-jump'));
+                    window.ytJumpTo(idx);
+                };
+            });
         }
     }
 
-    function ytPlayPause() {
+    window.ytPlayPause = function() {
         renderYTPlayer();
-    }
-    function ytNext() {
+    };
+    
+    window.ytNext = function() {
         if (ytPlayerState.current < ytPlayerState.playlist.length-1) {
             ytPlayerState.current++;
             renderYTPlayer();
         }
-    }
-    function ytPrev() {
+    };
+    
+    window.ytPrev = function() {
         if (ytPlayerState.current > 0) {
             ytPlayerState.current--;
             renderYTPlayer();
         }
-    }
-    function ytJumpTo(idx) {
+    };
+    
+    window.ytJumpTo = function(idx) {
         ytPlayerState.current = idx;
         renderYTPlayer();
-    }
+    };
 
     document.addEventListener('DOMContentLoaded', function() {
         if (document.getElementById('yt-player-embed')) {
-            loadYouTubePlayer([
+            window.loadYouTubePlayer([
                 {title: 'Blinding Lights', artist: 'The Weeknd', youtubeId: 'fHI8X4OXluQ'},
                 {title: 'Levitating', artist: 'Dua Lipa', youtubeId: 'TUVcZfQe-Kw'},
                 {title: 'Save Your Tears', artist: 'The Weeknd', youtubeId: 'XXYlFuWEuKI'},
                 {title: 'Peaches', artist: 'Justin Bieber', youtubeId: 'tQ0yjYUFKAE'},
                 {title: 'Watermelon Sugar', artist: 'Harry Styles', youtubeId: 'E07s5ZYygMg'}
             ]);
-            document.getElementById('yt-play-btn').onclick = ytPlayPause;
-            document.getElementById('yt-next-btn').onclick = ytNext;
-            document.getElementById('yt-prev-btn').onclick = ytPrev;
+            const playBtn = document.getElementById('yt-play-btn');
+            const nextBtn = document.getElementById('yt-next-btn');
+            const prevBtn = document.getElementById('yt-prev-btn');
+            
+            if (playBtn) playBtn.onclick = window.ytPlayPause;
+            if (nextBtn) nextBtn.onclick = window.ytNext;
+            if (prevBtn) prevBtn.onclick = window.ytPrev;
+            
             // Delegate click for upcoming list
             const upList = document.getElementById('yt-upcoming-list');
             if (upList) {
                 upList.addEventListener('click', function(e) {
                     const li = e.target.closest('[data-yt-jump]');
                     if (li) {
-                        ytJumpTo(Number(li.getAttribute('data-yt-jump')));
+                        window.ytJumpTo(Number(li.getAttribute('data-yt-jump')));
                     }
                 });
             }
@@ -84,9 +141,10 @@
  * Handles loading data for all dashboard sections
  */
 
-window.dataLoader = new (class DashboardDataLoader {
-    constructor() {
-        this.todos = [];
+try {
+    window.dataLoader = new (class DashboardDataLoader {
+        constructor() {
+            this.todos = [];
         this.calendar = [];
         this.emails = [];
         this.github = {};
@@ -103,6 +161,10 @@ window.dataLoader = new (class DashboardDataLoader {
         this.alertedEvents = new Set();
         this.feedbackData = {}; // Store feedback for AI training
         this.dismissedSuggestions = new Set(); // Track dismissed AI suggestions
+        // VIP/Client domains - emails from these will be prioritized and trigger alerts
+        this.clientDomains = JSON.parse(localStorage.getItem('clientDomains') || '[]');
+        this.clientEmailAddresses = JSON.parse(localStorage.getItem('clientEmailAddresses') || '[]');
+        this.lastSeenClientEmails = JSON.parse(localStorage.getItem('lastSeenClientEmails') || '[]');
         this.aiVoiceEnabled = localStorage.getItem('aiVoiceEnabled') !== 'false'; // AI voice responses - persisted
         this.globalMuted = localStorage.getItem('globalMuted') === 'true'; // Global mute for ALL voice alerts
         this.editMode = false;
@@ -138,14 +200,33 @@ window.dataLoader = new (class DashboardDataLoader {
             music: true,
             ai: true
         };
-        this.initVoiceRecognition();
-        this.loadDashboardConfig();
-        this.loadAutoRefreshSettings();
-        this.loadBackgroundSettings();
-        this.loadTaskSyncSettings();
-        this.loadVoiceSettings();
-        this.loadUserProfile();
-        this.updateGlobalMuteButton();
+        
+        try {
+            this.initVoiceRecognition();
+            this.loadDashboardConfig();
+            this.loadAutoRefreshSettings();
+            this.loadBackgroundSettings();
+            this.loadTaskSyncSettings();
+            this.loadVoiceSettings();
+            this.loadUserProfile();
+            this.updateGlobalMuteButton();
+        } catch (error) {
+            console.error('Error initializing dashboard components:', error);
+        }
+    }
+    
+    initVoiceRecognition() {
+        // Initialize voice recognition if available
+        try {
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (SpeechRecognition) {
+                this.voiceRecognition = new SpeechRecognition();
+                this.voiceRecognition.continuous = false;
+                this.voiceRecognition.interimResults = false;
+            }
+        } catch (error) {
+            console.warn('Voice recognition not available:', error);
+        }
     }
     
     updateGlobalMuteButton() {
@@ -666,11 +747,17 @@ window.dataLoader = new (class DashboardDataLoader {
         }
     }
     
-        async refreshEmails() {
+    async refreshEmails() {
         this.showNotification('Refreshing emails...', 'info');
-        await this.loadEmails(true); // Force refresh with cache busting
-        this.updateAllCounts();
-        this.showNotification('Emails refreshed!', 'success');
+        try {
+            await this.loadEmails(true); // Force refresh with cache busting
+            this.updateAllCounts();
+            this.renderEmails();
+            this.showNotification('Emails refreshed!', 'success');
+        } catch (error) {
+            console.error('Error refreshing emails:', error);
+            this.showNotification('Failed to refresh emails', 'error');
+        }
     }
     
     showScanEmailsModal() {
@@ -842,6 +929,8 @@ window.dataLoader = new (class DashboardDataLoader {
                         class="email-filter-btn px-3 py-1 bg-red-700 rounded text-sm hover:bg-red-600">⚠️ High Risk</button>
                 <button onclick="dataLoader.filterEmails('safe')" 
                         class="email-filter-btn px-3 py-1 bg-green-700 rounded text-sm hover:bg-green-600">✓ Safe</button>
+                <button onclick="dataLoader.filterEmails('clients')" 
+                        class="email-filter-btn px-3 py-1 bg-yellow-600 rounded text-sm hover:bg-yellow-500">⭐ Clients</button>
                 ${labels.map(label => 
                     `<button onclick="dataLoader.filterEmails('label-${this.escapeHtml(label)}')" 
                              class="email-filter-btn px-3 py-1 bg-gray-700 rounded text-sm hover:bg-gray-600">${this.escapeHtml(label)}</button>`
@@ -849,37 +938,54 @@ window.dataLoader = new (class DashboardDataLoader {
             </div>
         `;
         
-        const html = this.emails.map(email => {
+        // Update email stats
+        this.updateEmailStats();
+        
+        // Sort emails: clients first, then by date
+        const sortedEmails = [...this.emails].sort((a, b) => {
+            const aIsClient = this.isClientEmail(a);
+            const bIsClient = this.isClientEmail(b);
+            if (aIsClient && !bIsClient) return -1;
+            if (!aIsClient && bIsClient) return 1;
+            // Within same priority, sort by date (newest first)
+            const aDate = new Date(a.received_date || a.date || 0);
+            const bDate = new Date(b.received_date || b.date || 0);
+            return bDate - aDate;
+        });
+        
+        // Check for new client emails and show alert
+        this.checkClientEmailAlerts(sortedEmails);
+        
+        const html = sortedEmails.map(email => {
+            const isClient = this.isClientEmail(email);
             const feedback = this.feedbackData[`email-${email.id}`] || null;
-            const readClass = email.read ? 'opacity-70 bg-gray-800' : 'bg-gray-750 border-blue-500/30';
+            const readClass = email.read ? 'opacity-70 bg-gray-800' : 'bg-gray-750 border-l-4 border-l-blue-500';
             const readIndicator = email.read ? 
-                '<span class="text-gray-500 text-xs">✓ Read</span>' : 
-                '<span class="flex items-center gap-1 text-blue-400 text-xs font-semibold"><span class="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></span>UNREAD</span>';
+                '<span class="text-gray-500 text-xs">✓</span>' : 
+                '<span class="flex items-center gap-1 text-blue-400 text-xs font-semibold"><span class="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></span></span>';
             const smartTag = this.getSmartTagForEmail(email);
+            const starIcon = email.is_starred ? '⭐' : '☆';
             
             // Format the date/time nicely
             const emailDate = email.received_date || email.date;
             const timeAgo = this.getTimeAgo(emailDate);
             
             // Trust Layer Badge - on-demand scanning only
-            // Auto-fetch trust report (backend caches safe emails to avoid rescanning)
-            let riskBadge = '<span class="text-xs bg-gray-600 px-2 py-1 rounded" title="Analyzing email security...">⏳ Analyzing...</span>';
-            if (trustUI) {
+            let riskBadge = '';
+            if (email.risk_score && email.risk_score >= 7) {
+                riskBadge = '<span class="text-xs bg-red-600 px-2 py-1 rounded">⚠️ Risk</span>';
+            }
+            if (typeof trustUI !== 'undefined' && trustUI) {
                 trustUI.getTrustReport(email).then(report => {
                     if (report && report.score !== undefined) {
                         const badge = trustUI.getTrustBadge(report.score, report.risk_level);
-                        const container = document.querySelector(`[onclick*="showEmailDetail('${this.escapeHtml(email.id)}')"] .trust-badge-container`);
+                        const container = document.querySelector(`[data-email-id="${this.escapeHtml(email.id)}"] .trust-badge-container`);
                         if (container) {
                             container.innerHTML = badge;
                         }
                     }
                 }).catch(err => {
                     console.error('Trust report fetch failed for', email.id, err);
-                    // Show scan button on error
-                    const container = document.querySelector(`[onclick*="showEmailDetail('${this.escapeHtml(email.id)}')"] .trust-badge-container`);
-                    if (container) {
-                        container.innerHTML = trustUI.getTrustBadge(null, null);
-                    }
                 });
             }
             
@@ -890,61 +996,47 @@ window.dataLoader = new (class DashboardDataLoader {
                 smartTagHtml = `<span class="text-xs bg-purple-600 px-2 py-1 rounded whitespace-nowrap cursor-help" title="Auto-tagged based on your feedback patterns from ${domain}">${smartTag}</span>`;
             }
             
+            // Client badge
+            const clientBadge = isClient ? '<span class="text-xs bg-yellow-500 text-black font-bold px-2 py-1 rounded">⭐ CLIENT</span>' : '';
+            // Client styling - add yellow border for client emails
+            const clientClass = isClient ? 'ring-2 ring-yellow-500' : '';
+            
             return `
-            <div class="rounded-lg p-4 border border-gray-700 cursor-pointer hover:border-gray-600 ${readClass}"
-                 onclick="dataLoader.showEmailDetail('${this.escapeHtml(email.id)}')">
-                <div class="flex justify-between items-start mb-2">
-                    <div class="flex gap-2 items-center flex-1">
+            <div class="rounded-lg p-3 border border-gray-700 hover:border-gray-500 ${readClass} ${clientClass} flex items-start gap-3"
+                 data-email-id="${this.escapeHtml(email.id)}">
+                <div class="flex items-center gap-2 pt-1" onclick="event.stopPropagation()">
+                    <input type="checkbox" class="email-checkbox w-4 h-4 rounded" 
+                           data-email-checkbox="${this.escapeHtml(email.id)}"
+                           onchange="window.emailClient && emailClient.toggleEmailSelection('${this.escapeHtml(email.id)}', this.checked)">
+                    <button onclick="window.emailClient && emailClient.starEmail('${this.escapeHtml(email.id)}', ${!email.is_starred}); this.textContent = this.textContent === '☆' ? '⭐' : '☆';" 
+                            class="text-lg hover:scale-110 transition-transform" title="Star">${starIcon}</button>
+                </div>
+                <div class="flex-1 min-w-0 cursor-pointer" onclick="window.emailClient && emailClient.showEmailDetail('${this.escapeHtml(email.id)}')">
+                    <div class="flex items-center gap-2 mb-1">
                         ${readIndicator}
-                        <span class="font-semibold text-white">${this.escapeHtml(email.sender)}</span>
-                        <span class="text-xs text-gray-500 ml-auto">${timeAgo}</span>
+                        ${clientBadge}
+                        <span class="font-semibold text-white truncate">${this.escapeHtml(email.sender)}</span>
+                        <span class="text-xs text-gray-500 ml-auto whitespace-nowrap">${timeAgo}</span>
                     </div>
+                    <div class="flex items-center gap-2 mb-1">
+                        <h4 class="font-medium text-gray-200 truncate flex-1">${this.escapeHtml(email.subject)}</h4>
+                        <div class="flex gap-1 items-center flex-shrink-0">
+                            <div class="trust-badge-container">${riskBadge}</div>
+                            ${smartTagHtml}
+                            ${email.has_todos ? '<span class="text-xs bg-orange-600 px-1 py-0.5 rounded">📋</span>' : ''}
+                        </div>
+                    </div>
+                    ${email.snippet ? `<p class="text-sm text-gray-400 truncate">${this.escapeHtml(email.snippet)}</p>` : ''}
                 </div>
-                <div class="flex justify-between items-start mb-2">
-                    <h4 class="font-medium text-gray-200 flex-1">${this.escapeHtml(email.subject)}</h4>
-                    <div class="flex gap-2 items-center ml-2">
-                        <div class="trust-badge-container">${riskBadge}</div>
-                        ${smartTagHtml}
-                        ${email.has_todos ? '<span class="text-xs bg-orange-600 px-2 py-1 rounded whitespace-nowrap cursor-help" title="This email has associated tasks">📋 Tasks</span>' : ''}
-                        ${email.priority === 'high' ? '<span class="text-xs bg-red-600 px-2 py-1 rounded whitespace-nowrap cursor-help" title="High priority email">High</span>' : ''}
-                    </div>
-                </div>
-                ${email.snippet ? `<p class="text-sm text-gray-400 line-clamp-2 mb-2">${this.escapeHtml(email.snippet)}</p>` : ''}
-                ${email.labels && email.labels.length > 0 ? `
-                    <div class="flex gap-2 mt-2 mb-2 flex-wrap">
-                        ${email.labels.map(label => 
-                            `<span class="text-xs bg-blue-600 px-2 py-1 rounded">${this.escapeHtml(label)}</span>`
-                        ).join('')}
-                    </div>
-                ` : ''}
-                ${email.summary ? `
-                    <div class="mt-2 p-2 bg-gray-700 rounded text-sm">
-                        <div class="text-xs text-gray-400 mb-1">AI Summary:</div>
-                        <div class="text-white">${this.escapeHtml(email.summary)}</div>
-                    </div>
-                ` : ''}
-                <div class="flex gap-1 pt-2 border-t border-gray-700" onclick="event.stopPropagation()">
-                    <button data-item-type="email" 
-                            data-item-id="${this.escapeHtml(email.id)}" 
-                            data-item-data="${this.escapeHtml(JSON.stringify(email))}"
-                            onclick="dataLoader.summarizeItemFromButton(this)"
-                            class="px-2 py-1 rounded text-xs bg-purple-600 hover:bg-purple-700" 
-                            title="Summarize and scan for tasks">🤖 AI</button>
-                    ${email.is_whitelisted ? 
-                        '<span class="px-2 py-1 text-xs bg-green-600 rounded">✓ Trusted Sender</span>' :
-                        `<button onclick="dataLoader.markEmailAsSafe('${this.escapeHtml(email.sender)}')" 
-                                class="px-2 py-1 rounded text-xs bg-gray-700 hover:bg-green-600" 
-                                title="Mark this sender as safe/trusted">✓ Mark Safe</button>`
-                    }
-                    <button onclick="dataLoader.giveFeedback('email', '${this.escapeHtml(email.id)}', 'up')" 
-                            class="feedback-btn px-2 py-1 rounded text-xs ${feedback === 'up' ? 'bg-green-600' : 'bg-gray-700 hover:bg-green-600'}" 
-                            title="Important email">👍</button>
-                    <button onclick="dataLoader.giveFeedback('email', '${this.escapeHtml(email.id)}', 'neutral')" 
-                            class="feedback-btn px-2 py-1 rounded text-xs ${feedback === 'neutral' ? 'bg-blue-600' : 'bg-gray-700 hover:bg-blue-600'}" 
-                            title="Neutral">👌</button>
-                    <button onclick="dataLoader.giveFeedback('email', '${this.escapeHtml(email.id)}', 'down')" 
-                            class="feedback-btn px-2 py-1 rounded text-xs ${feedback === 'down' ? 'bg-red-600' : 'bg-gray-700 hover:bg-red-600'}" 
-                            title="Spam/Not relevant">👎</button>
+                <div class="flex flex-col gap-1" onclick="event.stopPropagation()">
+                    <button onclick="window.emailClient && emailClient.showComposeModal('reply', {id:'${this.escapeHtml(email.id)}', from:'${this.escapeHtml(email.sender)}', subject:'${this.escapeHtml(email.subject)}', snippet:'${this.escapeHtml((email.snippet || '').replace(/'/g, ''))}'})"
+                            class="px-2 py-1 rounded text-xs bg-blue-600 hover:bg-blue-700" title="Reply">↩️</button>
+                    <button onclick="window.emailClient && emailClient.archiveEmail('${this.escapeHtml(email.id)}'); this.closest('[data-email-id]').remove();"
+                            class="px-2 py-1 rounded text-xs bg-gray-700 hover:bg-gray-600" title="Archive">📥</button>
+                    <button onclick="if(confirm('Delete?')){window.emailClient && emailClient.deleteEmail('${this.escapeHtml(email.id)}'); this.closest('[data-email-id]').remove();}"
+                            class="px-2 py-1 rounded text-xs bg-gray-700 hover:bg-red-600" title="Delete">🗑️</button>
+                    ${!isClient ? `<button onclick="dataLoader.addSenderAsClient('${this.escapeHtml(email.sender)}')"
+                            class="px-2 py-1 rounded text-xs bg-gray-700 hover:bg-yellow-600" title="Add as Client">⭐</button>` : ''}
                 </div>
             </div>
         `;
@@ -953,9 +1045,25 @@ window.dataLoader = new (class DashboardDataLoader {
         grid.innerHTML = filters + html;
     }
     
+    updateEmailStats() {
+        const totalEl = document.getElementById('email-total-count');
+        const unreadEl = document.getElementById('email-unread-count');
+        const starredEl = document.getElementById('email-starred-count');
+        const riskEl = document.getElementById('email-highrisk-count');
+        
+        if (totalEl) totalEl.textContent = this.emails.length;
+        if (unreadEl) unreadEl.textContent = this.emails.filter(e => !e.read).length;
+        if (starredEl) starredEl.textContent = this.emails.filter(e => e.is_starred).length;
+        if (riskEl) riskEl.textContent = this.emails.filter(e => e.risk_score >= 7).length;
+    }
+    
     filterEmails(filter = null) {
         const searchInput = document.getElementById('email-search');
         const searchTerm = searchInput ? searchInput.value.toLowerCase() : '';
+        
+        // Store current filter for use when rendering
+        this.currentEmailFilter = filter;
+        this.currentEmailSearch = searchTerm;
         
         // Update button states
         document.querySelectorAll('.email-filter-btn').forEach(btn => {
@@ -964,57 +1072,341 @@ window.dataLoader = new (class DashboardDataLoader {
                 btn.classList.add('bg-red-700');
             } else if (btn.textContent.includes('Safe')) {
                 btn.classList.add('bg-green-700');
+            } else if (btn.textContent.includes('Clients')) {
+                btn.classList.add('bg-yellow-600');
             } else {
                 btn.classList.add('bg-gray-700');
             }
         });
         
         if (filter && event && event.target) {
-            event.target.classList.remove('bg-gray-700', 'bg-red-700', 'bg-green-700');
+            event.target.classList.remove('bg-gray-700', 'bg-red-700', 'bg-green-700', 'bg-yellow-600');
             event.target.classList.add('bg-blue-600');
         }
         
-        // Get all email cards - they're divs with onclick="dataLoader.showEmailDetail"
-        const emailGrid = document.getElementById('emails-grid');
-        if (!emailGrid) return;
+        // Filter the full email list and re-render
+        let filteredEmails = [...this.emails];
         
-        const emailCards = emailGrid.querySelectorAll('[onclick*="showEmailDetail"]');
+        // Apply filter
+        if (filter && filter !== 'all') {
+            filteredEmails = filteredEmails.filter(email => {
+                if (filter === 'unread') return !email.read;
+                if (filter === 'read') return email.read;
+                if (filter === 'has-todos') return email.has_todos;
+                if (filter === 'high-priority') return email.priority === 'high';
+                if (filter === 'high-risk') return (email.risk_score || 0) >= 7;
+                if (filter === 'safe') return (email.risk_score || 0) < 3;
+                if (filter === 'clients') return this.isClientEmail(email);
+                if (filter.startsWith('label-')) {
+                    const label = filter.substring(6);
+                    return email.labels && email.labels.includes(label);
+                }
+                return true;
+            });
+        }
         
-        emailCards.forEach((card, index) => {
-            const email = this.emails[index];
-            if (!email) {
-                card.style.display = 'none';
-                return;
-            }
-            
-            let visible = true;
-            
-            // Apply filter
-            if (filter === 'unread') {
-                visible = !email.read;
-            } else if (filter === 'read') {
-                visible = email.read;
-            } else if (filter === 'has-todos') {
-                visible = email.has_todos;
-            } else if (filter === 'high-priority') {
-                visible = email.priority === 'high';
-            } else if (filter === 'high-risk') {
-                visible = (email.risk_score || 0) >= 7;
-            } else if (filter === 'safe') {
-                visible = (email.risk_score || 0) < 3;
-            } else if (filter && filter.startsWith('label-')) {
-                const label = filter.substring(6);
-                visible = email.labels && email.labels.includes(label);
-            }
-            
-            // Apply search
-            if (searchTerm && visible) {
-                const searchableText = `${email.sender} ${email.subject} ${email.snippet || ''}`.toLowerCase();
-                visible = searchableText.includes(searchTerm);
-            }
-            
-            card.style.display = visible ? 'block' : 'none';
+        // Apply search across ALL emails (not just displayed)
+        if (searchTerm) {
+            filteredEmails = filteredEmails.filter(email => {
+                const searchableText = `${email.sender} ${email.subject} ${email.snippet || ''} ${(email.labels || []).join(' ')}`.toLowerCase();
+                return searchableText.includes(searchTerm);
+            });
+        }
+        
+        // Render the filtered emails
+        this.renderFilteredEmails(filteredEmails);
+    }
+    
+    renderFilteredEmails(emails) {
+        const grid = document.getElementById('emails-grid');
+        if (!grid) return;
+        
+        // Keep the filter bar at the top
+        const filterBar = grid.querySelector('.col-span-full');
+        
+        // Sort emails: clients first, then by date
+        const sortedEmails = [...emails].sort((a, b) => {
+            const aIsClient = this.isClientEmail(a);
+            const bIsClient = this.isClientEmail(b);
+            if (aIsClient && !bIsClient) return -1;
+            if (!aIsClient && bIsClient) return 1;
+            const aDate = new Date(a.received_date || a.date || 0);
+            const bDate = new Date(b.received_date || b.date || 0);
+            return bDate - aDate;
         });
+        
+        if (sortedEmails.length === 0) {
+            const filterHtml = filterBar ? filterBar.outerHTML : '';
+            grid.innerHTML = filterHtml + `
+                <div class="col-span-full text-center py-12">
+                    <div class="text-6xl mb-4">🔍</div>
+                    <h3 class="text-xl font-semibold mb-2">No emails found</h3>
+                    <p class="text-gray-400">Try a different search or filter</p>
+                </div>
+            `;
+            return;
+        }
+        
+        const html = sortedEmails.map(email => {
+            const isClient = this.isClientEmail(email);
+            const feedback = this.feedbackData[`email-${email.id}`] || null;
+            const readClass = email.read ? 'opacity-70 bg-gray-800' : 'bg-gray-750 border-l-4 border-l-blue-500';
+            const readIndicator = email.read ? 
+                '<span class="text-gray-500 text-xs">✓</span>' : 
+                '<span class="flex items-center gap-1 text-blue-400 text-xs font-semibold"><span class="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></span></span>';
+            const smartTag = this.getSmartTagForEmail(email);
+            const starIcon = email.is_starred ? '⭐' : '☆';
+            const emailDate = email.received_date || email.date;
+            const timeAgo = this.getTimeAgo(emailDate);
+            
+            let riskBadge = '';
+            if (email.risk_score && email.risk_score >= 7) {
+                riskBadge = '<span class="text-xs bg-red-600 px-2 py-1 rounded">⚠️ Risk</span>';
+            }
+            
+            let smartTagHtml = '';
+            if (smartTag) {
+                const domain = email.sender.split('@')[1] || email.sender;
+                smartTagHtml = `<span class="text-xs bg-purple-600 px-2 py-1 rounded whitespace-nowrap cursor-help" title="Auto-tagged based on your feedback patterns from ${domain}">${smartTag}</span>`;
+            }
+            
+            const clientBadge = isClient ? '<span class="text-xs bg-yellow-500 text-black font-bold px-2 py-1 rounded">⭐ CLIENT</span>' : '';
+            const clientClass = isClient ? 'ring-2 ring-yellow-500' : '';
+            
+            return `
+            <div class="rounded-lg p-3 border border-gray-700 hover:border-gray-500 ${readClass} ${clientClass} flex items-start gap-3"
+                 data-email-id="${this.escapeHtml(email.id)}">
+                <div class="flex items-center gap-2 pt-1" onclick="event.stopPropagation()">
+                    <input type="checkbox" class="email-checkbox w-4 h-4 rounded" 
+                           data-email-checkbox="${this.escapeHtml(email.id)}"
+                           onchange="window.emailClient && emailClient.toggleEmailSelection('${this.escapeHtml(email.id)}', this.checked)">
+                    <button onclick="window.emailClient && emailClient.starEmail('${this.escapeHtml(email.id)}', ${!email.is_starred}); this.textContent = this.textContent === '☆' ? '⭐' : '☆';" 
+                            class="text-lg hover:scale-110 transition-transform" title="Star">${starIcon}</button>
+                </div>
+                <div class="flex-1 min-w-0 cursor-pointer" onclick="window.emailClient && emailClient.showEmailDetail('${this.escapeHtml(email.id)}')">
+                    <div class="flex items-center gap-2 mb-1">
+                        ${readIndicator}
+                        ${clientBadge}
+                        <span class="font-semibold text-white truncate">${this.escapeHtml(email.sender)}</span>
+                        <span class="text-xs text-gray-500 ml-auto whitespace-nowrap">${timeAgo}</span>
+                    </div>
+                    <div class="flex items-center gap-2 mb-1">
+                        <h4 class="font-medium text-gray-200 truncate flex-1">${this.escapeHtml(email.subject)}</h4>
+                        <div class="flex gap-1 items-center flex-shrink-0">
+                            <div class="trust-badge-container">${riskBadge}</div>
+                            ${smartTagHtml}
+                            ${email.has_todos ? '<span class="text-xs bg-orange-600 px-1 py-0.5 rounded">📋</span>' : ''}
+                        </div>
+                    </div>
+                    ${email.snippet ? `<p class="text-sm text-gray-400 truncate">${this.escapeHtml(email.snippet)}</p>` : ''}
+                </div>
+                <div class="flex flex-col gap-1" onclick="event.stopPropagation()">
+                    <button onclick="window.emailClient && emailClient.showComposeModal('reply', {id:'${this.escapeHtml(email.id)}', from:'${this.escapeHtml(email.sender)}', subject:'${this.escapeHtml(email.subject)}', snippet:'${this.escapeHtml((email.snippet || '').replace(/'/g, ''))}'})"
+                            class="px-2 py-1 rounded text-xs bg-blue-600 hover:bg-blue-700" title="Reply">↩️</button>
+                    <button onclick="window.emailClient && emailClient.archiveEmail('${this.escapeHtml(email.id)}'); this.closest('[data-email-id]').remove();"
+                            class="px-2 py-1 rounded text-xs bg-gray-700 hover:bg-gray-600" title="Archive">📥</button>
+                    <button onclick="if(confirm('Delete?')){window.emailClient && emailClient.deleteEmail('${this.escapeHtml(email.id)}'); this.closest('[data-email-id]').remove();}"
+                            class="px-2 py-1 rounded text-xs bg-gray-700 hover:bg-red-600" title="Delete">🗑️</button>
+                    ${!isClient ? `<button onclick="dataLoader.addSenderAsClient('${this.escapeHtml(email.sender)}')"
+                            class="px-2 py-1 rounded text-xs bg-gray-700 hover:bg-yellow-600" title="Add as Client">⭐</button>` : ''}
+                </div>
+            </div>
+        `;
+        }).join('');
+        
+        const filterHtml = filterBar ? filterBar.outerHTML : '';
+        grid.innerHTML = filterHtml + html;
+        
+        // Update stats based on filtered view
+        const totalEl = document.getElementById('email-total-count');
+        if (totalEl) totalEl.textContent = sortedEmails.length;
+    }
+    
+    // CLIENT EMAIL MANAGEMENT
+    isClientEmail(email) {
+        if (!email || !email.sender) return false;
+        const senderLower = email.sender.toLowerCase();
+        const senderDomain = senderLower.split('@')[1] || '';
+        
+        // Check against client domains
+        for (const domain of this.clientDomains) {
+            if (senderDomain === domain.toLowerCase() || senderDomain.endsWith('.' + domain.toLowerCase())) {
+                return true;
+            }
+        }
+        
+        // Check against specific client email addresses
+        for (const addr of this.clientEmailAddresses) {
+            if (senderLower.includes(addr.toLowerCase())) {
+                return true;
+            }
+        }
+        
+        return false;
+    }
+    
+    checkClientEmailAlerts(emails) {
+        const clientEmails = emails.filter(e => this.isClientEmail(e) && !e.read);
+        const newClientEmails = clientEmails.filter(e => !this.lastSeenClientEmails.includes(e.id));
+        
+        if (newClientEmails.length > 0) {
+            // Show notification
+            const count = newClientEmails.length;
+            const firstSender = newClientEmails[0].sender;
+            const message = count === 1 
+                ? `New email from client: ${firstSender}` 
+                : `${count} new emails from clients`;
+            
+            this.showNotification(`⭐ ${message}`, 'warning', 10000);
+            
+            // Play sound alert if not muted
+            if (!this.globalMuted) {
+                this.playAlertSound();
+            }
+            
+            // Update last seen
+            this.lastSeenClientEmails = [...this.lastSeenClientEmails, ...newClientEmails.map(e => e.id)];
+            localStorage.setItem('lastSeenClientEmails', JSON.stringify(this.lastSeenClientEmails));
+        }
+    }
+    
+    playAlertSound() {
+        try {
+            // Create a simple alert tone
+            const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            const oscillator = audioContext.createOscillator();
+            const gainNode = audioContext.createGain();
+            
+            oscillator.connect(gainNode);
+            gainNode.connect(audioContext.destination);
+            
+            oscillator.frequency.value = 880; // A5 note
+            oscillator.type = 'sine';
+            gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5);
+            
+            oscillator.start(audioContext.currentTime);
+            oscillator.stop(audioContext.currentTime + 0.5);
+        } catch (e) {
+            console.warn('Could not play alert sound:', e);
+        }
+    }
+    
+    showManageClientsModal() {
+        const currentDomains = this.clientDomains.join('\\n');
+        const currentAddresses = this.clientEmailAddresses.join('\\n');
+        
+        const content = `
+            <div class="space-y-4">
+                <p class="text-gray-300">Emails from these domains and addresses will be highlighted and appear at the top of your inbox with alerts.</p>
+                
+                <div>
+                    <label class="block text-sm font-medium text-gray-300 mb-1">Client Domains (one per line)</label>
+                    <textarea id="client-domains-input" rows="4" 
+                              class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white placeholder-gray-400"
+                              placeholder="example.com&#10;client-company.com">${currentDomains}</textarea>
+                    <p class="text-xs text-gray-500 mt-1">e.g., acme.com, bigclient.io</p>
+                </div>
+                
+                <div>
+                    <label class="block text-sm font-medium text-gray-300 mb-1">Client Email Addresses (one per line)</label>
+                    <textarea id="client-addresses-input" rows="4" 
+                              class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white placeholder-gray-400"
+                              placeholder="john@example.com&#10;ceo@bigclient.com">${currentAddresses}</textarea>
+                    <p class="text-xs text-gray-500 mt-1">For specific people not from a client domain</p>
+                </div>
+                
+                <div class="flex gap-3 pt-4">
+                    <button onclick="dataLoader.saveClientSettings()" 
+                            class="flex-1 bg-yellow-600 hover:bg-yellow-700 px-4 py-2 rounded-lg font-semibold">
+                        💾 Save Settings
+                    </button>
+                    <button onclick="closeModal()" 
+                            class="flex-1 bg-gray-600 hover:bg-gray-700 px-4 py-2 rounded-lg font-semibold">
+                        Cancel
+                    </button>
+                </div>
+            </div>
+        `;
+        
+        showModal('⭐ Manage Client Emails', content);
+    }
+    
+    saveClientSettings() {
+        const domainsInput = document.getElementById('client-domains-input');
+        const addressesInput = document.getElementById('client-addresses-input');
+        
+        if (domainsInput) {
+            this.clientDomains = domainsInput.value.split('\\n').map(s => s.trim()).filter(s => s);
+            localStorage.setItem('clientDomains', JSON.stringify(this.clientDomains));
+        }
+        
+        if (addressesInput) {
+            this.clientEmailAddresses = addressesInput.value.split('\\n').map(s => s.trim()).filter(s => s);
+            localStorage.setItem('clientEmailAddresses', JSON.stringify(this.clientEmailAddresses));
+        }
+        
+        // Clear last seen to re-trigger alerts for any current client emails
+        this.lastSeenClientEmails = [];
+        localStorage.setItem('lastSeenClientEmails', '[]');
+        
+        closeModal();
+        this.showNotification('Client settings saved! Refreshing emails...', 'success');
+        this.renderEmails();
+    }
+    
+    // Quick add current sender as client
+    addSenderAsClient(sender) {
+        const email = sender.toLowerCase();
+        const domain = email.split('@')[1];
+        
+        if (domain && !this.clientDomains.includes(domain)) {
+            // Ask if they want to add domain or just this address
+            const content = `
+                <div class="space-y-4">
+                    <p class="text-gray-300">Add <strong>${sender}</strong> as a client?</p>
+                    <div class="flex flex-col gap-2">
+                        <button onclick="dataLoader.addClientDomain('${domain}'); closeModal();"
+                                class="w-full bg-yellow-600 hover:bg-yellow-700 px-4 py-2 rounded-lg font-semibold">
+                            Add entire domain: @${domain}
+                        </button>
+                        <button onclick="dataLoader.addClientAddress('${email}'); closeModal();"
+                                class="w-full bg-gray-600 hover:bg-gray-700 px-4 py-2 rounded-lg font-semibold">
+                            Add just this address
+                        </button>
+                        <button onclick="closeModal()"
+                                class="w-full bg-gray-700 hover:bg-gray-800 px-4 py-2 rounded-lg">
+                            Cancel
+                        </button>
+                    </div>
+                </div>
+            `;
+            showModal('⭐ Add Client', content);
+        } else if (!this.clientEmailAddresses.includes(email)) {
+            this.addClientAddress(email);
+        }
+    }
+    
+    addClientDomain(domain) {
+        if (!this.clientDomains.includes(domain)) {
+            this.clientDomains.push(domain);
+            localStorage.setItem('clientDomains', JSON.stringify(this.clientDomains));
+            this.lastSeenClientEmails = [];
+            localStorage.setItem('lastSeenClientEmails', '[]');
+            this.showNotification(`Added @${domain} as client domain`, 'success');
+            this.renderEmails();
+        }
+    }
+    
+    addClientAddress(address) {
+        if (!this.clientEmailAddresses.includes(address)) {
+            this.clientEmailAddresses.push(address);
+            localStorage.setItem('clientEmailAddresses', JSON.stringify(this.clientEmailAddresses));
+            this.lastSeenClientEmails = [];
+            localStorage.setItem('lastSeenClientEmails', '[]');
+            this.showNotification(`Added ${address} as client`, 'success');
+            this.renderEmails();
+        }
     }
     
     // DASHBOARDS
@@ -4196,6 +4588,12 @@ Then ask me: "What would you like to do with this email?"`,
                     this.showNotification('Playlist not found', 'error');
                     return;
                 }
+                
+                // Use musicPlayer to set the playlist - this saves to server automatically
+                if (window.musicPlayer) {
+                    musicPlayer.setPlaylist(playlist.tracks, playlistId, playlist.name || playlistId);
+                }
+                
                 // Render tracks in the player section
                 const grid = document.getElementById('playlists-grid');
                 if (grid) {
@@ -5740,9 +6138,34 @@ Then ask me: "What would you like to do with this email?"`,
             }
         }
     }
-}
+    
+    // Initialize dashboard on page load
+    async init() {
+        try {
+            console.log('Initializing dashboard data loader...');
+            
+            // Load initial user profile
+            await this.loadUserProfile();
+            
+            // Load all data in parallel
+            await Promise.all([
+                this.loadTodos().catch(e => console.warn('Error loading todos:', e)),
+                this.loadCalendar().catch(e => console.warn('Error loading calendar:', e)),
+                this.loadEmails().catch(e => console.warn('Error loading emails:', e)),
+                this.loadGithub().catch(e => console.warn('Error loading github:', e)),
+                this.loadNews().catch(e => console.warn('Error loading news:', e)),
+                this.loadWeather().catch(e => console.warn('Error loading weather:', e))
+            ]);
+            
+            console.log('Dashboard initialization complete');
+        } catch (error) {
+            console.error('Error during dashboard initialization:', error);
+        }
+    }
+})();
 
 // Global instance
+console.log('✅ DashboardDataLoader class instantiated, window.dataLoader:', typeof window.dataLoader);
 
 // Dashboard Management Functions
 function showAddDashboardModal(dashboardData = null) {
@@ -6212,4 +6635,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     await updateGoogleAuthButton();
     await loadSuggestedTodos();
 });
+} catch (error) {
+    console.error('❌ CRITICAL: Failed to initialize DashboardDataLoader:', error);
+    console.error('Stack:', error.stack);
+    // Create a minimal fallback dataLoader
+    window.dataLoader = {
+        loadEmails: () => console.warn('dataLoader not functional'),
+        loadCalendar: () => console.warn('dataLoader not functional'),
+        loadTodos: () => console.warn('dataLoader not functional'),
+        loadGithub: () => console.warn('dataLoader not functional'),
+        loadNews: () => console.warn('dataLoader not functional'),
+        showNotification: (msg) => alert(msg)
+    };
+}
 

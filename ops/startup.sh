@@ -352,6 +352,64 @@ check_config() {
     echo -e "${GREEN}   ✅ Configuration ready${NC}"
 }
 
+# Function to check Ollama and recommended model
+check_ollama() {
+    echo -e "${BLUE}🤖 Checking Ollama AI server...${NC}"
+    
+    # Get Ollama host from config (default to localhost)
+    local ollama_host="localhost"
+    local ollama_port="11434"
+    
+    # Try to read from config.yaml if yq is available
+    if command -v yq &> /dev/null && [ -f "$PROJECT_ROOT/config/config.yaml" ]; then
+        ollama_host=$(yq -r '.ollama.host // "localhost"' "$PROJECT_ROOT/config/config.yaml" 2>/dev/null || echo "localhost")
+        ollama_port=$(yq -r '.ollama.port // "11434"' "$PROJECT_ROOT/config/config.yaml" 2>/dev/null || echo "11434")
+    fi
+    
+    # Check for database setting override (more reliable)
+    if [ -f "$PROJECT_ROOT/dashboard.db" ]; then
+        local db_host=$(sqlite3 "$PROJECT_ROOT/dashboard.db" "SELECT setting_value FROM settings WHERE setting_key='ollama_host';" 2>/dev/null | tr -d '"')
+        local db_port=$(sqlite3 "$PROJECT_ROOT/dashboard.db" "SELECT setting_value FROM settings WHERE setting_key='ollama_port';" 2>/dev/null | tr -d '"')
+        [ -n "$db_host" ] && ollama_host="$db_host"
+        [ -n "$db_port" ] && ollama_port="$db_port"
+    fi
+    
+    local ollama_url="http://${ollama_host}:${ollama_port}"
+    
+    # Check if Ollama is reachable
+    if ! curl -s --connect-timeout 5 "${ollama_url}/api/tags" > /dev/null 2>&1; then
+        echo -e "${YELLOW}   ⚠️  Ollama server not reachable at ${ollama_url}${NC}"
+        echo -e "${YELLOW}   AI assistant features may be limited${NC}"
+        echo -e "${BLUE}   To install Ollama: curl -fsSL https://ollama.com/install.sh | sh${NC}"
+        return 0
+    fi
+    
+    echo -e "${GREEN}   ✅ Ollama server reachable at ${ollama_url}${NC}"
+    
+    # Check for recommended model (deepseek-r1)
+    local recommended_model="deepseek-r1:latest"
+    local models=$(curl -s "${ollama_url}/api/tags" 2>/dev/null)
+    
+    if echo "$models" | grep -q "deepseek-r1"; then
+        echo -e "${GREEN}   ✅ Recommended model (deepseek-r1) is installed${NC}"
+    else
+        echo -e "${YELLOW}   ⚠️  Recommended model not found: ${recommended_model}${NC}"
+        echo -e "${YELLOW}   The deepseek-r1 model provides best context-awareness for the AI assistant${NC}"
+        echo -e "${BLUE}   To install: ollama pull deepseek-r1${NC}"
+        echo ""
+        
+        # List available models
+        local available=$(echo "$models" | grep -o '"name":"[^"]*"' | cut -d'"' -f4 | head -5)
+        if [ -n "$available" ]; then
+            echo -e "${BLUE}   Currently installed models:${NC}"
+            echo "$available" | while read -r model; do
+                echo -e "${BLUE}     - $model${NC}"
+            done
+        fi
+        echo ""
+    fi
+}
+
 # Function to check database integrity
 check_database() {
     echo -e "${BLUE}🗄️  Checking database integrity...${NC}"
@@ -519,6 +577,7 @@ case "${1:-start}" in
         install_requirements
         check_voice_system
         check_config
+        check_ollama
         check_database
         start_server
         ;;
@@ -534,6 +593,7 @@ case "${1:-start}" in
         install_requirements
         check_voice_system
         check_config
+        check_ollama
         check_database
         start_server
         ;;

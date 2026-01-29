@@ -63,7 +63,7 @@ class AIService:
             if ai_provider_type == 'ollama':
                 ollama_host = self.db.get_setting('ollama_host', 'localhost')
                 ollama_port = self.db.get_setting('ollama_port', 11434)
-                ollama_model = self.db.get_setting('ollama_model', 'llama3.2:latest')
+                ollama_model = self.db.get_setting('ollama_model', 'deepseek-r1:latest')
                 
                 config = {
                     'base_url': f'http://{ollama_host}:{ollama_port}',
@@ -286,7 +286,7 @@ class AIService:
         
         return {'style': 'Professional and friendly', 'tone': 'Helpful and concise'}
     
-    def build_context(self, user_message: str = "", force_refresh: bool = False) -> str:
+    async def build_context(self, user_message: str = "", force_refresh: bool = False) -> str:
         """
         Build comprehensive context for AI requests.
         Includes user profile, recent data, and relevant information.
@@ -341,107 +341,86 @@ class AIService:
             # 4. Today's Calendar Events
             context_parts.append(f"\n=== TODAY'S SCHEDULE ===")
             try:
-                # Get today's events from database
-                with self.db.get_connection() as conn:
-                    cursor = conn.cursor()
-                    cursor.execute("""
-                        SELECT summary, start_time, end_time, location, description
-                        FROM calendar_events
-                        WHERE date(start_time) = date('now')
-                        ORDER BY start_time
-                        LIMIT 10
-                    """)
-                    
-                    events = cursor.fetchall()
-                    if events:
-                        for event in events:
-                            time_str = event['start_time'].split('T')[1][:5] if 'T' in event['start_time'] else ''
-                            context_parts.append(f"  - {time_str} {event['summary']}")
-                            if event.get('location'):
-                                context_parts.append(f"    Location: {event['location']}")
-                    else:
-                        context_parts.append("No events scheduled for today")
-            except:
+                # Import the background manager to get cached data directly
+                from main import background_manager
+                cached_calendar = background_manager.get_cached_data('calendar')
+                if cached_calendar and cached_calendar.get('events'):
+                    events = cached_calendar['events']
+                    context_parts.append(f"You have {len(events)} upcoming events:")
+                    for event in events[:10]:
+                        time_str = event.get('time', 'All day')
+                        title = event.get('title') or event.get('summary', 'Untitled')
+                        context_parts.append(f"  - {time_str}: {title}")
+                        if event.get('location'):
+                            context_parts.append(f"    Location: {event['location']}")
+                        if event.get('description'):
+                            desc = str(event['description'])[:100]
+                            context_parts.append(f"    Details: {desc}...")
+                else:
+                    context_parts.append("No upcoming events (data may be loading)")
+            except Exception as e:
+                logger.warning(f"Failed to fetch calendar for context: {e}")
                 context_parts.append("(Calendar data not available)")
             
-            # 5. Recent Emails (important/unread)
-            context_parts.append(f"\n=== RECENT IMPORTANT EMAILS (You have full access to these) ===")
+            # 5. Recent Emails (compact summary)
+            context_parts.append(f"\n=== RECENT EMAILS ===")
             try:
-                with self.db.get_connection() as conn:
-                    cursor = conn.cursor()
-                    # Get both high priority and recent emails
-                    cursor.execute("""
-                        SELECT subject, sender, snippet, priority, has_todos, received_at
-                        FROM emails
-                        WHERE priority = 'high' OR has_todos = 1 OR received_at >= date('now', '-2 days')
-                        ORDER BY received_at DESC
-                        LIMIT 10
-                    """)
-                    
-                    emails = cursor.fetchall()
-                    if emails:
-                        context_parts.append(f"You have access to {len(emails)} recent/important emails:")
-                        for email in emails:
-                            flags = []
-                            if email.get('priority') == 'high':
-                                flags.append('HIGH')
-                            if email.get('has_todos'):
-                                flags.append('TODO')
-                            flag_str = f"[{','.join(flags)}]" if flags else ""
-                            
-                            context_parts.append(f"  {flag_str} From: {email['sender']}")
-                            context_parts.append(f"    Subject: {email['subject']}")
-                            if email.get('snippet'):
-                                snippet = email['snippet'][:100]
-                                context_parts.append(f"    Preview: {snippet}...")
-                    else:
-                        context_parts.append("No recent emails found in database (may need to collect)")
+                from main import background_manager
+                cached_email = background_manager.get_cached_data('email')
+                if cached_email and cached_email.get('emails'):
+                    emails = cached_email['emails']
+                    context_parts.append(f"{len(emails)} emails in inbox. Recent:")
+                    for email in emails[:8]:  # Reduced from 15
+                        sender = email.get('sender') or email.get('from', 'Unknown')
+                        # Extract just the name part if it's an email format
+                        if '<' in sender:
+                            sender = sender.split('<')[0].strip().strip('"')
+                        subject = email.get('subject', 'No subject')[:60]  # Truncate long subjects
+                        context_parts.append(f"  - {sender}: {subject}")
+                else:
+                    context_parts.append("No recent emails")
             except Exception as e:
-                context_parts.append(f"(Email data not available: {str(e)})")
+                logger.warning(f"Failed to fetch emails for context: {e}")
+                context_parts.append(f"(Email data not available)")
             
             # 6. GitHub Activity
             context_parts.append(f"\n=== GITHUB ACTIVITY ===")
             try:
-                with self.db.get_connection() as conn:
-                    cursor = conn.cursor()
-                    cursor.execute("""
-                        SELECT title, state, repo, url
-                        FROM github_issues
-                        WHERE state = 'open'
-                        ORDER BY updated_at DESC
-                        LIMIT 5
-                    """)
-                    
-                    issues = cursor.fetchall()
-                    if issues:
-                        context_parts.append(f"Open Issues ({len(issues)}):")
-                        for issue in issues:
-                            context_parts.append(f"  - {issue['repo']}: {issue['title']}")
+                from main import background_manager
+                cached_github = background_manager.get_cached_data('github')
+                if cached_github and cached_github.get('issues'):
+                    issues = cached_github['issues']
+                    open_issues = [i for i in issues if i.get('state') == 'open']
+                    if open_issues:
+                        context_parts.append(f"Open Issues ({len(open_issues)}):")
+                        for issue in open_issues[:5]:
+                            repo = issue.get('repo', 'unknown')
+                            title = issue.get('title', 'Untitled')
+                            context_parts.append(f"  - {repo}: {title}")
                     else:
                         context_parts.append("No open GitHub issues")
-            except:
+                else:
+                    context_parts.append("No GitHub data (may be loading)")
+            except Exception as e:
+                logger.warning(f"Failed to fetch GitHub for context: {e}")
                 context_parts.append("(GitHub data not available)")
             
-            # 7. Recent News (liked topics)
+            # 7. Recent News (compact)
             context_parts.append(f"\n=== RECENT NEWS ===")
             try:
-                with self.db.get_connection() as conn:
-                    cursor = conn.cursor()
-                    cursor.execute("""
-                        SELECT title, source
-                        FROM news_items
-                        ORDER BY published_at DESC
-                        LIMIT 5
-                    """)
-                    
-                    news = cursor.fetchall()
-                    if news:
-                        for item in news:
-                            context_parts.append(f"  - [{item['source']}] {item['title']}")
-                    else:
-                        context_parts.append("No recent news")
-            except:
-                context_parts.append("(News data not available)")
+                from main import background_manager
+                cached_news = background_manager.get_cached_data('news')
+                if cached_news and cached_news.get('articles'):
+                    articles = cached_news['articles']
+                    context_parts.append(f"{len(articles)} articles. Top 3:")
+                    for article in articles[:3]:
+                        title = article.get('title', 'Untitled')[:60]
+                        context_parts.append(f"  - {title}")
+                else:
+                    context_parts.append("No news available")
+            except Exception as e:
+                logger.warning(f"Failed to fetch news for context: {e}")
+                context_parts.append("(News not available)")
             
             # 8. Weather
             context_parts.append(f"\n=== WEATHER ===")
@@ -570,150 +549,26 @@ class AIService:
                 }
             
             # Build context
-            context = self.build_context(message) if include_context else ""
+            context = await self.build_context(message) if include_context else ""
             
             # Build messages for chat
             messages = []
             
             # System message with context
             if context:
-                # Use string concatenation to avoid f-string issues with curly braces in context
-                system_message = "You are a personal AI assistant with direct access to the user's dashboard data.\n\n"
+                # Put strong directive BEFORE the context data - KEEP IT SHORT
+                system_message = """You are a personal AI assistant with access to the user's data shown below.
+IMPORTANT: When asked about calendar, emails, tasks - USE THE DATA IN THIS MESSAGE. Never say "I don't have access."
+
+"""
                 system_message += context
-                system_message += f"""
+                # Keep additional instructions minimal
+                system_message += """
 
-=== YOUR CORE CAPABILITIES ===
-
-**TASK MANAGEMENT:**
-- Search existing tasks by keyword, status, priority, or due date
-- Create single or multiple tasks from conversations, notes, or meetings
-- Update task status (complete, pending, etc.)
-- Suggest task priorities based on deadlines and importance
-
-**EMAIL & CALENDAR ACCESS:**
-- You HAVE FULL ACCESS to the user's emails shown in the context above
-- Review email subjects, senders, and snippets provided
-- Identify action items and follow-ups from emails
-- Suggest responses or actions based on email content
-- View calendar events and identify scheduling conflicts
-- ALL EMAIL AND CALENDAR DATA IS IN THE CONTEXT - USE IT!
-
-**NOTE & MEETING ANALYSIS:**
-- Summarize meeting transcripts and notes
-- Extract action items and decisions from notes
-- Identify participants, key topics, and follow-up items
-- Connect meeting outcomes to existing tasks
-
-**INSTRUCTIONS:**
-- Use the specific information provided in the context above
-- You have DIRECT ACCESS to emails, calendar, tasks, GitHub, and notes data
-- Reference actual task IDs like [task_123] when discussing tasks
-- Reference actual email subjects and senders when discussing emails
-- Be proactive: suggest priorities, identify conflicts, highlight important items
-- When asked about tasks/schedule/emails/github/news, use the actual data provided
-- NEVER say "I don't have access" - the data is in your context!
-
-=== TASK OPERATIONS ===
-
-**SEARCHING TASKS:**
-When user asks "what tasks do I have about X" or "find tasks related to Y":
-1. Look through the task list in the context above
-2. Match by keywords in title/description
-3. Present results with task IDs, priorities, and due dates
-Example: "I found 3 tasks related to 'Buildly':
-- [task_001] Review Buildly architecture (High, due Dec 15)
-- [task_002] Update Buildly documentation (Medium, due Dec 20)
-- [task_003] Demo Buildly to client (High, due Dec 18)"
-
-**CREATING TASKS FROM NOTES:**
-When user asks to "extract tasks from my meeting with X" or "create tasks from note Y":
-1. Identify all action items in the note/meeting
-2. Parse each into: title, description, priority, due date
-3. Present as numbered list for approval
-4. Ask if user wants to create them
-
-Example workflow:
-User: "Extract tasks from my meeting with Crispin"
-You: "I found 8 action items in your Dec 3rd meeting with Crispin Courtenay. Here are the tasks:
-
-1. **Schedule follow-up meeting** - Review Buildly's product management workflow and demonstrate AI-enabled MCP/server visualization (High priority, due within 2 weeks - Dec 23)
-
-2. **Prepare demo walkthrough** - Product metrics and commit/process visualization showing AI agents and guardrails integration (Medium priority, due before follow-up meeting - Dec 20)
-
-3. **Send LLM hosting recommendations** - Cost-effective options, multi-agent orchestration, on-prem/GPU-lite approaches (Medium priority, due within 1 week - Dec 16)
-
-4. **Draft AI guardrails workflow** - Template for developer + AI guardrails with coding agents, documentation agents, MCP coordination (High priority, due within 3 weeks - Dec 30)
-
-5. **Experiment with Google Code Wiki** - Test on small repo and report findings on multi-repo coverage and doc quality (Medium priority, due before follow-up - Dec 20)
-
-6. **Read multi-agent white papers** - Anthropic/Google papers, summarize architectural patterns for safe multi-agent integration (Medium priority, due within 2 weeks - Dec 23)
-
-7. **Prepare authentication module description** - Document ephemeral-token design, integration points, security assumptions (Medium priority, ASAP - Dec 12)
-
-8. **Assess Q1 hiring plan** - Options: freelancers, direct hires, or independent developer network (High priority, due before follow-up - Dec 20)
-
-Would you like me to create all 8 tasks? (Type 'yes' to create them all, or specify which ones you want)"
-
-**BATCH TASK CREATION FORMAT:**
-When creating multiple tasks, use this JSON structure internally:
-{{
-  "approved": true,
-  "sync_to_ticktick": false,
-  "tasks": [
-    {{
-      "title": "Clear, actionable title",
-      "description": "Full context and details",
-      "priority": "high|medium|low",
-      "due_date": "YYYY-MM-DD"
-    }}
-  ]
-}}
-
-**SUMMARIZING MEETINGS:**
-When user asks to "summarize my meeting with X":
-1. Identify the note/transcript
-2. Extract: participants, date, main topics, decisions, action items, next steps
-3. Present in clear sections
-
-Example:
-"**Meeting Summary: Crispin Courtenay - Dec 3, 2025**
-
-**Participants:** Greg Lind (CEO, Buildly), Crispin Courtenay
-
-**Main Topics:**
-- Product management workflow and AI-enabled visualization
-- MCP server integration and multi-agent orchestration
-- Cost-effective LLM hosting options
-- Developer workflow with AI guardrails
-
-**Key Decisions:**
-- Will schedule follow-up meeting within 2 weeks
-- Focus on demonstrating product metrics and commit visualization
-- Explore Canadian LLM providers for cost savings
-
-**Action Items:** (8 total - see above for full list)
-
-**Next Steps:**
-- Greg to send follow-up meeting invite
-- Prepare demo walkthrough before meeting
-- Research and share LLM hosting recommendations"
-
-=== IMPORTANT RULES ===
-
-✅ DO:
-- Search context data before saying "no tasks found"
-- Extract specific due dates from phrases like "within 2 weeks", "before meeting", "ASAP"
-- Calculate actual dates (today is {datetime.now().strftime('%B %d, %Y')})
-- Present tasks with clear titles, priorities, and due dates
-- Ask for confirmation before creating tasks
-
-❌ DON'T:
-- Create tasks without user approval
-- Guess or make up task information
-- Sync to TickTick directly (explain user needs to use sync button)
-- Ignore existing tasks when user asks to create similar ones
-
-When user approves task creation, call the batch creation endpoint and report success."""
+RULES:
+- Answer questions using the data above
+- Reference specific events, emails, and tasks by name
+- Be concise and helpful"""
                 messages.append({'role': 'system', 'content': system_message})
             
             # Add conversation history if available
@@ -728,6 +583,9 @@ When user approves task creation, call the batch creation endpoint and report su
             
             # Add current message
             messages.append({'role': 'user', 'content': message})
+            
+            # Log what we're sending (minimal logging)
+            logger.info(f"Calling provider.chat with {len(messages)} messages")
             
             # Get AI response
             response = await provider.chat(messages, stream=False)

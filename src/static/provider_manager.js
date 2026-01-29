@@ -1,44 +1,31 @@
-    savePlaylistLocally(data) {
-        if (!data || !data.tracks) return;
-        const playlists = JSON.parse(localStorage.getItem('savedPlaylists') || '[]');
-        const playlist = {
-            timestamp: Date.now(),
-            mood: data.mood,
-            artists: data.artists,
-            songs: data.songs,
-            tracks: data.tracks
-        };
-        playlists.push(playlist);
-        localStorage.setItem('savedPlaylists', JSON.stringify(playlists));
-        alert('Playlist saved locally!');
-    },
+/**
+ * Provider Manager for Email and Calendar Providers
+ * Handles Google and Microsoft OAuth connections
+ */
 
-    likeSong(track, context) {
-        // track: {artist, title}, context: {mood, artists, songs}
-        const likedSongs = JSON.parse(localStorage.getItem('likedSongs') || '[]');
-        likedSongs.push({
-            ...track,
-            context,
-            timestamp: Date.now()
-        });
-        localStorage.setItem('likedSongs', JSON.stringify(likedSongs));
-        alert(`Liked: ${track.artist} - ${track.title}`);
-    },
+class ProviderManager {
+    constructor() {
+        this.providers = [];
+        this.currentProvider = null;
+    }
 
-    getAIContext() {
-        // Gather liked songs, moods, and suggestions for future AI requests
-        const likedSongs = JSON.parse(localStorage.getItem('likedSongs') || '[]');
-        const playlists = JSON.parse(localStorage.getItem('savedPlaylists') || '[]');
-        return {
-            likedSongs,
-            playlists
-        };
-    },
-// --- Mood/Artist/Song Music Player ---
+    async init() {
+        console.log('Initializing ProviderManager...');
+        await this.loadProviders();
+        console.log('ProviderManager initialized');
+    }
+
     async loadProviders() {
         try {
             const response = await fetch('/api/email/accounts');
+            if (!response.ok) {
+                console.warn('Could not load email accounts');
+                this.providers = [];
+                this.renderProviders();
+                return;
+            }
             const data = await response.json();
+            
             // Flatten providers into a single array with type
             this.providers = [];
             ['google', 'microsoft'].forEach(type => {
@@ -46,14 +33,15 @@
                     this.providers.push({
                         name: acc.name,
                         type: type,
-                        authenticated: true // Assume configured accounts are connected for now
+                        authenticated: true
                     });
                 });
             });
             this.renderProviders();
         } catch (error) {
             console.error('Error loading providers:', error);
-            this.showNotification('Failed to load providers', 'error');
+            this.providers = [];
+            this.renderProviders();
         }
     }
 
@@ -64,10 +52,11 @@
         if (this.providers.length === 0) {
             container.innerHTML = `
                 <div class="text-center py-8 text-gray-400">
-                    <p class="mb-4">No providers configured yet</p>
-                    <button onclick="providerManager.showAddProviderModal()" 
+                    <p class="mb-4">No email providers configured yet</p>
+                    <p class="text-sm mb-4">Connect Google to sync your emails and calendar</p>
+                    <button onclick="window.location.href='/auth/google'" 
                             class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded">
-                        Add Your First Provider
+                        Connect Google Account
                     </button>
                 </div>
             `;
@@ -94,227 +83,98 @@
                     <span class="text-xs ${statusColor} px-2 py-1 rounded">${statusText}</span>
                 </div>
                 <div class="flex gap-2">
-                    <button onclick="providerManager.switchToProvider('${provider.type}', '${provider.name}')" 
+                    <button onclick="window.providerManager.switchToProvider('${provider.type}', '${provider.name}')" 
                             class="bg-blue-600 hover:bg-blue-700 text-white text-sm px-3 py-1 rounded">
                         Switch
+                    </button>
+                    <button onclick="window.providerManager.testProvider('${provider.type}', '${provider.name}')" 
+                            class="bg-gray-600 hover:bg-gray-700 text-white text-sm px-3 py-1 rounded">
+                        Test
+                    </button>
+                    <button onclick="window.providerManager.disconnectProvider('${provider.type}', '${provider.name}')" 
+                            class="bg-red-600 hover:bg-red-700 text-white text-sm px-3 py-1 rounded">
+                        Disconnect
                     </button>
                 </div>
             </div>
         `;
-    }
-
-    async switchToProvider(type, name) {
-        try {
-            // Fetch emails for this provider/account
-            const response = await fetch(`/api/email/${type}/${encodeURIComponent(name)}`);
-            const data = await response.json();
-            // You can now update the UI to show emails for this account
-            if (window.dataLoader && typeof window.dataLoader.showEmailsForAccount === 'function') {
-                window.dataLoader.showEmailsForAccount(data);
-            } else {
-                alert(`Switched to ${type}: ${name}. Emails loaded.`);
-            }
-        } catch (error) {
-            this.showNotification('Failed to load emails for this account', 'error');
-        }
     }
 
     getProviderIcon(type) {
         const icons = {
             'google': '📧',
-            'microsoft': '📨',
-            'proton': '🔒'
+            'microsoft': '📬',
+            'icloud': '☁️'
         };
-        return icons[type] || '📬';
+        return icons[type] || '📧';
     }
 
-    showAddProviderModal() {
-        const modal = document.getElementById('add-provider-modal') || this.createAddProviderModal();
-
-        // Add Provider UI is disabled. Show instructions instead.
-        showAddProviderModal() {
-            alert(
-              'To add a new email provider, edit config/config.yaml and config/credentials.yaml, then restart the dashboard.\n\n' +
-              'For Google: Add a new entry under email_accounts.google\n' +
-              'For Microsoft: Add a new entry under email_accounts.microsoft\n' +
-              'After saving, run ./ops/startup.sh restart to apply changes.'
-            );
-        }
-            this.closeAddProviderModal();
-            await this.loadProviders();
-            
-            // Immediately prompt for authentication
-            setTimeout(() => {
-                this.authenticateProvider(data.provider_id, type);
-            }, 500);
-            
-        } catch (error) {
-            console.error('Error adding provider:', error);
-            this.showNotification(error.message, 'error');
-        }
-    }
-
-    async authenticateProvider(providerId, type) {
+    async switchToProvider(type, name) {
         try {
-            const response = await fetch(`/api/providers/${providerId}/auth-url`);
-            const data = await response.json();
-            
-            if (!response.ok) {
-                // Show detailed error if available
-                if (data.detail && typeof data.detail === 'object') {
-                    if (window.showDetailedError) {
-                        window.showDetailedError(data.detail);
-                        return;
-                    }
-                }
-                throw new Error(typeof data.detail === 'string' ? data.detail : 'Failed to get auth URL');
-            }
-            
-            if (data.requires_credentials) {
-                // Show Proton credentials form
-                this.showProtonCredentialsModal(providerId);
-            } else if (data.auth_url) {
-                // Show instructions and open OAuth flow
-                this.showNotification(data.instructions, 'info');
-                
-                // Open OAuth URL
-                if (data.auth_url.startsWith('http')) {
-                    window.location.href = data.auth_url;
-                } else {
-                    // Relative URL (Google)
-                    window.location.href = data.auth_url;
-                }
-            }
-            
-        } catch (error) {
-            console.error('Error authenticating provider:', error);
-            this.showNotification(error.message, 'error');
-        }
-    }
-
-    showProtonCredentialsModal(providerId) {
-        const modal = document.getElementById('proton-credentials-modal') || this.createProtonCredentialsModal(providerId);
-        modal.classList.remove('hidden');
-        document.getElementById('proton-provider-id').value = providerId;
-    }
-
-    createProtonCredentialsModal(providerId) {
-        const modal = document.createElement('div');
-        modal.id = 'proton-credentials-modal';
-        modal.className = 'hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4';
-        modal.innerHTML = `
-            <div class="bg-gray-900 border border-gray-700 rounded-lg max-w-md w-full p-6">
-                <div class="flex items-center justify-between mb-4">
-                    <h2 class="text-xl font-bold text-white">Proton Bridge Credentials</h2>
-                    <button onclick="providerManager.closeProtonCredentialsModal()" class="text-gray-400 hover:text-white">
-                        ✕
-                    </button>
-                </div>
-                
-                <div class="mb-4 bg-yellow-900 border border-yellow-700 rounded p-3 text-sm text-yellow-200">
-                    <p class="font-semibold mb-1">⚠️ Proton Bridge Required</p>
-                    <p>Make sure Proton Bridge is installed and running. Use the Bridge password, not your web password.</p>
-                </div>
-                
-                <form id="proton-credentials-form" onsubmit="providerManager.submitProtonCredentials(event)">
-                    <input type="hidden" id="proton-provider-id">
-                    
-                    <div class="mb-4">
-                        <label class="block text-sm font-medium text-gray-300 mb-2">ProtonMail Email</label>
-                        <input type="email" id="proton-username" 
-                               placeholder="your@proton.me"
-                               class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white" required>
-                    </div>
-                    
-                    <div class="mb-4">
-                        <label class="block text-sm font-medium text-gray-300 mb-2">Bridge Password</label>
-                        <input type="password" id="proton-password" 
-                               placeholder="Get from Bridge app settings"
-                               class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white" required>
-                        <p class="text-xs text-gray-500 mt-1">This is NOT your ProtonMail web password</p>
-                    </div>
-                    
-                    <div class="flex gap-2">
-                        <button type="submit" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded">
-                            Connect
-                        </button>
-                        <button type="button" onclick="providerManager.closeProtonCredentialsModal()" 
-                                class="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded">
-                            Cancel
-                        </button>
-                    </div>
-                </form>
-            </div>
-        `;
-        document.body.appendChild(modal);
-        return modal;
-    }
-
-    closeProtonCredentialsModal() {
-        const modal = document.getElementById('proton-credentials-modal');
-        if (modal) modal.classList.add('hidden');
-    }
-
-    async submitProtonCredentials(event) {
-        event.preventDefault();
-        
-        const providerId = document.getElementById('proton-provider-id').value;
-        const username = document.getElementById('proton-username').value;
-        const password = document.getElementById('proton-password').value;
-        
-        try {
-            const response = await fetch(`/api/providers/${providerId}/credentials`, {
+            const response = await fetch('/api/email/switch-account', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ username, password })
+                body: JSON.stringify({ provider: type, account_name: name })
             });
             
-            const data = await response.json();
-            
-            if (!response.ok) throw new Error(data.detail || 'Failed to set credentials');
-            
-            this.showNotification('Proton connected successfully!', 'success');
-            this.closeProtonCredentialsModal();
-            await this.loadProviders();
-            
+            if (response.ok) {
+                this.currentProvider = { type, name };
+                this.showNotification(`Switched to ${name}`, 'success');
+                
+                // Reload emails with new provider
+                if (window.dataLoader && typeof window.dataLoader.loadEmails === 'function') {
+                    window.dataLoader.loadEmails();
+                }
+            } else {
+                this.showNotification('Failed to switch provider', 'error');
+            }
         } catch (error) {
-            console.error('Error setting Proton credentials:', error);
-            this.showNotification(error.message, 'error');
+            console.error('Error switching provider:', error);
+            this.showNotification('Error switching provider', 'error');
         }
     }
 
-    async removeProvider(providerId) {
-        if (!confirm('Are you sure you want to remove this provider? This will delete all authentication data.')) {
+    async disconnectProvider(type, name) {
+        if (!confirm(`Disconnect ${name}? This will remove the account connection.`)) {
             return;
         }
         
         try {
-            const response = await fetch(`/api/providers/${providerId}`, {
-                method: 'DELETE'
+            const response = await fetch('/api/email/accounts', {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ provider: type, account_name: name })
             });
             
-            if (!response.ok) throw new Error('Failed to remove provider');
-            
-            this.showNotification('Provider removed', 'success');
-            await this.loadProviders();
-            
+            if (response.ok) {
+                this.showNotification(`Disconnected ${name}`, 'success');
+                await this.loadProviders();
+            } else {
+                this.showNotification('Failed to disconnect provider', 'error');
+            }
         } catch (error) {
-            console.error('Error removing provider:', error);
-            this.showNotification(error.message, 'error');
+            console.error('Error disconnecting provider:', error);
+            this.showNotification('Error disconnecting provider', 'error');
         }
     }
 
-    async testProvider(providerId) {
+    async testProvider(type, name) {
         try {
             this.showNotification('Testing connection...', 'info');
             
-            const response = await fetch('/api/providers/emails?days=1');
+            const response = await fetch('/api/email/test-account', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ provider: type, account_name: name })
+            });
+            
             const data = await response.json();
             
-            const providerEmails = data.by_provider[providerId] || 0;
-            
-            this.showNotification(`✅ Connected! Found ${providerEmails} recent emails`, 'success');
-            
+            if (data.success) {
+                this.showNotification(`✅ Connection successful! Found ${data.email_count || 0} emails`, 'success');
+            } else {
+                this.showNotification(`❌ Connection failed: ${data.error || 'Unknown error'}`, 'error');
+            }
         } catch (error) {
             console.error('Error testing provider:', error);
             this.showNotification('Connection test failed', 'error');
@@ -325,16 +185,21 @@
         if (window.showNotification) {
             window.showNotification(message, type);
         } else {
-            alert(message);
+            console.log(`[${type}] ${message}`);
+            if (type === 'error') {
+                alert(message);
+            }
         }
     }
 }
 
-// Initialize provider manager and Last.fm music player
-let providerManager;
+// Initialize provider manager immediately so it's available when needed
+window.providerManager = new ProviderManager();
+
+// Also initialize on DOMContentLoaded to attach event listeners
 document.addEventListener('DOMContentLoaded', () => {
-    providerManager = new ProviderManager();
-    // Attach Last.fm login button event
-    const lastfmBtn = document.getElementById('lastfm-login-btn');
-    if (lastfmBtn) {
+    if (window.providerManager) {
+        window.providerManager.init();
+    }
+});
 

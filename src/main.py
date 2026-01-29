@@ -9,7 +9,6 @@ from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 import uvicorn
 import json
-import requests
 from datetime import datetime, timedelta
 import os
 import yaml
@@ -160,8 +159,7 @@ async def health_check():
         "service": "personal-dashboard"
     }
 
-    from fastapi import FastAPI, HTTPException, Request
-    from modules.lastfm.endpoints import router as lastfm_router
+
 class BackgroundDataManager:
     """Manages background data collection and caching."""
     
@@ -335,9 +333,27 @@ class BackgroundDataManager:
     
     async def _collect_email(self):
         try:
-            from config.settings import Settings
-            settings = Settings()
-            collector = GmailCollector(settings)
+            # Create proper account config for GmailCollector (same as /api/email endpoint)
+            tokens_file = project_root / "tokens" / "google_credentials.json"
+            if not tokens_file.exists():
+                return {
+                    "emails": [],
+                    "total_count": 0,
+                    "unread_count": 0,
+                    "authenticated": False,
+                    "error": "Not authenticated with Google"
+                }
+            
+            account_config = {
+                'name': 'primary',
+                'credentials_file': str(tokens_file),
+                'scopes': [
+                    'https://www.googleapis.com/auth/gmail.readonly',
+                    'https://www.googleapis.com/auth/calendar.readonly'
+                ]
+            }
+            
+            collector = GmailCollector(account_config)
             return await collector.collect_data()
         except Exception as e:
             logger.error(f"Email collection error: {e}")
@@ -955,22 +971,6 @@ async def update_notes_settings(settings: Dict[str, Any]):
         logger.error(f"Error updating notes settings: {e}")
         return {"success": False, "error": str(e)}
 
-
-@app.get("/api/user/profile")
-async def get_user_profile():
-    """Get user profile settings."""
-    try:
-        profile = db.get_user_profile()
-        
-        return {
-            "success": True,
-            "profile": profile
-        }
-        
-    except Exception as e:
-        logger.error(f"Error getting user profile: {e}")
-        return {"success": False, "error": str(e)}
-
 @app.post("/api/user/profile")
 async def save_user_profile(request: Request):
     """Save user profile settings."""
@@ -998,13 +998,20 @@ async def get_ai_settings():
     """Get AI/Ollama configuration settings."""
     try:
         from database import DatabaseManager
+        from config.settings import Settings
+        
         db = DatabaseManager()
         
+        # Load defaults from config file
+        config_path = project_root / "src" / "config" / "config.yaml"
+        config_settings = Settings.from_yaml(str(config_path)) if config_path.exists() else Settings()
+        
+        # Use config file values as defaults, but database settings take priority
         settings = {
             'ai_provider': db.get_setting('ai_provider', 'ollama'),
-            'ollama_host': db.get_setting('ollama_host', 'localhost'),
-            'ollama_port': db.get_setting('ollama_port', 11434),
-            'ollama_model': db.get_setting('ollama_model', 'llama3.2:1b'),
+            'ollama_host': db.get_setting('ollama_host', config_settings.ollama.host),
+            'ollama_port': db.get_setting('ollama_port', config_settings.ollama.port),
+            'ollama_model': db.get_setting('ollama_model', config_settings.ollama.model),
             'openai_api_key': db.get_setting('openai_api_key', ''),
             'openai_model': db.get_setting('openai_model', 'gpt-4o-mini'),
             'gemini_api_key': db.get_setting('gemini_api_key', ''),
@@ -1082,7 +1089,7 @@ async def update_ai_settings(settings: Dict[str, Any]):
                     # Create/update Ollama provider
                     ollama_host = settings.get('ollama_host', db.get_setting('ollama_host', 'localhost'))
                     ollama_port = settings.get('ollama_port', db.get_setting('ollama_port', 11434))
-                    ollama_model = settings.get('ollama_model', db.get_setting('ollama_model', 'llama3.2:latest'))
+                    ollama_model = settings.get('ollama_model', db.get_setting('ollama_model', 'deepseek-r1:latest'))
                     
                     config = {
                         'base_url': f'http://{ollama_host}:{ollama_port}',
@@ -1199,11 +1206,17 @@ async def get_ollama_models():
     """Get list of available Ollama models."""
     try:
         from database import DatabaseManager
+        from config.settings import Settings
+        
         db = DatabaseManager()
         
-        # Get Ollama host and port from settings
-        host = db.get_setting('ollama_host', 'localhost')
-        port = db.get_setting('ollama_port', 11434)
+        # Load defaults from config file
+        config_path = project_root / "src" / "config" / "config.yaml"
+        config_settings = Settings.from_yaml(str(config_path)) if config_path.exists() else Settings()
+        
+        # Get Ollama host and port from settings (database takes priority over config)
+        host = db.get_setting('ollama_host', config_settings.ollama.host)
+        port = db.get_setting('ollama_port', config_settings.ollama.port)
         url = f"http://{host}:{port}/api/tags"
         
         async with httpx.AsyncClient() as client:
@@ -1422,8 +1435,27 @@ async def get_email():
         logger.info("Fetching fresh email data from Gmail")
         if COLLECTORS_AVAILABLE:
             try:
-                settings = Settings()
-                gmail_collector = GmailCollector(settings)
+                # Create proper account config for GmailCollector
+                tokens_file = project_root / "tokens" / "google_credentials.json"
+                if not tokens_file.exists():
+                    return {
+                        "emails": [],
+                        "total_count": 0,
+                        "unread_count": 0,
+                        "authenticated": False,
+                        "error": "Not authenticated with Google. Please click 'Connect Google' button."
+                    }
+                
+                account_config = {
+                    'name': 'primary',
+                    'credentials_file': str(tokens_file),
+                    'scopes': [
+                        'https://www.googleapis.com/auth/gmail.readonly',
+                        'https://www.googleapis.com/auth/calendar.readonly'
+                    ]
+                }
+                
+                gmail_collector = GmailCollector(account_config)
                 data = await gmail_collector.collect_data()
                 
                 logger.info(f"Retrieved {data.get('total_count', 0)} emails, {data.get('unread_count', 0)} unread")
@@ -1834,6 +1866,606 @@ async def remove_safe_sender(sender_email: str):
     except Exception as e:
         logger.error(f"Error removing safe sender: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# Email Client API Endpoints (Send, Reply, Forward, Delete, Archive, etc.)
+
+def get_gmail_service():
+    """Get authenticated Gmail service."""
+    from google.oauth2.credentials import Credentials
+    from googleapiclient.discovery import build
+    
+    tokens_file = project_root / "tokens" / "google_credentials.json"
+    if not tokens_file.exists():
+        raise HTTPException(status_code=401, detail="Not authenticated with Google. Please connect your Google account.")
+    
+    creds = Credentials.from_authorized_user_file(
+        str(tokens_file),
+        scopes=[
+            'https://www.googleapis.com/auth/gmail.readonly',
+            'https://www.googleapis.com/auth/gmail.send',
+            'https://www.googleapis.com/auth/gmail.modify',
+            'https://www.googleapis.com/auth/gmail.labels'
+        ]
+    )
+    
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            from google.auth.transport.requests import Request
+            creds.refresh(Request())
+            with open(tokens_file, 'w') as f:
+                f.write(creds.to_json())
+        else:
+            raise HTTPException(status_code=401, detail="Google credentials expired. Please reconnect.")
+    
+    return build('gmail', 'v1', credentials=creds)
+
+
+@app.post("/api/email/send")
+async def send_email(request: Request):
+    """Send a new email."""
+    try:
+        import base64
+        from email.mime.text import MIMEText
+        from email.mime.multipart import MIMEMultipart
+        from email.mime.base import MIMEBase
+        from email import encoders
+        
+        data = await request.json()
+        to = data.get('to', '')
+        cc = data.get('cc', '')
+        bcc = data.get('bcc', '')
+        subject = data.get('subject', '')
+        body = data.get('body', '')
+        html_body = data.get('html_body', '')
+        attachments = data.get('attachments', [])  # List of {filename, content_base64, mime_type}
+        
+        if not to:
+            raise HTTPException(status_code=400, detail="Recipient (to) is required")
+        
+        service = get_gmail_service()
+        
+        # Create message
+        if html_body or attachments:
+            message = MIMEMultipart('alternative')
+        else:
+            message = MIMEText(body, 'plain')
+        
+        message['to'] = to
+        if cc:
+            message['cc'] = cc
+        if bcc:
+            message['bcc'] = bcc
+        message['subject'] = subject
+        
+        if html_body:
+            # Add both plain and HTML versions
+            part1 = MIMEText(body, 'plain')
+            part2 = MIMEText(html_body, 'html')
+            message.attach(part1)
+            message.attach(part2)
+        
+        # Handle attachments
+        for attachment in attachments:
+            part = MIMEBase('application', 'octet-stream')
+            content = base64.b64decode(attachment['content_base64'])
+            part.set_payload(content)
+            encoders.encode_base64(part)
+            part.add_header('Content-Disposition', f"attachment; filename={attachment['filename']}")
+            message.attach(part)
+        
+        # Encode and send
+        raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
+        
+        result = service.users().messages().send(
+            userId='me',
+            body={'raw': raw}
+        ).execute()
+        
+        logger.info(f"Email sent successfully, message ID: {result['id']}")
+        
+        return {
+            "success": True,
+            "message_id": result['id'],
+            "thread_id": result.get('threadId'),
+            "message": "Email sent successfully"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error sending email: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/email/reply")
+async def reply_to_email(request: Request):
+    """Reply to an email."""
+    try:
+        import base64
+        from email.mime.text import MIMEText
+        from email.mime.multipart import MIMEMultipart
+        
+        data = await request.json()
+        message_id = data.get('message_id')
+        body = data.get('body', '')
+        html_body = data.get('html_body', '')
+        reply_all = data.get('reply_all', False)
+        
+        if not message_id:
+            raise HTTPException(status_code=400, detail="message_id is required")
+        
+        service = get_gmail_service()
+        
+        # Get original message to get thread info and headers
+        original = service.users().messages().get(userId='me', id=message_id, format='full').execute()
+        headers = {h['name'].lower(): h['value'] for h in original['payload'].get('headers', [])}
+        
+        thread_id = original.get('threadId')
+        original_from = headers.get('from', '')
+        original_to = headers.get('to', '')
+        original_cc = headers.get('cc', '')
+        original_subject = headers.get('subject', '')
+        message_id_header = headers.get('message-id', '')
+        
+        # Determine recipients
+        reply_to = original_from
+        cc = ''
+        if reply_all:
+            # Include all original recipients except myself
+            all_recipients = set()
+            if original_to:
+                all_recipients.update([e.strip() for e in original_to.split(',')])
+            if original_cc:
+                all_recipients.update([e.strip() for e in original_cc.split(',')])
+            # Remove the original sender (they're in 'to') and our own email
+            all_recipients.discard(original_from)
+            cc = ', '.join(all_recipients)
+        
+        # Create reply message
+        if html_body:
+            message = MIMEMultipart('alternative')
+            message.attach(MIMEText(body, 'plain'))
+            message.attach(MIMEText(html_body, 'html'))
+        else:
+            message = MIMEText(body, 'plain')
+        
+        message['to'] = reply_to
+        if cc:
+            message['cc'] = cc
+        message['subject'] = f"Re: {original_subject}" if not original_subject.startswith('Re:') else original_subject
+        message['In-Reply-To'] = message_id_header
+        message['References'] = message_id_header
+        
+        raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
+        
+        result = service.users().messages().send(
+            userId='me',
+            body={'raw': raw, 'threadId': thread_id}
+        ).execute()
+        
+        logger.info(f"Reply sent successfully, message ID: {result['id']}")
+        
+        return {
+            "success": True,
+            "message_id": result['id'],
+            "thread_id": result.get('threadId'),
+            "message": "Reply sent successfully"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error replying to email: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/email/forward")
+async def forward_email(request: Request):
+    """Forward an email."""
+    try:
+        import base64
+        from email.mime.text import MIMEText
+        from email.mime.multipart import MIMEMultipart
+        
+        data = await request.json()
+        message_id = data.get('message_id')
+        to = data.get('to', '')
+        additional_message = data.get('body', '')
+        
+        if not message_id or not to:
+            raise HTTPException(status_code=400, detail="message_id and to are required")
+        
+        service = get_gmail_service()
+        
+        # Get original message
+        original = service.users().messages().get(userId='me', id=message_id, format='full').execute()
+        headers = {h['name'].lower(): h['value'] for h in original['payload'].get('headers', [])}
+        
+        original_subject = headers.get('subject', '')
+        original_from = headers.get('from', '')
+        original_date = headers.get('date', '')
+        original_body = original.get('snippet', '')
+        
+        # Get full body if available
+        if 'body' in original['payload'] and original['payload']['body'].get('data'):
+            original_body = base64.urlsafe_b64decode(original['payload']['body']['data']).decode('utf-8', errors='ignore')
+        
+        # Create forwarded message
+        forward_body = f"""
+{additional_message}
+
+---------- Forwarded message ---------
+From: {original_from}
+Date: {original_date}
+Subject: {original_subject}
+
+{original_body}
+"""
+        
+        message = MIMEText(forward_body, 'plain')
+        message['to'] = to
+        message['subject'] = f"Fwd: {original_subject}" if not original_subject.startswith('Fwd:') else original_subject
+        
+        raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
+        
+        result = service.users().messages().send(
+            userId='me',
+            body={'raw': raw}
+        ).execute()
+        
+        logger.info(f"Email forwarded successfully, message ID: {result['id']}")
+        
+        return {
+            "success": True,
+            "message_id": result['id'],
+            "message": "Email forwarded successfully"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error forwarding email: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/email/delete")
+async def delete_email(request: Request):
+    """Move email to trash."""
+    try:
+        data = await request.json()
+        message_id = data.get('message_id')
+        permanent = data.get('permanent', False)
+        
+        if not message_id:
+            raise HTTPException(status_code=400, detail="message_id is required")
+        
+        service = get_gmail_service()
+        
+        if permanent:
+            # Permanently delete
+            service.users().messages().delete(userId='me', id=message_id).execute()
+            logger.info(f"Email permanently deleted: {message_id}")
+        else:
+            # Move to trash
+            service.users().messages().trash(userId='me', id=message_id).execute()
+            logger.info(f"Email moved to trash: {message_id}")
+        
+        return {
+            "success": True,
+            "message": "Email deleted successfully" if permanent else "Email moved to trash"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting email: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/email/archive")
+async def archive_email(request: Request):
+    """Archive email (remove from inbox)."""
+    try:
+        data = await request.json()
+        message_id = data.get('message_id')
+        
+        if not message_id:
+            raise HTTPException(status_code=400, detail="message_id is required")
+        
+        service = get_gmail_service()
+        
+        # Remove INBOX label to archive
+        service.users().messages().modify(
+            userId='me',
+            id=message_id,
+            body={'removeLabelIds': ['INBOX']}
+        ).execute()
+        
+        logger.info(f"Email archived: {message_id}")
+        
+        return {
+            "success": True,
+            "message": "Email archived successfully"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error archiving email: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/email/mark-read")
+async def mark_email_read(request: Request):
+    """Mark email as read or unread."""
+    try:
+        data = await request.json()
+        message_id = data.get('message_id')
+        read = data.get('read', True)
+        
+        if not message_id:
+            raise HTTPException(status_code=400, detail="message_id is required")
+        
+        service = get_gmail_service()
+        
+        if read:
+            # Mark as read (remove UNREAD label)
+            service.users().messages().modify(
+                userId='me',
+                id=message_id,
+                body={'removeLabelIds': ['UNREAD']}
+            ).execute()
+        else:
+            # Mark as unread (add UNREAD label)
+            service.users().messages().modify(
+                userId='me',
+                id=message_id,
+                body={'addLabelIds': ['UNREAD']}
+            ).execute()
+        
+        logger.info(f"Email marked as {'read' if read else 'unread'}: {message_id}")
+        
+        return {
+            "success": True,
+            "message": f"Email marked as {'read' if read else 'unread'}"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error marking email: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/email/star")
+async def star_email(request: Request):
+    """Star or unstar an email."""
+    try:
+        data = await request.json()
+        message_id = data.get('message_id')
+        starred = data.get('starred', True)
+        
+        if not message_id:
+            raise HTTPException(status_code=400, detail="message_id is required")
+        
+        service = get_gmail_service()
+        
+        if starred:
+            service.users().messages().modify(
+                userId='me',
+                id=message_id,
+                body={'addLabelIds': ['STARRED']}
+            ).execute()
+        else:
+            service.users().messages().modify(
+                userId='me',
+                id=message_id,
+                body={'removeLabelIds': ['STARRED']}
+            ).execute()
+        
+        logger.info(f"Email {'starred' if starred else 'unstarred'}: {message_id}")
+        
+        return {
+            "success": True,
+            "message": f"Email {'starred' if starred else 'unstarred'}"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error starring email: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/email/{message_id}")
+async def get_email_detail(message_id: str):
+    """Get full email details including body."""
+    try:
+        import base64
+        
+        service = get_gmail_service()
+        
+        # Get full message
+        message = service.users().messages().get(
+            userId='me',
+            id=message_id,
+            format='full'
+        ).execute()
+        
+        headers = {h['name'].lower(): h['value'] for h in message['payload'].get('headers', [])}
+        
+        # Extract body
+        body = ''
+        html_body = ''
+        attachments = []
+        
+        def extract_parts(payload):
+            nonlocal body, html_body, attachments
+            
+            if 'body' in payload and payload['body'].get('data'):
+                content = base64.urlsafe_b64decode(payload['body']['data']).decode('utf-8', errors='ignore')
+                mime_type = payload.get('mimeType', '')
+                if 'html' in mime_type:
+                    html_body = content
+                else:
+                    body = content
+            
+            if 'parts' in payload:
+                for part in payload['parts']:
+                    mime_type = part.get('mimeType', '')
+                    if mime_type.startswith('text/'):
+                        if 'body' in part and part['body'].get('data'):
+                            content = base64.urlsafe_b64decode(part['body']['data']).decode('utf-8', errors='ignore')
+                            if 'html' in mime_type:
+                                html_body = content
+                            else:
+                                body = content
+                    elif part.get('filename'):
+                        # This is an attachment
+                        attachments.append({
+                            'filename': part['filename'],
+                            'mime_type': mime_type,
+                            'size': part['body'].get('size', 0),
+                            'attachment_id': part['body'].get('attachmentId')
+                        })
+                    
+                    # Recurse into nested parts
+                    extract_parts(part)
+        
+        extract_parts(message['payload'])
+        
+        # Determine if starred
+        labels = message.get('labelIds', [])
+        is_starred = 'STARRED' in labels
+        is_unread = 'UNREAD' in labels
+        
+        return {
+            "success": True,
+            "email": {
+                "id": message_id,
+                "thread_id": message.get('threadId'),
+                "subject": headers.get('subject', ''),
+                "from": headers.get('from', ''),
+                "to": headers.get('to', ''),
+                "cc": headers.get('cc', ''),
+                "bcc": headers.get('bcc', ''),
+                "date": headers.get('date', ''),
+                "body": body,
+                "html_body": html_body,
+                "snippet": message.get('snippet', ''),
+                "labels": labels,
+                "is_starred": is_starred,
+                "is_unread": is_unread,
+                "attachments": attachments
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting email detail: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/email/{message_id}/attachment/{attachment_id}")
+async def get_email_attachment(message_id: str, attachment_id: str):
+    """Download an email attachment."""
+    try:
+        import base64
+        from fastapi.responses import Response
+        
+        service = get_gmail_service()
+        
+        attachment = service.users().messages().attachments().get(
+            userId='me',
+            messageId=message_id,
+            id=attachment_id
+        ).execute()
+        
+        data = base64.urlsafe_b64decode(attachment['data'])
+        
+        return Response(
+            content=data,
+            media_type='application/octet-stream',
+            headers={'Content-Disposition': f'attachment; filename="attachment"'}
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error downloading attachment: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/email/labels/list")
+async def get_email_labels():
+    """Get all Gmail labels."""
+    try:
+        service = get_gmail_service()
+        
+        results = service.users().labels().list(userId='me').execute()
+        labels = results.get('labels', [])
+        
+        return {
+            "success": True,
+            "labels": [
+                {
+                    "id": label['id'],
+                    "name": label['name'],
+                    "type": label['type']
+                }
+                for label in labels
+            ]
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting labels: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/email/labels/apply")
+async def apply_email_label(request: Request):
+    """Apply or remove labels from an email."""
+    try:
+        data = await request.json()
+        message_id = data.get('message_id')
+        add_labels = data.get('add_labels', [])
+        remove_labels = data.get('remove_labels', [])
+        
+        if not message_id:
+            raise HTTPException(status_code=400, detail="message_id is required")
+        
+        service = get_gmail_service()
+        
+        body = {}
+        if add_labels:
+            body['addLabelIds'] = add_labels
+        if remove_labels:
+            body['removeLabelIds'] = remove_labels
+        
+        if body:
+            service.users().messages().modify(
+                userId='me',
+                id=message_id,
+                body=body
+            ).execute()
+        
+        logger.info(f"Labels updated for email {message_id}")
+        
+        return {
+            "success": True,
+            "message": "Labels updated successfully"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error applying labels: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 # Task Management API Endpoints
 @app.get("/api/tasks")
@@ -2629,8 +3261,6 @@ async def get_news(filter: str = "all", include_read: bool = False):
         articles = await get_hacker_news_articles()
         return {"articles": articles, "filter": filter, "error": str(e), "source": "Error_Fallback"}
 
-async def get_hacker_news_articles():
-    """Get articles from Hacker News as fallback"""
 async def get_hacker_news_articles():
     """Get articles from Hacker News as fallback"""
     articles = []
@@ -3484,6 +4114,258 @@ async def create_custom_playlist(request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/api/ai/generate-playlist")
+async def generate_ai_playlist(request: Request):
+    """
+    Generate a playlist using AI (Ollama) with direct API call.
+    Bypasses conversation context for more reliable JSON output.
+    """
+    import aiohttp
+    import json
+    import re
+    
+    try:
+        data = await request.json()
+        mood = data.get('mood', 'chill')
+        liked_artists = data.get('liked_artists', []) or data.get('artists', [])
+        seed_songs = data.get('seed_songs', [])
+        genres = data.get('genres', [])
+        max_tracks = max(10, data.get('max_tracks', 20))  # Minimum 10 tracks
+        
+        # Mood descriptions for better AI understanding
+        mood_descriptions = {
+            'chill': 'relaxed, calm, laid-back',
+            'energetic': 'upbeat, high-energy, pump-up',
+            'focus': 'concentration, ambient, instrumental',
+            'happy': 'uplifting, feel-good, positive',
+            'sad': 'melancholic, emotional, slow',
+            'party': 'dance, club, EDM',
+            'romantic': 'love songs, slow jams',
+            'workout': 'high energy, motivating',
+            'sleep': 'calm, ambient, peaceful',
+            'custom': 'mixed genres'
+        }
+        mood_desc = mood_descriptions.get(mood.lower(), mood)
+        
+        # Build a concise but effective prompt
+        prompt_parts = [f"Generate {max_tracks} real songs for \"{mood}\" mood ({mood_desc})."]
+        
+        if liked_artists:
+            prompt_parts.append(f"Include multiple songs by: {', '.join(liked_artists)}. Also include similar artists.")
+        
+        if genres:
+            prompt_parts.append(f"Genres: {', '.join(genres)}.")
+            
+        if seed_songs:
+            prompt_parts.append(f"Similar to: {', '.join(seed_songs)}.")
+        
+        prompt_parts.append("""
+Return ONLY a JSON array, no markdown or explanation.
+Format: [{"artist": "Name", "title": "Song"}, ...]""")
+        
+        prompt = " ".join(prompt_parts)
+
+        # Get Ollama settings
+        ollama_url = db.get_setting('ollama_url', 'http://localhost:11434')
+        # Use llama3.2:1b which follows instructions better than tinyllama
+        model = 'llama3.2:1b'
+        
+        # Try to use the configured model if available
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(f"{ollama_url}/api/tags") as resp:
+                    if resp.status == 200:
+                        tags = await resp.json()
+                        available_models = [m['name'] for m in tags.get('models', [])]
+                        if 'llama3.2:1b' in available_models:
+                            model = 'llama3.2:1b'
+                        elif 'llama3.2:latest' in available_models:
+                            model = 'llama3.2:latest'
+                        elif 'roger:latest' in available_models:
+                            model = 'roger:latest'
+                        logger.info(f"Using model {model} for playlist generation")
+        except Exception as e:
+            logger.warning(f"Could not check available models: {e}")
+        
+        # Call Ollama directly
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f"{ollama_url}/api/generate",
+                json={
+                    "model": model,
+                    "prompt": prompt,
+                    "stream": False,
+                    "options": {
+                        "temperature": 0.7,
+                        "num_predict": 2000
+                    }
+                },
+                timeout=aiohttp.ClientTimeout(total=60)
+            ) as response:
+                if response.status != 200:
+                    error_text = await response.text()
+                    logger.error(f"Ollama error: {error_text}")
+                    raise HTTPException(status_code=500, detail=f"AI service error: {error_text}")
+                
+                result = await response.json()
+                ai_response = result.get('response', '')
+                logger.info(f"AI playlist response: {ai_response[:200]}...")
+        
+        # Parse the JSON from the response
+        # Remove code blocks
+        clean_response = ai_response
+        clean_response = re.sub(r'```json\s*', '', clean_response)
+        clean_response = re.sub(r'```\s*', '', clean_response)
+        clean_response = re.sub(r'```python[\s\S]*?```', '', clean_response)
+        clean_response = re.sub(r'```bash[\s\S]*?```', '', clean_response)
+        
+        # Find JSON array with artist/title
+        tracks = None
+        
+        # First, try to parse the entire response as JSON (with cleaning)
+        clean_response_stripped = clean_response.strip()
+        if clean_response_stripped.startswith('['):
+            try:
+                # Find the matching closing bracket
+                bracket_count = 0
+                end_pos = 0
+                for i, char in enumerate(clean_response_stripped):
+                    if char == '[':
+                        bracket_count += 1
+                    elif char == ']':
+                        bracket_count -= 1
+                        if bracket_count == 0:
+                            end_pos = i + 1
+                            break
+                
+                json_str = clean_response_stripped[:end_pos]
+                json_str = json_str.replace('\u2018', "'").replace('\u2019', "'")
+                json_str = json_str.replace('\u201c', '"').replace('\u201d', '"')
+                json_str = re.sub(r',\s*]', ']', json_str)
+                json_str = re.sub(r',\s*}', '}', json_str)
+                
+                parsed = json.loads(json_str)
+                if isinstance(parsed, list) and len(parsed) > 0:
+                    if isinstance(parsed[0], dict) and 'artist' in parsed[0]:
+                        tracks = parsed
+                    elif isinstance(parsed[0], str) and ' - ' in parsed[0]:
+                        # Convert "Artist - Title" format
+                        tracks = []
+                        for item in parsed:
+                            if isinstance(item, str) and ' - ' in item:
+                                parts = item.split(' - ', 1)
+                                tracks.append({"artist": parts[0].strip(), "title": parts[1].strip()})
+            except (json.JSONDecodeError, IndexError):
+                pass
+        
+        # Fallback: find JSON arrays in the response
+        if not tracks:
+            json_matches = re.findall(r'\[[\s\S]*?\]', clean_response)
+            for match in json_matches:
+                if '"artist"' in match and '"title"' in match:
+                    try:
+                        # Clean up common JSON issues
+                        clean_json = match
+                        clean_json = clean_json.replace('\u2018', "'").replace('\u2019', "'")
+                        clean_json = clean_json.replace('\u201c', '"').replace('\u201d', '"')
+                        clean_json = re.sub(r',\s*]', ']', clean_json)
+                        clean_json = re.sub(r',\s*}', '}', clean_json)
+                        
+                        tracks = json.loads(clean_json)
+                        if isinstance(tracks, list) and len(tracks) > 0:
+                            break
+                    except json.JSONDecodeError:
+                        continue
+                else:
+                    # Try parsing as simple string array like ["Artist - Title", ...]
+                    try:
+                        parsed = json.loads(match)
+                        if isinstance(parsed, list) and len(parsed) > 0 and isinstance(parsed[0], str):
+                            # Convert "Artist - Title" format to objects
+                            converted = []
+                            for item in parsed:
+                                if isinstance(item, str) and ' - ' in item:
+                                    parts = item.split(' - ', 1)
+                                    if len(parts) == 2:
+                                        converted.append({"artist": parts[0].strip(), "title": parts[1].strip()})
+                            if converted:
+                                tracks = converted
+                                break
+                    except json.JSONDecodeError:
+                        continue
+        
+        # Fallback: extract individual song objects
+        if not tracks:
+            song_pattern = r'\{\s*"artist"\s*:\s*"([^"]+)"\s*,\s*"title"\s*:\s*"([^"]+)"\s*\}'
+            song_matches = re.findall(song_pattern, clean_response)
+            if song_matches:
+                tracks = [{"artist": m[0], "title": m[1]} for m in song_matches]
+        
+        # Fallback: look for "Artist - Title" pattern anywhere in response
+        if not tracks:
+            # Match quoted strings in format "Artist - Title"
+            string_pattern = r'"([^"]+)\s*-\s*([^"]+)"'
+            string_matches = re.findall(string_pattern, clean_response)
+            if string_matches and len(string_matches) >= 2:  # At least 2 songs
+                tracks = [{"artist": m[0].strip(), "title": m[1].strip()} for m in string_matches]
+        
+        if not tracks or len(tracks) == 0:
+            logger.error(f"Could not parse playlist from AI response: {ai_response}")
+            raise HTTPException(status_code=500, detail="AI did not return valid playlist data")
+        
+        # Filter valid tracks
+        tracks = [t for t in tracks if isinstance(t, dict) and t.get('artist') and t.get('title')]
+        
+        logger.info(f"Generated playlist with {len(tracks)} tracks")
+        return {
+            "success": True,
+            "tracks": tracks,
+            "mood": mood,
+            "model": model
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error generating AI playlist: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/youtube/search")
+async def youtube_search(q: str):
+    """Search YouTube and return the first video ID"""
+    import aiohttp
+    import re
+    
+    try:
+        # Use YouTube's search page and extract video ID
+        search_url = f"https://www.youtube.com/results?search_query={q}"
+        
+        async with aiohttp.ClientSession() as session:
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            }
+            async with session.get(search_url, headers=headers) as response:
+                if response.status == 200:
+                    html = await response.text()
+                    
+                    # Extract video ID from the search results
+                    # Look for "videoId":"XXXXXXXXXXX" pattern
+                    video_id_match = re.search(r'"videoId":"([a-zA-Z0-9_-]{11})"', html)
+                    
+                    if video_id_match:
+                        video_id = video_id_match.group(1)
+                        logger.info(f"YouTube search for '{q}' found video: {video_id}")
+                        return {"videoId": video_id, "query": q}
+        
+        logger.warning(f"No video found for query: {q}")
+        return {"videoId": None, "query": q, "error": "No video found"}
+        
+    except Exception as e:
+        logger.error(f"YouTube search error: {e}")
+        return {"videoId": None, "query": q, "error": str(e)}
+
+
 @app.get("/api/music/playlists")
 async def get_saved_playlists():
     """Get all saved playlists"""
@@ -3809,12 +4691,16 @@ async def google_calendar_auth():
         flow = Flow.from_client_secrets_file(
             str(creds_file),
             scopes=[
-                'https://www.googleapis.com/auth/calendar.readonly',
-                'https://www.googleapis.com/auth/gmail.readonly',
-                'https://www.googleapis.com/auth/drive.readonly',
                 'https://www.googleapis.com/auth/userinfo.profile',
                 'https://www.googleapis.com/auth/userinfo.email',
-                'openid'
+                'openid',
+                'https://www.googleapis.com/auth/calendar.readonly',
+                'https://www.googleapis.com/auth/calendar.events',
+                'https://www.googleapis.com/auth/gmail.readonly',
+                'https://www.googleapis.com/auth/gmail.send',
+                'https://www.googleapis.com/auth/gmail.modify',
+                'https://www.googleapis.com/auth/gmail.labels',
+                'https://www.googleapis.com/auth/drive.readonly'
             ],
             redirect_uri='http://localhost:8008/auth/google/callback'
         )
@@ -3859,18 +4745,32 @@ async def google_oauth_callback(code: str = None, state: str = None, error: str 
         flow = Flow.from_client_secrets_file(
             str(creds_file),
             scopes=[
-                'https://www.googleapis.com/auth/calendar.readonly',
-                'https://www.googleapis.com/auth/gmail.readonly',
-                'https://www.googleapis.com/auth/drive.readonly',
                 'https://www.googleapis.com/auth/userinfo.profile',
                 'https://www.googleapis.com/auth/userinfo.email',
-                'openid'
+                'openid',
+                'https://www.googleapis.com/auth/calendar.readonly',
+                'https://www.googleapis.com/auth/calendar.events',
+                'https://www.googleapis.com/auth/gmail.readonly',
+                'https://www.googleapis.com/auth/gmail.send',
+                'https://www.googleapis.com/auth/gmail.modify',
+                'https://www.googleapis.com/auth/gmail.labels',
+                'https://www.googleapis.com/auth/drive.readonly'
             ],
             redirect_uri='http://localhost:8008/auth/google/callback'
         )
         
         # Exchange code for token (disable scope validation to handle Google's automatic additions)
-        flow.fetch_token(code=code)
+        try:
+            flow.fetch_token(code=code)
+        except Exception as token_error:
+            # If scope mismatch, user needs to disconnect and retry
+            if 'Scope has changed' in str(token_error):
+                logger.warning(f"Scope mismatch detected: {token_error}. User needs to disconnect and retry.")
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"OAuth scope changed. Please disconnect and reconnect: {str(token_error)}"
+                )
+            raise
         
         # Save credentials
         credentials = flow.credentials
@@ -3886,18 +4786,28 @@ async def google_oauth_callback(code: str = None, state: str = None, error: str 
         
         logger.info(f"Google credentials saved to {tokens_file}")
         
-        # Return success page that closes the popup
+        # Return success page that redirects back to the dashboard
         return HTMLResponse(content="""
         <html>
-            <head><title>Google Authentication Success</title></head>
-            <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
-                <h2 style="color: green;">✅ Google Authentication Successful!</h2>
-                <p>Your Google Calendar and Gmail access has been configured.</p>
-                <p>You can close this window and return to your dashboard.</p>
+            <head>
+                <title>Google Authentication Success</title>
+                <meta http-equiv="refresh" content="2;url=/">
+            </head>
+            <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px; background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); color: white; min-height: 100vh;">
+                <div style="max-width: 400px; margin: 0 auto; padding-top: 100px;">
+                    <div style="font-size: 64px; margin-bottom: 20px;">✅</div>
+                    <h2 style="color: #4ade80; margin-bottom: 16px;">Google Authentication Successful!</h2>
+                    <p style="color: #9ca3af; margin-bottom: 24px;">Your Google Calendar and Gmail access has been configured.</p>
+                    <p style="color: #6b7280; font-size: 14px;">Redirecting to dashboard...</p>
+                    <div style="margin-top: 20px;">
+                        <a href="/" style="color: #60a5fa; text-decoration: none;">Click here if not redirected automatically</a>
+                    </div>
+                </div>
                 <script>
+                    // Redirect to dashboard after brief delay
                     setTimeout(() => {
-                        window.close();
-                    }, 3000);
+                        window.location.href = '/';
+                    }, 2000);
                 </script>
             </body>
         </html>
@@ -4486,7 +5396,7 @@ async def get_ai_context():
     
     try:
         ai_service = get_ai_service(db, settings)
-        context = ai_service.build_context(force_refresh=True)
+        context = await ai_service.build_context(force_refresh=True)
         context_hash = ai_service.get_context_hash(context)
         
         return {
@@ -5246,7 +6156,7 @@ async def initialize_ai_providers():
             # Get Ollama configuration from settings
             ollama_host = db.get_setting('ollama_host', 'localhost')
             ollama_port = db.get_setting('ollama_port', 11434)
-            ollama_model = db.get_setting('ollama_model', 'llama3.2:latest')
+            ollama_model = db.get_setting('ollama_model', 'deepseek-r1:latest')
             
             # Build the URL from configured host and port
             configured_url = f'http://{ollama_host}:{ollama_port}'
@@ -5502,6 +6412,38 @@ async def get_leads():
     except Exception as e:
         logger.error(f"Error getting leads: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/leads/list")
+async def get_leads_list(limit: int = 100):
+    """Get leads list (alias for /api/leads with different format)."""
+    try:
+        # Import lead generation modules
+        from processors.lead_generator import LeadGenerator, PotentialLead
+        
+        lead_generator = LeadGenerator()
+        leads_list = []
+        
+        # Try to load existing leads from file
+        try:
+            leads_file = project_root / "data" / "generated_leads.json"
+            with open(leads_file, 'r') as f:
+                leads_data = json.load(f)
+                leads_list = leads_data if isinstance(leads_data, list) else []
+        except FileNotFoundError:
+            leads_list = []
+        
+        # Apply limit
+        leads_list = leads_list[:limit]
+        
+        return {
+            "leads": leads_list,
+            "total": len(leads_list)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting leads list: {e}")
+        return {"leads": [], "total": 0, "error": str(e)}
 
 
 @app.post("/api/leads/generate")

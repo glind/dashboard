@@ -24,9 +24,15 @@ class OllamaSettings(BaseSettings):
 class GoogleSettings(BaseSettings):
     """Google APIs configuration."""
     credentials_file: Optional[str] = Field(default=None, description="Path to Google credentials JSON")
+    token_file: Optional[str] = Field(default=None, description="Path to Google OAuth token JSON (auto-set)")
     scopes: list = Field(default_factory=lambda: [
         'https://www.googleapis.com/auth/gmail.readonly',
-        'https://www.googleapis.com/auth/calendar.readonly'
+        'https://www.googleapis.com/auth/calendar.readonly',
+        'https://www.googleapis.com/auth/calendar.events',
+        'https://www.googleapis.com/auth/drive.readonly',
+        'https://www.googleapis.com/auth/userinfo.profile',
+        'https://www.googleapis.com/auth/userinfo.email',
+        'openid'
     ])
 
 

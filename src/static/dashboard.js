@@ -4,13 +4,78 @@
         playlist: [], // [{title, artist, youtubeId}]
         current: 0,
         ytPlayer: null,
-        isPlaying: false
+        isPlaying: false,
+        playlistId: null, // ID of the currently playing playlist
+        playlistName: 'Queue' // Name of the current playlist
     };
 
-    window.loadYouTubePlayer = function(playlist) {
+    // Expose state for persistence
+    window.ytPlayerState = ytPlayerState;
+
+    window.loadYouTubePlayer = function(playlist, playlistId, playlistName) {
         ytPlayerState.playlist = playlist || [];
         ytPlayerState.current = 0;
+        ytPlayerState.playlistId = playlistId || null;
+        ytPlayerState.playlistName = playlistName || 'Queue';
         renderYTPlayer();
+        // Save playback state to database
+        savePlaybackState();
+    };
+
+    // Save playback state to database
+    async function savePlaybackState() {
+        try {
+            await fetch('/api/music/playback-state', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    playlist_id: ytPlayerState.playlistId || 'manual',
+                    playlist_name: ytPlayerState.playlistName || 'Queue',
+                    tracks: ytPlayerState.playlist,
+                    current_index: ytPlayerState.current
+                })
+            });
+        } catch (e) {
+            console.warn('Failed to save playback state:', e);
+        }
+    }
+
+    // Update just the current index
+    async function updatePlaybackIndex() {
+        try {
+            await fetch('/api/music/playback-state/index', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ index: ytPlayerState.current })
+            });
+        } catch (e) {
+            console.warn('Failed to update playback index:', e);
+        }
+    }
+
+    // Load playback state from database
+    window.loadPlaybackState = async function() {
+        try {
+            const response = await fetch('/api/music/playback-state');
+            if (response.ok) {
+                const data = await response.json();
+                // Handle response format from music module: {success: bool, state: {...}}
+                const state = data.state;
+                
+                if (state && state.tracks && state.tracks.length > 0) {
+                    ytPlayerState.playlist = state.tracks;
+                    ytPlayerState.current = state.current_index || 0;
+                    ytPlayerState.playlistId = state.playlist_id;
+                    ytPlayerState.playlistName = state.playlist_name;
+                    console.log(`Restored playback state: ${state.playlist_name} (${state.tracks.length} tracks, index ${state.current_index})`);
+                    renderYTPlayer();
+                    return true;
+                }
+            }
+        } catch (e) {
+            console.warn('Failed to load playback state:', e);
+        }
+        return false;
     };
 
     async function searchYouTubeVideo(artist, title) {
@@ -34,6 +99,12 @@
         if (titleEl) titleEl.textContent = now ? now.title : 'No Track Playing';
         if (artistEl) artistEl.textContent = now ? now.artist : '';
         
+        // Update playlist name display
+        const playlistNameEl = document.getElementById('yt-playlist-name');
+        if (playlistNameEl) {
+            playlistNameEl.textContent = ytPlayerState.playlistName || 'Queue';
+        }
+        
         // Embed YouTube
         const ytDiv = document.getElementById('yt-player-embed');
         if (ytDiv && now) {
@@ -51,6 +122,10 @@
             
             if (videoId) {
                 ytDiv.innerHTML = `<iframe width="100%" height="315" src="https://www.youtube.com/embed/${videoId}?autoplay=1&enablejsapi=1" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>`;
+                // Show audio control panel for music
+                if (window.dataLoader && window.dataLoader.showAudioControlPanel) {
+                    window.dataLoader.showAudioControlPanel('music', `${now.title} - ${now.artist}`);
+                }
             } else {
                 // Fallback: link to YouTube search
                 const searchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(now.artist + ' ' + now.title)}`;
@@ -91,6 +166,7 @@
         if (ytPlayerState.current < ytPlayerState.playlist.length-1) {
             ytPlayerState.current++;
             renderYTPlayer();
+            updatePlaybackIndex();
         }
     };
     
@@ -98,23 +174,32 @@
         if (ytPlayerState.current > 0) {
             ytPlayerState.current--;
             renderYTPlayer();
+            updatePlaybackIndex();
         }
     };
     
     window.ytJumpTo = function(idx) {
         ytPlayerState.current = idx;
         renderYTPlayer();
+        updatePlaybackIndex();
     };
 
-    document.addEventListener('DOMContentLoaded', function() {
+    document.addEventListener('DOMContentLoaded', async function() {
         if (document.getElementById('yt-player-embed')) {
-            window.loadYouTubePlayer([
-                {title: 'Blinding Lights', artist: 'The Weeknd', youtubeId: 'fHI8X4OXluQ'},
-                {title: 'Levitating', artist: 'Dua Lipa', youtubeId: 'TUVcZfQe-Kw'},
-                {title: 'Save Your Tears', artist: 'The Weeknd', youtubeId: 'XXYlFuWEuKI'},
-                {title: 'Peaches', artist: 'Justin Bieber', youtubeId: 'tQ0yjYUFKAE'},
-                {title: 'Watermelon Sugar', artist: 'Harry Styles', youtubeId: 'E07s5ZYygMg'}
-            ]);
+            // Try to restore saved playback state first
+            const restored = await window.loadPlaybackState();
+            
+            if (!restored) {
+                // Only load default playlist if no saved state
+                window.loadYouTubePlayer([
+                    {title: 'Blinding Lights', artist: 'The Weeknd', youtubeId: 'fHI8X4OXluQ'},
+                    {title: 'Levitating', artist: 'Dua Lipa', youtubeId: 'TUVcZfQe-Kw'},
+                    {title: 'Save Your Tears', artist: 'The Weeknd', youtubeId: 'XXYlFuWEuKI'},
+                    {title: 'Peaches', artist: 'Justin Bieber', youtubeId: 'tQ0yjYUFKAE'},
+                    {title: 'Watermelon Sugar', artist: 'Harry Styles', youtubeId: 'E07s5ZYygMg'}
+                ], 'default', 'Default Playlist');
+            }
+            
             const playBtn = document.getElementById('yt-play-btn');
             const nextBtn = document.getElementById('yt-next-btn');
             const prevBtn = document.getElementById('yt-prev-btn');
@@ -203,6 +288,7 @@ try {
         
         try {
             this.initVoiceRecognition();
+            this.initAudioControlPanel();
             this.loadDashboardConfig();
             this.loadAutoRefreshSettings();
             this.loadBackgroundSettings();
@@ -269,7 +355,8 @@ try {
             this.loadGithub(),
             this.loadNews(),
             this.loadWeather(),
-            this.loadDashboards()
+            this.loadDashboards(),
+            this.loadPlaylists()  // Load saved playlists from database
         ]);
         
         this.updateAllCounts();
@@ -2599,13 +2686,17 @@ try {
     
     speakEventAlert(eventTitle, minutesUntil, location) {
         if (!this.speechSynthesis) return;
+        if (this.globalMuted) return;
         
         const message = `Hello! You have an event starting in ${minutesUntil} minute${minutesUntil > 1 ? 's' : ''}. ${eventTitle}. ${location ? `The location is ${location}.` : ''} Would you like to join?`;
         
-        const utterance = new SpeechSynthesisUtterance(message);
+        // Sanitize text (though this message is clean, good practice)
+        const cleanedMessage = this.sanitizeTextForSpeech(message);
+        
+        const utterance = new SpeechSynthesisUtterance(cleanedMessage);
         utterance.rate = 0.9; // Slightly slower for clarity
         utterance.pitch = 1.0;
-        utterance.volume = 0.8;
+        utterance.volume = this.audioState?.volume ?? 0.8;
         
         // Try to use a more natural voice
         const voices = this.speechSynthesis.getVoices();
@@ -2613,6 +2704,12 @@ try {
         if (preferredVoice) {
             utterance.voice = preferredVoice;
         }
+        
+        // Show audio control panel
+        this.showAudioControlPanel('alert', 'Event Alert');
+        
+        utterance.onend = () => this.hideAudioControlPanel();
+        utterance.onerror = () => this.hideAudioControlPanel();
         
         this.speechSynthesis.speak(utterance);
     }
@@ -2668,6 +2765,13 @@ try {
         
         const utterance = new SpeechSynthesisUtterance(message);
         utterance.rate = 0.9;
+        utterance.volume = this.audioState?.volume ?? 0.8;
+        
+        // Show audio control panel
+        this.showAudioControlPanel('speech', 'Responding...');
+        utterance.onend = () => this.hideAudioControlPanel();
+        utterance.onerror = () => this.hideAudioControlPanel();
+        
         this.speechSynthesis.speak(utterance);
         
         if (response !== 'unclear') {
@@ -3495,6 +3599,164 @@ Then ask me: "What would you like to do with this email?"`,
         }
     }
     
+    /**
+     * Convert Markdown to HTML for display in chat messages.
+     * Supports: bold, italic, code, code blocks, links, lists, headers, blockquotes
+     */
+    renderMarkdown(text) {
+        if (!text) return text;
+        
+        let html = this.escapeHtml(text);
+        
+        // Code blocks (```code```) - must be first to prevent inner processing
+        html = html.replace(/```(\w*)\n?([\s\S]*?)```/g, (match, lang, code) => {
+            return `<pre class="bg-gray-900 rounded p-2 my-2 overflow-x-auto text-xs"><code class="language-${lang || 'text'}">${code.trim()}</code></pre>`;
+        });
+        
+        // Inline code (`code`)
+        html = html.replace(/`([^`]+)`/g, '<code class="bg-gray-900 px-1 rounded text-xs">$1</code>');
+        
+        // Headers (### Header)
+        html = html.replace(/^### (.+)$/gm, '<h3 class="font-bold text-base mt-2 mb-1">$1</h3>');
+        html = html.replace(/^## (.+)$/gm, '<h2 class="font-bold text-lg mt-2 mb-1">$1</h2>');
+        html = html.replace(/^# (.+)$/gm, '<h1 class="font-bold text-xl mt-2 mb-1">$1</h1>');
+        
+        // Bold (**text** or __text__)
+        html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+        html = html.replace(/__([^_]+)__/g, '<strong>$1</strong>');
+        
+        // Italic (*text* or _text_)
+        html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+        html = html.replace(/(?<![a-zA-Z])_([^_]+)_(?![a-zA-Z])/g, '<em>$1</em>');
+        
+        // Strikethrough (~~text~~)
+        html = html.replace(/~~([^~]+)~~/g, '<del>$1</del>');
+        
+        // Links [text](url)
+        html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" class="text-blue-400 hover:underline">$1</a>');
+        
+        // Blockquotes (> text)
+        html = html.replace(/^&gt; (.+)$/gm, '<blockquote class="border-l-2 border-gray-500 pl-2 italic text-gray-400">$1</blockquote>');
+        
+        // Unordered lists (- item or * item)
+        html = html.replace(/^[\-\*] (.+)$/gm, '<li class="ml-4">• $1</li>');
+        
+        // Ordered lists (1. item)
+        html = html.replace(/^\d+\. (.+)$/gm, '<li class="ml-4 list-decimal">$1</li>');
+        
+        // Horizontal rule (---)
+        html = html.replace(/^---$/gm, '<hr class="border-gray-600 my-2">');
+        
+        // Line breaks (preserve paragraph structure)
+        html = html.replace(/\n\n/g, '</p><p class="mt-2">');
+        html = html.replace(/\n/g, '<br>');
+        
+        // Wrap in paragraph if not already structured
+        if (!html.startsWith('<')) {
+            html = `<p>${html}</p>`;
+        }
+        
+        return html;
+    }
+    
+    /**
+     * Strip Markdown syntax from text for speech.
+     * Removes formatting markers while keeping the content readable.
+     */
+    stripMarkdownForSpeech(text) {
+        if (!text) return text;
+        
+        let cleaned = text;
+        
+        // Remove code blocks entirely (they don't speak well)
+        cleaned = cleaned.replace(/```[\s\S]*?```/g, ' code block ');
+        
+        // Remove inline code backticks
+        cleaned = cleaned.replace(/`([^`]+)`/g, '$1');
+        
+        // Remove headers markers
+        cleaned = cleaned.replace(/^#{1,6}\s+/gm, '');
+        
+        // Remove bold markers
+        cleaned = cleaned.replace(/\*\*([^*]+)\*\*/g, '$1');
+        cleaned = cleaned.replace(/__([^_]+)__/g, '$1');
+        
+        // Remove italic markers
+        cleaned = cleaned.replace(/\*([^*]+)\*/g, '$1');
+        cleaned = cleaned.replace(/(?<![a-zA-Z])_([^_]+)_(?![a-zA-Z])/g, '$1');
+        
+        // Remove strikethrough
+        cleaned = cleaned.replace(/~~([^~]+)~~/g, '$1');
+        
+        // Convert links to just the text
+        cleaned = cleaned.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1');
+        
+        // Remove blockquote markers
+        cleaned = cleaned.replace(/^>\s*/gm, '');
+        
+        // Remove list markers
+        cleaned = cleaned.replace(/^[\-\*]\s+/gm, '');
+        cleaned = cleaned.replace(/^\d+\.\s+/gm, '');
+        
+        // Remove horizontal rules
+        cleaned = cleaned.replace(/^---$/gm, '');
+        
+        // Remove excess whitespace
+        cleaned = cleaned.replace(/\n{3,}/g, '\n\n');
+        
+        return cleaned;
+    }
+    
+    /**
+     * Sanitize text for natural speech by removing elements that sound bad when spoken.
+     * Removes URLs, hashes, long numbers, file paths, markdown syntax, etc.
+     */
+    sanitizeTextForSpeech(text) {
+        if (!text) return text;
+        
+        // First strip markdown syntax
+        let cleaned = this.stripMarkdownForSpeech(text);
+        
+        // URLs
+        cleaned = cleaned.replace(/https?:\/\/[^\s<>"{}|\\^`\[\]]+/gi, 'link');
+        cleaned = cleaned.replace(/www\.[^\s<>"{}|\\^`\[\]]+/gi, 'link');
+        
+        // Email addresses
+        cleaned = cleaned.replace(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g, 'email address');
+        
+        // UUIDs
+        cleaned = cleaned.replace(/[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}/g, 'ID');
+        
+        // SHA/MD5 hashes (32+ hex chars)
+        cleaned = cleaned.replace(/\b[a-fA-F0-9]{32,}\b/g, 'hash');
+        
+        // Long hex values
+        cleaned = cleaned.replace(/\b0x[a-fA-F0-9]{8,}\b/g, 'hex value');
+        
+        // Long numeric sequences (7+ digits)
+        cleaned = cleaned.replace(/\b\d{7,}\b/g, 'number');
+        
+        // File paths
+        cleaned = cleaned.replace(/[\/\\][\w.\/\\-]{10,}/g, ' file path ');
+        
+        // Base64-like strings
+        cleaned = cleaned.replace(/[A-Za-z0-9+\/=]{40,}/g, 'encoded data');
+        
+        // JSON-like content
+        cleaned = cleaned.replace(/\{[^{}]{100,}\}/g, 'data object');
+        
+        // Code syntax
+        cleaned = cleaned.replace(/[\[\]{}();]{3,}/g, '');
+        
+        // Multiple special chars
+        cleaned = cleaned.replace(/[_\-=]{4,}/g, ' ');
+        
+        // Clean up whitespace
+        cleaned = cleaned.replace(/\s+/g, ' ').trim();
+        
+        return cleaned;
+    }
+    
     speakText(text, forceSignature = false) {
         // Check if globally muted
         if (this.globalMuted) {
@@ -3502,14 +3764,21 @@ Then ask me: "What would you like to do with this email?"`,
             return;
         }
         
+        // Sanitize text for natural speech
+        const cleanedText = this.sanitizeTextForSpeech(text);
+        if (!cleanedText || cleanedText.length < 2) {
+            console.log('🔇 Text too short after sanitization, skipping');
+            return;
+        }
+        
         // Check if Rogr is selected (default)
         if (!this.selectedVoice || this.selectedVoice === 'rogr') {
             // Use Rogr battle-droid voice system
             // If forceSignature is true (from test button), use it; otherwise use setting
-            this.speakWithRogr(text, 'droid', forceSignature ? true : null);
+            this.speakWithRogr(cleanedText, 'droid', forceSignature ? true : null);
         } else {
             // Use browser TTS for other voices
-            this.speakWithBrowserTTS(text);
+            this.speakWithBrowserTTS(cleanedText);
         }
     }
     
@@ -3519,7 +3788,11 @@ Then ask me: "What would you like to do with this email?"`,
             // Cancel any ongoing speech
             window.speechSynthesis.cancel();
             
-            const utterance = new SpeechSynthesisUtterance(text);
+            // Sanitize text if not already done
+            const cleanedText = this.sanitizeTextForSpeech(text);
+            if (!cleanedText || cleanedText.length < 2) return;
+            
+            const utterance = new SpeechSynthesisUtterance(cleanedText);
             
             // Find and set the selected voice
             if (this.selectedVoice) {
@@ -3529,10 +3802,22 @@ Then ask me: "What would you like to do with this email?"`,
                 }
             }
             
-            // Set voice properties
+            // Set voice properties - use audio state volume if available
             utterance.rate = 0.9;
             utterance.pitch = 1.0;
-            utterance.volume = 1.0;
+            utterance.volume = this.audioState?.volume ?? 0.8;
+            
+            // Show audio control panel
+            this.showAudioControlPanel('speech', 'Speaking...');
+            
+            // Hide panel when speech ends
+            utterance.onend = () => {
+                this.hideAudioControlPanel();
+            };
+            
+            utterance.onerror = () => {
+                this.hideAudioControlPanel();
+            };
             
             window.speechSynthesis.speak(utterance);
         } else {
@@ -3545,6 +3830,9 @@ Then ask me: "What would you like to do with this email?"`,
         if (addSignature === null) {
             addSignature = this.voiceSignatureEnabled;
         }
+        
+        // Show audio control panel
+        this.showAudioControlPanel('ai-voice', 'Rogr speaking...');
         
         try {
             const response = await fetch('/api/voice/test', {
@@ -3560,9 +3848,16 @@ Then ask me: "What would you like to do with this email?"`,
             const result = await response.json();
             if (!result.success) {
                 console.error('Voice system error:', result.error);
+                this.hideAudioControlPanel();
+            } else {
+                // Voice was sent to PersonaPlex - hide after estimated time
+                // Rough estimate: 100ms per character
+                const estimatedDuration = Math.max(2000, text.length * 100);
+                setTimeout(() => this.hideAudioControlPanel(), estimatedDuration);
             }
         } catch (error) {
             console.error('Failed to speak with Rogr:', error);
+            this.hideAudioControlPanel();
         }
     }
     
@@ -3570,13 +3865,17 @@ Then ask me: "What would you like to do with this email?"`,
     speakTextBrowser(text) {
         if (!this.speechSynthesis) return;
         
+        // Sanitize text
+        const cleanedText = this.sanitizeTextForSpeech(text);
+        if (!cleanedText || cleanedText.length < 2) return;
+        
         // Cancel any ongoing speech
         this.speechSynthesis.cancel();
         
-        const utterance = new SpeechSynthesisUtterance(text);
+        const utterance = new SpeechSynthesisUtterance(cleanedText);
         utterance.rate = 0.9;
         utterance.pitch = 1.0;
-        utterance.volume = 0.8;
+        utterance.volume = this.audioState?.volume ?? 0.8;
         
         // Get available voices (they may have loaded since init)
         const voices = this.speechSynthesis.getVoices();
@@ -3632,35 +3931,263 @@ Then ask me: "What would you like to do with this email?"`,
     stopSpeech() {
         if (this.speechSynthesis) {
             this.speechSynthesis.cancel();
-            this.hideStopSpeechButton();
-            this.stopStopCommandListener();
+        }
+        this.hideAudioControlPanel();
+        this.stopStopCommandListener();
+    }
+    
+    // =========================================================================
+    // FLOATING AUDIO CONTROL PANEL
+    // Unified control for all audio: speech, music, AI voice
+    // =========================================================================
+    
+    initAudioControlPanel() {
+        // Track audio state
+        this.audioState = {
+            isSpeaking: false,
+            isMusicPlaying: false,
+            currentSource: null, // 'speech', 'music', 'ai-voice'
+            volume: 0.8,
+            isMuted: false
+        };
+        
+        // Create the floating panel (hidden by default)
+        this.createAudioControlPanel();
+    }
+    
+    createAudioControlPanel() {
+        // Remove existing panel if any
+        const existing = document.getElementById('audio-control-panel');
+        if (existing) existing.remove();
+        
+        const panel = document.createElement('div');
+        panel.id = 'audio-control-panel';
+        panel.className = 'fixed bottom-6 right-6 z-[9999] bg-gray-900/95 backdrop-blur-sm border border-gray-700 rounded-2xl shadow-2xl p-3 transition-all duration-300 transform translate-y-full opacity-0 pointer-events-none';
+        panel.innerHTML = `
+            <div class="flex items-center gap-3">
+                <!-- Audio source indicator -->
+                <div id="audio-source-indicator" class="flex items-center gap-2 px-3 py-1.5 bg-gray-800 rounded-lg min-w-[120px]">
+                    <span id="audio-icon" class="text-lg">🔊</span>
+                    <span id="audio-label" class="text-sm text-gray-300 truncate">Audio</span>
+                </div>
+                
+                <!-- Volume slider -->
+                <div class="flex items-center gap-2">
+                    <button id="audio-mute-btn" class="p-2 rounded-lg hover:bg-gray-700 transition-colors" title="Mute">
+                        <svg id="volume-icon" class="w-5 h-5 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072M18.364 5.636a9 9 0 010 12.728M12 6.253v11.494c0 .935-1.03 1.535-1.856 1.082l-4.39-2.561A2 2 0 014.9 16H3a2 2 0 01-2-2v-4a2 2 0 012-2h1.9a2 2 0 00.854-.189l4.39-2.561C10.97 4.719 12 5.319 12 6.253z"/>
+                        </svg>
+                    </button>
+                    <input type="range" id="audio-volume-slider" min="0" max="100" value="80" 
+                           class="w-20 h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500">
+                </div>
+                
+                <!-- Skip/Next button -->
+                <button id="audio-skip-btn" class="p-2 rounded-lg hover:bg-gray-700 transition-colors" title="Skip">
+                    <svg class="w-5 h-5 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 5v14"/>
+                    </svg>
+                </button>
+                
+                <!-- Stop button -->
+                <button id="audio-stop-btn" class="p-2 bg-red-600 hover:bg-red-700 rounded-lg transition-colors" title="Stop">
+                    <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <rect x="6" y="6" width="12" height="12" rx="1" stroke-width="2"/>
+                    </svg>
+                </button>
+                
+                <!-- Close/minimize button -->
+                <button id="audio-close-btn" class="p-1.5 rounded-lg hover:bg-gray-700 transition-colors text-gray-500 hover:text-gray-300" title="Hide controls">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                </button>
+            </div>
+        `;
+        
+        document.body.appendChild(panel);
+        
+        // Bind event handlers
+        this.bindAudioControlEvents();
+    }
+    
+    bindAudioControlEvents() {
+        const muteBtn = document.getElementById('audio-mute-btn');
+        const volumeSlider = document.getElementById('audio-volume-slider');
+        const skipBtn = document.getElementById('audio-skip-btn');
+        const stopBtn = document.getElementById('audio-stop-btn');
+        const closeBtn = document.getElementById('audio-close-btn');
+        
+        if (muteBtn) {
+            muteBtn.onclick = () => this.toggleAudioMute();
+        }
+        
+        if (volumeSlider) {
+            volumeSlider.oninput = (e) => this.setAudioVolume(e.target.value / 100);
+        }
+        
+        if (skipBtn) {
+            skipBtn.onclick = () => this.skipCurrentAudio();
+        }
+        
+        if (stopBtn) {
+            stopBtn.onclick = () => this.stopAllAudio();
+        }
+        
+        if (closeBtn) {
+            closeBtn.onclick = () => this.hideAudioControlPanel();
+        }
+        
+        // Keyboard shortcut: Escape to stop audio
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && this.audioState?.isSpeaking) {
+                this.stopAllAudio();
+            }
+        });
+    }
+    
+    showAudioControlPanel(source = 'speech', label = 'Speaking...') {
+        if (!this.audioState) this.initAudioControlPanel();
+        
+        this.audioState.currentSource = source;
+        this.audioState.isSpeaking = true;
+        
+        const panel = document.getElementById('audio-control-panel');
+        const icon = document.getElementById('audio-icon');
+        const labelEl = document.getElementById('audio-label');
+        
+        if (!panel) {
+            this.createAudioControlPanel();
+            return this.showAudioControlPanel(source, label);
+        }
+        
+        // Update source indicator
+        const icons = {
+            'speech': '🗣️',
+            'music': '🎵',
+            'ai-voice': '🤖',
+            'alert': '🔔'
+        };
+        
+        if (icon) icon.textContent = icons[source] || '🔊';
+        if (labelEl) labelEl.textContent = label;
+        
+        // Show panel with animation
+        panel.classList.remove('translate-y-full', 'opacity-0', 'pointer-events-none');
+        panel.classList.add('translate-y-0', 'opacity-100', 'pointer-events-auto');
+    }
+    
+    hideAudioControlPanel() {
+        if (this.audioState) {
+            this.audioState.isSpeaking = false;
+            this.audioState.currentSource = null;
+        }
+        
+        const panel = document.getElementById('audio-control-panel');
+        if (panel) {
+            panel.classList.add('translate-y-full', 'opacity-0', 'pointer-events-none');
+            panel.classList.remove('translate-y-0', 'opacity-100', 'pointer-events-auto');
         }
     }
     
-    showStopSpeechButton() {
-        let stopBtn = document.getElementById('stop-speech-btn');
-        if (!stopBtn) {
-            stopBtn = document.createElement('button');
-            stopBtn.id = 'stop-speech-btn';
-            stopBtn.className = 'fixed bottom-8 right-8 z-50 bg-red-600 hover:bg-red-700 text-white px-6 py-3 rounded-full shadow-lg flex items-center gap-2 animate-pulse';
-            stopBtn.innerHTML = `
-                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z"></path>
-                </svg>
-                <span class="font-semibold">Stop Speaking</span>
-            `;
-            stopBtn.onclick = () => this.stopSpeech();
-            document.body.appendChild(stopBtn);
+    toggleAudioMute() {
+        if (!this.audioState) return;
+        
+        this.audioState.isMuted = !this.audioState.isMuted;
+        this.globalMuted = this.audioState.isMuted;
+        
+        const volumeIcon = document.getElementById('volume-icon');
+        const volumeSlider = document.getElementById('audio-volume-slider');
+        
+        if (this.audioState.isMuted) {
+            // Muted
+            if (volumeIcon) {
+                volumeIcon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2"/>';
+            }
+            if (volumeSlider) volumeSlider.disabled = true;
+            
+            // Actually mute
+            if (this.speechSynthesis) this.speechSynthesis.cancel();
+        } else {
+            // Unmuted
+            if (volumeIcon) {
+                volumeIcon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072M18.364 5.636a9 9 0 010 12.728M12 6.253v11.494c0 .935-1.03 1.535-1.856 1.082l-4.39-2.561A2 2 0 014.9 16H3a2 2 0 01-2-2v-4a2 2 0 012-2h1.9a2 2 0 00.854-.189l4.39-2.561C10.97 4.719 12 5.319 12 6.253z"/>';
+            }
+            if (volumeSlider) volumeSlider.disabled = false;
         }
-        stopBtn.style.display = 'flex';
+    }
+    
+    setAudioVolume(volume) {
+        if (!this.audioState) return;
+        this.audioState.volume = volume;
+        
+        // Apply to any active audio elements
+        const iframes = document.querySelectorAll('iframe[src*="youtube"]');
+        iframes.forEach(iframe => {
+            try {
+                iframe.contentWindow.postMessage(JSON.stringify({
+                    event: 'command',
+                    func: 'setVolume',
+                    args: [volume * 100]
+                }), '*');
+            } catch (e) {}
+        });
+        
+        // Note: Browser TTS volume is set per utterance
+    }
+    
+    skipCurrentAudio() {
+        const source = this.audioState?.currentSource;
+        
+        if (source === 'speech' || source === 'ai-voice') {
+            // Stop current speech
+            if (this.speechSynthesis) {
+                this.speechSynthesis.cancel();
+            }
+            this.hideAudioControlPanel();
+        } else if (source === 'music') {
+            // Skip to next track
+            if (window.ytNext) {
+                window.ytNext();
+            }
+        }
+    }
+    
+    stopAllAudio() {
+        // Stop speech synthesis
+        if (this.speechSynthesis) {
+            this.speechSynthesis.cancel();
+        }
+        
+        // Stop music (pause YouTube)
+        const ytPlayer = document.querySelector('iframe[src*="youtube"]');
+        if (ytPlayer) {
+            try {
+                ytPlayer.contentWindow.postMessage(JSON.stringify({
+                    event: 'command',
+                    func: 'pauseVideo',
+                    args: []
+                }), '*');
+            } catch (e) {}
+        }
+        
+        // Set global mute flag
+        this.globalMuted = true;
+        
+        // Hide control panel
+        this.hideAudioControlPanel();
+        
+        console.log('🔇 All audio stopped');
+    }
+    
+    // Legacy method compatibility
+    showStopSpeechButton() {
+        this.showAudioControlPanel('speech', 'Speaking...');
     }
     
     hideStopSpeechButton() {
-        const stopBtn = document.getElementById('stop-speech-btn');
-        if (stopBtn) {
-            stopBtn.style.display = 'none';
-        }
+        this.hideAudioControlPanel();
     }
     
     renderAIChat() {
@@ -3696,10 +4223,11 @@ Then ask me: "What would you like to do with this email?"`,
                     </div>
                 `;
             } else {
+                // Assistant messages: render markdown for proper formatting
                 return `
                     <div class="text-left">
-                        <div class="inline-block max-w-[80%] bg-gray-700 rounded-lg px-4 py-2">
-                            <p class="text-sm">${this.escapeHtml(msg.content)}</p>
+                        <div class="inline-block max-w-[80%] bg-gray-700 rounded-lg px-4 py-2 ai-message-content">
+                            <div class="text-sm prose prose-invert prose-sm max-w-none">${this.renderMarkdown(msg.content)}</div>
                             ${msg.id ? `
                                 <div class="flex gap-2 mt-2 pt-2 border-t border-gray-600">
                                     <button onclick="dataLoader.rateAIMessage('${msg.id}', '${msg.conversation_id}', 'thumbs_up')" 
@@ -4589,30 +5117,23 @@ Then ask me: "What would you like to do with this email?"`,
                     return;
                 }
                 
-                // Use musicPlayer to set the playlist - this saves to server automatically
-                if (window.musicPlayer) {
-                    musicPlayer.setPlaylist(playlist.tracks, playlistId, playlist.name || playlistId);
+                // Use the YouTube player to load the playlist
+                if (window.loadYouTubePlayer && playlist.tracks && playlist.tracks.length > 0) {
+                    // Convert tracks to YouTube format
+                    const ytTracks = playlist.tracks.map(t => ({
+                        title: t.title,
+                        artist: t.artist,
+                        youtubeId: t.youtubeId || null
+                    }));
+                    window.loadYouTubePlayer(ytTracks, playlistId, playlist.name);
+                    this.showNotification(`Playing playlist: ${playlist.name} (${playlist.tracks.length} tracks)`, 'info');
+                } else {
+                    this.showNotification('No tracks in playlist', 'warning');
                 }
-                
-                // Render tracks in the player section
-                const grid = document.getElementById('playlists-grid');
-                if (grid) {
-                    grid.innerHTML = playlist.tracks.map((t, i) =>
-                        `<div class="flex items-center gap-3 mb-2">
-                            <span class="font-semibold">${i+1}.</span>
-                            <span>${t.artist} - ${t.title}</span>
-                            <button class="ml-auto bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded text-xs" onclick="musicPlayer.playOnYoutube('${t.artist}', '${t.title}')">Play on YouTube</button>
-                        </div>`
-                    ).join('');
-                }
-                // Set now playing info
-                const nowTitle = document.getElementById('now-playing-title');
-                const nowArtist = document.getElementById('now-playing-artist');
-                if (nowTitle && nowArtist && playlist.tracks.length > 0) {
-                    nowTitle.textContent = playlist.tracks[0].title;
-                    nowArtist.textContent = playlist.tracks[0].artist;
-                }
-                this.showNotification(`Playing playlist: ${playlist.name}`, 'info');
+            })
+            .catch(err => {
+                console.error('Error playing playlist:', err);
+                this.showNotification('Error loading playlist', 'error');
             });
     }
     

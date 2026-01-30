@@ -4,7 +4,7 @@
 # ============================================
 # Voice input (microphone/speech recognition)
 # ============================================
-# Requires: sudo apt install portaudio19-dev
+# Requires: sudo apt install portaudio19-dev (Linux) or brew install portaudio (macOS)
 SpeechRecognition==3.10.0
 PyAudio==0.2.14
 
@@ -12,7 +12,7 @@ PyAudio==0.2.14
 # PersonaPlex (NVIDIA full-duplex voice AI)
 # ============================================
 # Requires:
-#   - sudo apt install libopus-dev
+#   - sudo apt install libopus-dev (Linux) or brew install opus (macOS)
 #   - HuggingFace account with accepted model license
 #   - Run: ./scripts/setup_personaplex.sh
 #
@@ -28,7 +28,7 @@ websockets>=11.0
 # It requires NVIDIA GPU with 8GB+ VRAM (or use --cpu-offload for CPU)
 
 # ============================================
-# Legacy Piper TTS (fallback)
+# Enable voice system:
+#   export PERSONAPLEX_ENABLED=true
+#   export HF_TOKEN=your_huggingface_token
 # ============================================
-# Note: Piper TTS works without these packages as it's a separate binary
-# Only voice commands (listening) require PyAudio

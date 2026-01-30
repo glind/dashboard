@@ -1,509 +1,395 @@
 #!/usr/bin/env python3
 """
-Voice system for the dashboard - "Rogr" battle-droid-style assistant
-Uses Piper TTS + ffmpeg for robot voice effects
-Answers to "rogr" or "roger" and says "roger, roger" after commands
+Unified Voice System for Dashboard - "Rogr" AI Assistant
+
+Uses NVIDIA PersonaPlex for real-time, full-duplex voice conversations.
+Maintains backward compatibility with previous configuration options.
+
+Configuration (via config.yaml):
+  voice:
+    enabled: true
+    voice_preset: "NATM1"      # Voice: NATF0-3, NATM0-3, VARF0-4, VARM0-4
+    persona: "rogr"            # Personality: rogr, assistant, casual
+    server_url: "wss://localhost:8998"
+    announce_on_startup: true
+
+Environment variables:
+  PERSONAPLEX_ENABLED=true     # Enable voice system
+  HF_TOKEN=xxx                 # HuggingFace token for model access
 """
 
-import subprocess
-import threading
+import asyncio
+import logging
+import os
+import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Literal
-import hashlib
-import logging
-import sys
 
 logger = logging.getLogger(__name__)
 
-# Voice styles available
-VoiceStyle = Literal["clean", "droid", "radio", "pa_system"]
+
+def strip_markdown(text: str) -> str:
+    """
+    Strip Markdown syntax from text for speech.
+    Removes formatting markers while keeping the content readable.
+    """
+    if not text:
+        return text
+    
+    cleaned = text
+    
+    # Remove code blocks entirely (they don't speak well)
+    cleaned = re.sub(r'```[\s\S]*?```', ' code block ', cleaned)
+    
+    # Remove inline code backticks
+    cleaned = re.sub(r'`([^`]+)`', r'\1', cleaned)
+    
+    # Remove header markers
+    cleaned = re.sub(r'^#{1,6}\s+', '', cleaned, flags=re.MULTILINE)
+    
+    # Remove bold markers
+    cleaned = re.sub(r'\*\*([^*]+)\*\*', r'\1', cleaned)
+    cleaned = re.sub(r'__([^_]+)__', r'\1', cleaned)
+    
+    # Remove italic markers
+    cleaned = re.sub(r'\*([^*]+)\*', r'\1', cleaned)
+    cleaned = re.sub(r'(?<![a-zA-Z])_([^_]+)_(?![a-zA-Z])', r'\1', cleaned)
+    
+    # Remove strikethrough
+    cleaned = re.sub(r'~~([^~]+)~~', r'\1', cleaned)
+    
+    # Convert links to just the text
+    cleaned = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', cleaned)
+    
+    # Remove blockquote markers
+    cleaned = re.sub(r'^>\s*', '', cleaned, flags=re.MULTILINE)
+    
+    # Remove list markers
+    cleaned = re.sub(r'^[\-\*]\s+', '', cleaned, flags=re.MULTILINE)
+    cleaned = re.sub(r'^\d+\.\s+', '', cleaned, flags=re.MULTILINE)
+    
+    # Remove horizontal rules
+    cleaned = re.sub(r'^---$', '', cleaned, flags=re.MULTILINE)
+    
+    # Remove excess whitespace
+    cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)
+    
+    return cleaned
+
+
+def sanitize_text_for_speech(text: str) -> str:
+    """
+    Clean text for natural speech by removing or replacing elements that
+    don't sound good when spoken aloud.
+    
+    Removes:
+    - Markdown syntax (bold, italic, code, links, etc.)
+    - URLs (http/https/www links)
+    - Email addresses
+    - Hash strings (sha256, md5, etc.)
+    - Long numeric sequences (> 6 digits)
+    - UUIDs
+    - File paths
+    - JSON/code snippets
+    - Long hexadecimal strings
+    
+    Returns:
+        Cleaned text suitable for speech synthesis
+    """
+    if not text:
+        return text
+    
+    # First strip markdown syntax
+    text = strip_markdown(text)
+    
+    # URL patterns
+    text = re.sub(r'https?://[^\s<>"{}|\\^`\[\]]+', 'link', text)
+    text = re.sub(r'www\.[^\s<>"{}|\\^`\[\]]+', 'link', text)
+    
+    # Email addresses
+    text = re.sub(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', 'email address', text)
+    
+    # UUIDs (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)
+    text = re.sub(r'[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}', 'ID', text)
+    
+    # SHA256/SHA512/MD5 hashes (long hex strings 32+ chars)
+    text = re.sub(r'\b[a-fA-F0-9]{32,}\b', 'hash', text)
+    
+    # Long hex strings (16+ chars that look like hex)
+    text = re.sub(r'\b0x[a-fA-F0-9]{8,}\b', 'hex value', text)
+    
+    # Long numeric sequences (phone numbers OK, but skip 7+ digit sequences)
+    text = re.sub(r'\b\d{7,}\b', 'number', text)
+    
+    # File paths (Unix and Windows)
+    text = re.sub(r'[/\\][\w./\\-]{10,}', ' file path ', text)
+    
+    # Base64-like strings (long alphanumeric with + / =)
+    text = re.sub(r'[A-Za-z0-9+/=]{40,}', 'encoded data', text)
+    
+    # JSON-like content in curly braces (if long)
+    text = re.sub(r'\{[^{}]{100,}\}', 'data object', text)
+    
+    # Code-like content with special chars
+    text = re.sub(r'[\[\]{}();]{3,}', '', text)
+    
+    # Multiple consecutive special characters
+    text = re.sub(r'[_\-=]{4,}', ' ', text)
+    
+    # Clean up multiple spaces
+    text = re.sub(r'\s+', ' ', text)
+    
+    # Clean up artifacts
+    text = text.strip()
+    
+    return text
+
+# Voice presets from PersonaPlex
+VoicePreset = Literal[
+    "NATF0", "NATF1", "NATF2", "NATF3",  # Natural female
+    "NATM0", "NATM1", "NATM2", "NATM3",  # Natural male
+    "VARF0", "VARF1", "VARF2", "VARF3", "VARF4",  # Variety female
+    "VARM0", "VARM1", "VARM2", "VARM4",  # Variety male
+]
+
+# Style to voice preset mapping (backward compatibility)
+STYLE_TO_PRESET = {
+    "droid": "NATM1",
+    "clean": "NATM0",
+    "radio": "VARM0",
+    "pa_system": "VARM1",
+    "assistant": "NATF1",
+    "casual": "VARM2",
+}
+
+# Persona prompts
+PERSONA_PROMPTS = {
+    "rogr": """You are Rogr, a helpful AI assistant for a personal dashboard application.
+You answer questions clearly and concisely. You help with productivity, scheduling, and information lookup.
+After completing commands, you acknowledge with "roger, roger" as your signature phrase.""",
+    "assistant": """You are a wise and friendly teacher. Answer questions or provide advice in a clear and engaging way.""",
+    "casual": """You enjoy having a good conversation. You are Rogr, a helpful assistant for a personal dashboard.""",
+}
+
+
+@dataclass
+class VoiceConfig:
+    """Configuration for the voice system"""
+    enabled: bool = True
+    server_url: str = "wss://localhost:8998"
+    voice_preset: str = "NATM1"
+    persona: str = "rogr"
+    hf_token: Optional[str] = None
+    ssl_verify: bool = False
+    announce_on_startup: bool = True
+    default_style: str = "droid"
+    speed: float = 0.75
+    pitch: float = 0.85
+
 
 class VoiceSystem:
-    """
-    Battle-droid-style voice assistant for dashboard
-    """
+    """Unified voice system using NVIDIA PersonaPlex."""
     
     def __init__(
         self,
-        piper_bin: str = "piper",
-        model_path: Optional[str] = None,
-        cache_dir: str = "data/voice_cache",
-        default_style: VoiceStyle = "droid",
-        speed: float = 0.65,
-        pitch: float = 0.65
+        config: Optional[VoiceConfig] = None,
+        default_style: str = "droid",
+        speed: float = 0.75,
+        pitch: float = 0.85,
+        server_url: str = "wss://localhost:8998",
+        voice_preset: Optional[str] = None,
+        persona: str = "rogr"
     ):
-        self.piper_bin = piper_bin
-        self.model_path = model_path
-        self.cache_dir = Path(cache_dir)
-        self.cache_dir.mkdir(parents=True, exist_ok=True)
-        self.default_style = default_style
-        self.speed = speed  # Speech speed multiplier
-        self.pitch = pitch  # Pitch shift multiplier
-        self.playback_lock = threading.Lock()
+        if config:
+            self.config = config
+        else:
+            preset = voice_preset or STYLE_TO_PRESET.get(default_style, "NATM1")
+            self.config = VoiceConfig(
+                enabled=True,
+                server_url=server_url,
+                voice_preset=preset,
+                persona=persona,
+                hf_token=os.environ.get("HF_TOKEN"),
+                default_style=default_style,
+                speed=speed,
+                pitch=pitch
+            )
         
-        # Wake words
+        self._client = None
+        self._running = False
+        self._pyaudio = None
+        self._audio_stream = None
+        self._mic_stream = None
+        
         self.wake_words = ["rogr", "roger"]
-        
-        # Signature phrase
         self.signature = "roger, roger"
         
-        logger.info(f"Voice system initialized with style: {default_style}, speed: {speed}x, pitch: {pitch}x")
+        logger.info(f"Voice system initialized: preset={self.config.voice_preset}, persona={self.config.persona}")
     
-    def _check_dependencies(self) -> bool:
-        """Check if required binaries are available"""
-        try:
-            subprocess.run(
-                [self.piper_bin, "--version"],
-                capture_output=True,
-                check=False
-            )
-            piper_ok = True
-        except FileNotFoundError:
-            piper_ok = False
-            logger.warning(f"Piper not found at {self.piper_bin}")
+    async def _get_client(self):
+        """Get or create the PersonaPlex client"""
+        if self._client is not None:
+            return self._client
         
         try:
-            subprocess.run(
-                ["ffmpeg", "-version"],
-                capture_output=True,
-                check=True
-            )
-            ffmpeg_ok = True
-        except (FileNotFoundError, subprocess.CalledProcessError):
-            ffmpeg_ok = False
-            logger.warning("ffmpeg not found")
-        
-        return piper_ok and ffmpeg_ok
-    
-    def _get_cache_path(self, text: str, style: str) -> Path:
-        """Generate cache filename from text + style"""
-        h = hashlib.md5(f"{text}:{style}".encode()).hexdigest()[:16]
-        return self.cache_dir / f"{style}_{h}.wav"
-    
-    def _synthesize_piper(self, text: str, out_wav: Path) -> bool:
-        """
-        Generate speech using Piper TTS
-        Returns True if successful
-        """
-        if not self.model_path:
-            logger.error("No Piper model path configured")
-            return False
-        
-        try:
-            # Piper command: reads text from stdin, outputs to file
-            cmd = [
-                self.piper_bin,
-                "-m", self.model_path,
-                "-f", str(out_wav),
-            ]
+            import websockets
+            import ssl
+            import json
             
-            result = subprocess.run(
-                cmd,
-                input=text.encode("utf-8"),
-                capture_output=True,
-                check=True
+            ssl_context = ssl.create_default_context()
+            if not self.config.ssl_verify:
+                ssl_context.check_hostname = False
+                ssl_context.verify_mode = ssl.CERT_NONE
+            
+            self._client = await websockets.connect(
+                self.config.server_url,
+                ssl=ssl_context,
+                ping_interval=20,
+                ping_timeout=10
             )
             
-            logger.debug(f"Piper TTS generated: {out_wav}")
-            return True
+            persona_prompt = PERSONA_PROMPTS.get(self.config.persona, self.config.persona)
+            init_msg = {
+                "type": "init",
+                "voice_prompt": f"{self.config.voice_preset}.pt",
+                "text_prompt": persona_prompt
+            }
+            await self._client.send(json.dumps(init_msg))
             
-        except subprocess.CalledProcessError as e:
-            logger.error(f"Piper TTS failed: {e.stderr.decode()}")
-            return False
-        except Exception as e:
-            logger.error(f"Piper TTS error: {e}")
-            return False
-    
-    def _apply_fx(self, in_wav: Path, out_wav: Path, style: VoiceStyle) -> bool:
-        """
-        Apply audio effects based on style
-        Returns True if successful
-        """
-        fx_chains = {
-            "clean": "",  # No effects
+            logger.info(f"Connected to PersonaPlex at {self.config.server_url}")
+            return self._client
             
-            "droid": (
-                # Battle-droid style: aggressive processing for robotic sound
-                f"atempo={self.speed},"
-                f"asetrate=44100*{self.pitch},aresample=44100,"
-                "highpass=f=250,lowpass=f=3000,"
-                "acompressor=threshold=-18dB:ratio=5:attack=2:release=40,"
-                "acrusher=bits=10:mix=0.35,"
-                "tremolo=f=100:d=0.12,"
-                "aecho=0.7:0.4:18:0.25,"
-                "highpass=f=220,"
-                "alimiter=limit=0.85"
-            ),
-            
-            "radio": (
-                # Radio transmission style
-                f"atempo={self.speed},"
-                f"asetrate=44100*{self.pitch},aresample=44100,"
-                "highpass=f=300,"
-                "lowpass=f=3000,"
-                "acompressor=threshold=-14dB:ratio=3:attack=5:release=80,"
-                "acrusher=bits=12:mix=0.2,"
-                "aecho=0.7:0.5:15:0.15"
-            ),
-            
-            "pa_system": (
-                # PA/intercom style
-                f"atempo={self.speed},"
-                f"asetrate=44100*{self.pitch},aresample=44100,"
-                "highpass=f=250,"
-                "lowpass=f=4000,"
-                "acompressor=threshold=-12dB:ratio=2.5:attack=10:release=100,"
-                "aecho=0.9:0.8:40:0.3"
-            ),
-        }
-        
-        fx = fx_chains.get(style, fx_chains["droid"])
-        
-        if not fx:
-            # Clean style: just copy
-            import shutil
-            shutil.copy(in_wav, out_wav)
-            return True
-        
-        try:
-            cmd = [
-                "ffmpeg", "-y",
-                "-i", str(in_wav),
-                "-af", fx,
-                str(out_wav),
-            ]
-            
-            subprocess.run(
-                cmd,
-                capture_output=True,
-                check=True
-            )
-            
-            logger.debug(f"Applied {style} FX: {out_wav}")
-            return True
-            
-        except subprocess.CalledProcessError as e:
-            logger.error(f"ffmpeg FX failed: {e.stderr.decode()}")
-            return False
-        except Exception as e:
-            logger.error(f"FX error: {e}")
-            return False
-    
-    def _clean_text(self, text: str) -> str:
-        """
-        Clean text for speech synthesis
-        - Remove emojis
-        - Fix common formatting issues
-        - Remove markdown symbols
-        """
-        import re
-        
-        # Remove emojis (Unicode ranges for emoji characters)
-        emoji_pattern = re.compile(
-            "["
-            "\U0001F600-\U0001F64F"  # emoticons
-            "\U0001F300-\U0001F5FF"  # symbols & pictographs
-            "\U0001F680-\U0001F6FF"  # transport & map symbols
-            "\U0001F1E0-\U0001F1FF"  # flags (iOS)
-            "\U00002500-\U00002BEF"  # chinese char
-            "\U00002702-\U000027B0"
-            "\U000024C2-\U0001F251"
-            "\U0001f926-\U0001f937"
-            "\U00010000-\U0010ffff"
-            "\u2640-\u2642"
-            "\u2600-\u2B55"
-            "\u200d"
-            "\u23cf"
-            "\u23e9"
-            "\u231a"
-            "\ufe0f"  # dingbats
-            "\u3030"
-            "]+", flags=re.UNICODE
-        )
-        text = emoji_pattern.sub('', text)
-        
-        # Remove markdown formatting
-        text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)  # bold
-        text = re.sub(r'\*(.+?)\*', r'\1', text)      # italic
-        text = re.sub(r'`(.+?)`', r'\1', text)        # code
-        text = re.sub(r'#{1,6}\s', '', text)          # headers
-        
-        # Clean up whitespace
-        text = re.sub(r'\s+', ' ', text).strip()
-        
-        return text
-    
-    def _generate_signature(self, style: Optional[VoiceStyle] = None) -> Optional[Path]:
-        """
-        Generate "roger roger" signature
-        Uses slower speed (0.45x) and much lower pitch (0.5x) for deep voice
-        """
-        if style is None:
-            style = self.default_style
-        
-        # Check cache first
-        sig_cache = self.cache_dir / f"{style}_signature.wav"
-        if sig_cache.exists():
-            return sig_cache
-        
-        # Generate with faster speed
-        raw_path = self.cache_dir / "temp_sig_raw.wav"
-        if not self._synthesize_piper(self.signature, raw_path):
+        except ImportError:
+            logger.error("websockets package not installed. Run: pip install websockets")
             return None
-        
-        # Apply FX with super fast speed (2.5x) and high pitch (1.8x)
-        if not self._apply_fx_signature(raw_path, sig_cache, style):
-            return None
-        
-        raw_path.unlink(missing_ok=True)
-        return sig_cache
-    
-    def _apply_fx_signature(self, in_wav: Path, out_wav: Path, style: VoiceStyle) -> bool:
-        """
-        Apply FX to signature with slower speed (0.45x) and much lower pitch (0.5x)
-        """
-        slower_speed = 0.45  # Much slower (50% of 0.85x)
-        lower_pitch = 0.5  # Much deeper pitch
-        
-        fx_chains = {
-            "clean": f"atempo={slower_speed},asetrate=44100*{lower_pitch},aresample=44100",
-            
-            "droid": (
-                f"atempo={slower_speed},"
-                f"asetrate=44100*{lower_pitch},aresample=44100,"
-                "highpass=f=250,lowpass=f=3000,"
-                "acompressor=threshold=-18dB:ratio=5:attack=2:release=40,"
-                "acrusher=bits=10:mix=0.35,"
-                "tremolo=f=100:d=0.12,"
-                "aecho=0.7:0.4:18:0.25,"
-                "highpass=f=220,"
-                "alimiter=limit=0.85"
-            ),
-            
-            "radio": (
-                f"atempo={slower_speed},"
-                f"asetrate=44100*{lower_pitch},aresample=44100,"
-                "highpass=f=300,"
-                "lowpass=f=3000,"
-                "acompressor=threshold=-14dB:ratio=3:attack=5:release=80,"
-                "acrusher=bits=12:mix=0.2,"
-                "aecho=0.7:0.5:15:0.15"
-            ),
-            
-            "pa_system": (
-                f"atempo={slower_speed},"
-                f"asetrate=44100*{lower_pitch},aresample=44100,"
-                "highpass=f=250,"
-                "lowpass=f=4000,"
-                "acompressor=threshold=-12dB:ratio=2.5:attack=10:release=100,"
-                "aecho=0.9:0.8:40:0.3"
-            ),
-        }
-        
-        fx = fx_chains.get(style, fx_chains["droid"])
-        
-        try:
-            cmd = [
-                "ffmpeg", "-y",
-                "-i", str(in_wav),
-                "-af", fx,
-                str(out_wav),
-            ]
-            
-            subprocess.run(
-                cmd,
-                capture_output=True,
-                check=True
-            )
-            
-            logger.debug(f"Applied fast signature FX: {out_wav}")
-            return True
-            
-        except subprocess.CalledProcessError as e:
-            logger.error(f"ffmpeg signature FX failed: {e.stderr.decode()}")
-            return False
         except Exception as e:
-            logger.error(f"Signature FX error: {e}")
-            return False
-    
-    def _concatenate_audio(self, wav1: Path, wav2: Path) -> Optional[Path]:
-        """
-        Concatenate two audio files
-        """
-        output = self.cache_dir / f"combined_{wav1.stem}.wav"
-        
-        try:
-            # Create concat list file
-            concat_list = self.cache_dir / "concat_list.txt"
-            with open(concat_list, 'w') as f:
-                f.write(f"file '{wav1.absolute()}'\n")
-                f.write(f"file '{wav2.absolute()}'\n")
-            
-            cmd = [
-                "ffmpeg", "-y",
-                "-f", "concat",
-                "-safe", "0",
-                "-i", str(concat_list),
-                "-c", "copy",
-                str(output)
-            ]
-            
-            subprocess.run(
-                cmd,
-                capture_output=True,
-                check=True
-            )
-            
-            concat_list.unlink(missing_ok=True)
-            logger.debug(f"Concatenated audio: {output}")
-            return output
-            
-        except Exception as e:
-            logger.error(f"Audio concatenation failed: {e}")
+            logger.error(f"Failed to connect to PersonaPlex: {e}")
             return None
     
-    def generate(
-        self,
-        text: str,
-        style: Optional[VoiceStyle] = None,
-        force: bool = False
-    ) -> Optional[Path]:
-        """
-        Generate voice audio for text
-        Returns path to WAV file, or None if failed
+    async def _disconnect(self):
+        """Disconnect from PersonaPlex"""
+        if self._client:
+            await self._client.close()
+            self._client = None
+            logger.info("Disconnected from PersonaPlex")
+    
+    async def say_async(self, text: str, skip_sanitize: bool = False) -> bool:
+        """Send text to be spoken by PersonaPlex (async)
         
         Args:
             text: Text to speak
-            style: Voice style (defaults to self.default_style)
-            force: Force regeneration even if cached
+            skip_sanitize: If True, skip text sanitization (for pre-cleaned text)
         """
-        if style is None:
-            style = self.default_style
-        
-        # Clean text before synthesis
-        text = self._clean_text(text)
-        
-        if not text:  # Skip if text is empty after cleaning
-            logger.warning("Text is empty after cleaning")
-            return None
-        
-        cache_path = self._get_cache_path(text, style)
-        
-        # Check cache
-        if cache_path.exists() and not force:
-            logger.debug(f"Using cached voice: {cache_path}")
-            return cache_path
-        
-        # Generate raw TTS
-        raw_path = self.cache_dir / "temp_raw.wav"
-        if not self._synthesize_piper(text, raw_path):
-            return None
-        
-        # Apply FX
-        if not self._apply_fx(raw_path, cache_path, style):
-            return None
-        
-        # Cleanup temp
-        raw_path.unlink(missing_ok=True)
-        
-        return cache_path
-    
-    def play(self, wav_path: Path, blocking: bool = False) -> bool:
-        """
-        Play audio file using ffplay (part of ffmpeg)
-        
-        Args:
-            wav_path: Path to WAV file
-            blocking: If True, wait for playback to finish
-        """
-        def _play():
-            try:
-                # ffplay with minimal output, auto-exit
-                cmd = [
-                    "ffplay",
-                    "-nodisp",  # No video window
-                    "-autoexit",  # Exit when done
-                    "-loglevel", "quiet",  # Suppress logs
-                    str(wav_path)
-                ]
-                subprocess.run(cmd, check=True)
-            except Exception as e:
-                logger.error(f"Playback error: {e}")
-        
-        if blocking:
-            _play()
-        else:
-            thread = threading.Thread(target=_play, daemon=True)
-            thread.start()
-        
-        return True
+        try:
+            # Sanitize text for natural speech unless skipped
+            if not skip_sanitize:
+                text = sanitize_text_for_speech(text)
+            
+            if not text or len(text.strip()) < 2:
+                logger.debug("Skipping empty or too-short text")
+                return True
+            
+            client = await self._get_client()
+            if not client:
+                logger.warning(f"PersonaPlex not available. Would say: {text}")
+                return False
+            
+            import json
+            msg = {"type": "text", "content": text}
+            await client.send(json.dumps(msg))
+            logger.debug(f"Sent to PersonaPlex: {text}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to send text to PersonaPlex: {e}")
+            return False
     
     def say(
         self,
         text: str,
-        style: Optional[VoiceStyle] = None,
+        style: Optional[str] = None,
         add_signature: bool = False,
         blocking: bool = False
     ) -> bool:
-        """
-        Generate and play speech
-        
-        Args:
-            text: Text to speak
-            style: Voice style
-            add_signature: If True, prepend "roger, roger" slightly faster at the beginning
-            blocking: Wait for playback to finish
-        
-        Returns:
-            True if successful
-        """
+        """Generate and play speech using PersonaPlex."""
         if add_signature:
-            # Generate slower/deeper "roger roger" signature (0.45x speed, 0.5x pitch)
-            sig_wav = self._generate_signature(style)
-            if not sig_wav:
-                logger.warning("Signature generation failed, playing without it")
-            
-            # Generate main message with slow/deep voice
-            main_wav = self.generate(text, style)
-            if not main_wav:
-                logger.error("Voice generation failed")
-                return False
-            
-            # Concatenate: signature FIRST, then main message
-            if sig_wav:
-                combined_wav = self._concatenate_audio(sig_wav, main_wav)
-                if combined_wav:
-                    return self.play(combined_wav, blocking=blocking)
-            
-            return self.play(main_wav, blocking=blocking)
-        else:
-            wav_path = self.generate(text, style)
-            if not wav_path:
-                logger.error("Voice generation failed")
-                return False
-            
-            return self.play(wav_path, blocking=blocking)
+            text = f"{text}. {self.signature}"
+        
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.create_task(self.say_async(text))
+                return True
+            else:
+                return loop.run_until_complete(self.say_async(text))
+        except RuntimeError:
+            return asyncio.run(self.say_async(text))
     
     def announce(self, text: str, **kwargs) -> bool:
-        """
-        Convenience method: say with signature
-        """
+        """Say with 'roger, roger' signature"""
         return self.say(text, add_signature=True, **kwargs)
     
-    def preload_common_phrases(self, phrases: list[str]) -> None:
-        """
-        Pre-generate and cache common phrases for faster playback
-        """
-        logger.info(f"Preloading {len(phrases)} common phrases...")
-        for phrase in phrases:
-            self.generate(phrase)
-            if phrase != f"{phrase}. {self.signature}":
-                self.generate(f"{phrase}. {self.signature}")
-        logger.info("Preload complete")
+    async def set_voice(self, voice: str) -> bool:
+        """Change voice preset"""
+        try:
+            client = await self._get_client()
+            if not client:
+                return False
+            import json
+            msg = {"type": "update_voice", "voice_prompt": f"{voice}.pt"}
+            await client.send(json.dumps(msg))
+            self.config.voice_preset = voice
+            logger.info(f"Voice changed to: {voice}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to change voice: {e}")
+            return False
+    
+    async def set_persona(self, persona: str) -> bool:
+        """Change persona/role"""
+        try:
+            client = await self._get_client()
+            if not client:
+                return False
+            import json
+            prompt = PERSONA_PROMPTS.get(persona, persona)
+            msg = {"type": "update_prompt", "text_prompt": prompt}
+            await client.send(json.dumps(msg))
+            self.config.persona = persona
+            logger.info(f"Persona changed to: {persona}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to change persona: {e}")
+            return False
+    
+    def preload_common_phrases(self, phrases: list) -> None:
+        """Pre-cache common phrases (no-op for PersonaPlex)"""
+        logger.debug("Preload skipped - PersonaPlex uses real-time synthesis")
+    
+    def generate(
+        self,
+        text: str,
+        style: Optional[str] = None,
+        force: bool = False
+    ) -> Optional[Path]:
+        """Generate voice audio (compatibility method)"""
+        logger.warning("generate() not supported with PersonaPlex - use say() instead")
+        return None
+    
+    async def shutdown(self):
+        """Clean up resources"""
+        await self._disconnect()
+        if self._pyaudio:
+            self._pyaudio.terminate()
+        logger.info("Voice system shutdown complete")
 
 
-# Singleton instance
+# =============================================================================
+# Singleton and convenience functions
+# =============================================================================
+
 _voice: Optional[VoiceSystem] = None
+
 
 def get_voice() -> VoiceSystem:
     """Get or create the global voice system instance"""
@@ -512,40 +398,41 @@ def get_voice() -> VoiceSystem:
         _voice = VoiceSystem()
     return _voice
 
+
 def say(text: str, **kwargs) -> bool:
     """Convenience function: generate and play speech"""
     return get_voice().say(text, **kwargs)
+
 
 def announce(text: str, **kwargs) -> bool:
     """Convenience function: say with 'roger, roger' signature"""
     return get_voice().announce(text, **kwargs)
 
 
-# Example usage
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-    
-    voice = VoiceSystem()
-    
-    # Check dependencies
-    if not voice._check_dependencies():
-        print("⚠️  Missing dependencies!")
-        print("Install with: sudo apt install ffmpeg")
-        print("Download Piper: https://github.com/rhasspy/piper/releases")
-        print("Download voice model: https://huggingface.co/rhasspy/piper-voices")
-        sys.exit(1)
-    
-    # Demo phrases
-    phrases = [
-        "Dashboard online",
-        "Three tasks are overdue",
-        "Daily summary ready",
-        "No urgent items detected",
-    ]
-    
-    print("Preloading common phrases...")
-    voice.preload_common_phrases(phrases)
-    
-    print("\n🤖 Rogr voice system ready")
-    print("Testing announcement...")
-    voice.announce("Dashboard initialization complete", blocking=True)
+async def init_voice(
+    server_url: str = "wss://localhost:8998",
+    voice_preset: str = "NATM1",
+    persona: str = "rogr"
+) -> bool:
+    """Initialize the voice system"""
+    global _voice
+    config = VoiceConfig(
+        server_url=server_url,
+        voice_preset=voice_preset,
+        persona=persona,
+        hf_token=os.environ.get("HF_TOKEN")
+    )
+    _voice = VoiceSystem(config=config)
+    try:
+        await _voice._get_client()
+        return True
+    except:
+        return False
+
+
+async def shutdown_voice():
+    """Shutdown the voice system"""
+    global _voice
+    if _voice:
+        await _voice.shutdown()
+        _voice = None

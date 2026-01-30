@@ -1,15 +1,20 @@
 """
 Voice system helper - makes imports easier throughout the codebase
 
-Supports two voice backends:
-1. PersonaPlex (NVIDIA) - Full-duplex real-time conversation (recommended)
-2. Piper TTS - Local text-to-speech with audio effects (fallback)
+Uses NVIDIA PersonaPlex for real-time, full-duplex voice conversations.
+PersonaPlex provides natural speech synthesis with multiple voice presets
+and customizable personas.
 
-PersonaPlex is used when:
-- PERSONAPLEX_ENABLED=true in environment
-- PersonaPlex server is running at configured URL
+Configuration:
+  - Set PERSONAPLEX_ENABLED=true to enable voice
+  - Set HF_TOKEN for HuggingFace authentication
+  - See devdocs/VOICE_SYSTEM.md for full setup
 
-Otherwise falls back to Piper TTS.
+Voice presets:
+  Natural female: NATF0, NATF1, NATF2, NATF3
+  Natural male:   NATM0, NATM1, NATM2, NATM3
+  Variety female: VARF0, VARF1, VARF2, VARF3, VARF4
+  Variety male:   VARM0, VARM1, VARM2, VARM4
 """
 
 import os
@@ -17,43 +22,75 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Check which voice system to use
-USE_PERSONAPLEX = os.environ.get("PERSONAPLEX_ENABLED", "false").lower() == "true"
+# Check if voice system is enabled
+VOICE_ENABLED = os.environ.get("PERSONAPLEX_ENABLED", "false").lower() == "true"
 
-if USE_PERSONAPLEX:
+if VOICE_ENABLED:
     try:
-        from voice_personaplex import (
-            say_personaplex as say,
-            announce_personaplex as announce,
-            get_personaplex_voice as get_voice,
-            PersonaPlexVoiceSystem as VoiceSystem,
-            init_personaplex,
-            shutdown_personaplex,
+        from voice import (
+            say,
+            announce,
+            get_voice,
+            VoiceSystem,
+            VoiceConfig,
             VoicePreset,
-            DEFAULT_PERSONA_PROMPT
+            init_voice,
+            shutdown_voice,
+            PERSONA_PROMPTS,
+            STYLE_TO_PRESET
         )
-        logger.info("Voice system: PersonaPlex (NVIDIA)")
+        logger.info("Voice system: PersonaPlex (enabled)")
     except ImportError as e:
-        logger.warning(f"PersonaPlex import failed: {e}, falling back to Piper TTS")
-        USE_PERSONAPLEX = False
+        logger.warning(f"Voice system import failed: {e}")
+        VOICE_ENABLED = False
 
-if not USE_PERSONAPLEX:
-    try:
-        from voice import say, announce, get_voice, VoiceSystem
-        logger.info("Voice system: Piper TTS")
-    except ImportError as e:
-        logger.warning(f"Voice system not available: {e}")
-        # Provide dummy functions
-        def say(text, **kwargs):
-            logger.info(f"[Voice disabled] {text}")
-        
-        def announce(text, **kwargs):
-            logger.info(f"[Voice disabled] {text}")
-        
-        def get_voice():
-            return None
-        
-        class VoiceSystem:
+if not VOICE_ENABLED:
+    # Provide stub functions when voice is disabled
+    logger.info("Voice system: disabled (set PERSONAPLEX_ENABLED=true to enable)")
+    
+    def say(text, **kwargs):
+        logger.debug(f"[Voice disabled] {text}")
+        return False
+    
+    def announce(text, **kwargs):
+        logger.debug(f"[Voice disabled] {text}")
+        return False
+    
+    def get_voice():
+        return None
+    
+    async def init_voice(**kwargs):
+        return False
+    
+    async def shutdown_voice():
+        pass
+    
+    class VoiceSystem:
+        def __init__(self, *args, **kwargs):
             pass
+        def say(self, text, **kwargs):
+            return False
+        def announce(self, text, **kwargs):
+            return False
+    
+    class VoiceConfig:
+        pass
+    
+    VoicePreset = str
+    PERSONA_PROMPTS = {}
+    STYLE_TO_PRESET = {}
 
-__all__ = ['say', 'announce', 'get_voice', 'VoiceSystem']
+__all__ = [
+    'say', 
+    'announce', 
+    'get_voice', 
+    'VoiceSystem',
+    'VoiceConfig',
+    'VoicePreset',
+    'init_voice',
+    'shutdown_voice',
+    'PERSONA_PROMPTS',
+    'STYLE_TO_PRESET',
+    'VOICE_ENABLED'
+]
+

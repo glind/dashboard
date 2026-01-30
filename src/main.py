@@ -4165,8 +4165,21 @@ Format: [{"artist": "Name", "title": "Song"}, ...]""")
         
         prompt = " ".join(prompt_parts)
 
-        # Get Ollama settings
-        ollama_url = db.get_setting('ollama_url', 'http://localhost:11434')
+        # Get Ollama URL from database settings or configured provider
+        ollama_url = db.get_setting('ollama_url')
+        if not ollama_url:
+            # Try to get from configured Ollama provider
+            providers = db.get_ai_providers()
+            for p in providers:
+                if p.get('provider_type') == 'ollama' and p.get('is_active'):
+                    ollama_url = p.get('base_url') or p.get('config_data', {}).get('base_url')
+                    if ollama_url:
+                        break
+        if not ollama_url:
+            ollama_url = 'http://localhost:11434'
+        
+        logger.info(f"Using Ollama URL for playlist generation: {ollama_url}")
+        
         # Use llama3.2:1b which follows instructions better than tinyllama
         model = 'llama3.2:1b'
         
@@ -4366,36 +4379,13 @@ async def youtube_search(q: str):
         return {"videoId": None, "query": q, "error": str(e)}
 
 
-@app.get("/api/music/playlists")
-async def get_saved_playlists():
-    """Get all saved playlists"""
-    try:
-        if COLLECTORS_AVAILABLE:
-            from collectors.universal_music_collector import UniversalMusicCollector
-            collector = UniversalMusicCollector()
-            playlists = await collector.get_saved_playlists()
-            
-            return {
-                "playlists": [
-                    {
-                        "id": p.id,
-                        "name": p.name,
-                        "description": p.description,
-                        "mood": p.mood,
-                        "created_by": p.created_by,
-                        "created_at": p.created_at.isoformat(),
-                        "track_count": len(p.tracks),
-                        "total_duration_ms": p.total_duration_ms,
-                        "services_used": p.services_used
-                    }
-                    for p in playlists
-                ]
-            }
-        else:
-            return {"playlists": []}
-    except Exception as e:
-        logger.error(f"Error getting playlists: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+# Note: Music playlist endpoints are now in modules/music/endpoints.py
+# which is included via music_router - provides:
+# - /api/music/playlists (GET, POST)
+# - /api/music/playback-state (GET, POST)
+# - /api/music/playback-state/index (PUT)
+# - /api/music/liked-songs (GET, POST, DELETE)
+# - /api/music/initial-data (GET)
 
 # OAuth endpoints for music services
 @app.get("/api/music/oauth/spotify/login")
@@ -7747,10 +7737,9 @@ async def startup_event():
     # Create data directory for lead generation files
     os.makedirs('data', exist_ok=True)
     
-    # Initialize voice system
+    # Initialize voice system (PersonaPlex)
     try:
-        # Import voice system from current directory structure
-        import voice as voice_module
+        import voice_helper
         
         # Load voice configuration from settings
         voice_config = getattr(settings, 'voice', {})
@@ -7758,56 +7747,42 @@ async def startup_event():
             # Fallback to default config
             voice_config = {
                 'enabled': True,
-                'model': 'en_US-ryan-high',
-                'default_style': 'droid',
-                'speed': 0.75,
-                'pitch': 0.85
+                'voice_preset': 'NATM1',
+                'persona': 'rogr',
+                'server_url': 'wss://localhost:8998',
+                'announce_on_startup': True
             }
         
         if not voice_config.get('enabled', True):
             logger.info("Voice system disabled in configuration")
+        elif not voice_helper.VOICE_ENABLED:
+            logger.info("Voice system not enabled (set PERSONAPLEX_ENABLED=true)")
         else:
             # Get configuration values
-            model_name = voice_config.get('model', 'en_US-ryan-high')
-            default_style = voice_config.get('default_style', 'droid')
-            speed = voice_config.get('speed', 0.75)
-            pitch = voice_config.get('pitch', 0.85)
+            voice_preset = voice_config.get('voice_preset', 'NATM1')
+            persona = voice_config.get('persona', 'rogr')
+            server_url = voice_config.get('server_url', 'wss://localhost:8998')
+            
+            # Map legacy style to voice preset if needed
+            if 'default_style' in voice_config and 'voice_preset' not in voice_config:
+                style = voice_config.get('default_style', 'droid')
+                voice_preset = voice_helper.STYLE_TO_PRESET.get(style, 'NATM1')
             
             # Initialize voice with configuration
-            voice = voice_module.VoiceSystem(
-                default_style=default_style,
-                speed=speed,
-                pitch=pitch
+            voice = voice_helper.VoiceSystem(
+                server_url=server_url,
+                voice_preset=voice_preset,
+                persona=persona
             )
             
             # Set as global voice instance
-            voice_module._voice = voice
+            voice_helper._voice = voice
             
-            # Configure voice system with Piper path
-            piper_bin = project_root / "data" / "voice_models" / "piper" / "piper"
-            model_path = project_root / "data" / "voice_models" / "piper" / f"{model_name}.onnx"
+            # Announce startup if configured
+            if voice_config.get('announce_on_startup', True):
+                voice_helper.announce("Dashboard initialization complete")
             
-            if piper_bin.exists() and model_path.exists():
-                voice.piper_bin = str(piper_bin)
-                voice.model_path = str(model_path)
-                
-                # Preload common phrases
-                common_phrases = [
-                    "Dashboard online",
-                    "Data collection complete",
-                    "No urgent items detected",
-                    "Status report ready",
-                ]
-                voice.preload_common_phrases(common_phrases)
-                
-                # Announce startup if configured
-                if voice_config.get('announce_on_startup', True):
-                    voice_module.announce("Dashboard initialization complete", blocking=False)
-                
-                logger.info(f"Voice system initialized: {model_name}, style={default_style}, speed={speed}x, pitch={pitch}x")
-            else:
-                logger.warning(f"Voice system not configured. Model not found: {model_path}")
-                logger.warning("Run scripts/setup_voice.sh to install.")
+            logger.info(f"Voice system initialized: PersonaPlex preset={voice_preset}, persona={persona}")
     except Exception as e:
         logger.warning(f"Voice system initialization failed: {e}")
     

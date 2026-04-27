@@ -7,6 +7,9 @@ import json
 import gzip
 import hashlib
 import logging
+import re
+import httpx
+from collections import OrderedDict
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional
 from pathlib import Path
@@ -27,12 +30,16 @@ class AIService:
         """Initialize AI service with database connection."""
         self.db = db
         self.settings = settings
+        self.repo_root = Path(__file__).resolve().parents[2]
+        self.long_term_memory_path = self.repo_root / 'LONG_TERM_MEMORY.md'
+        self.short_term_memory_path = self.repo_root / 'SHORT_TERM_MEMORY.md'
         self._provider = None
         self._context_cache = None
         self._context_cache_time = None
         self._user_profile_cache = None
         self._profile_cache_time = None
         self.cache_duration = timedelta(minutes=5)
+        self._ensure_memory_files()
         
     def get_provider(self):
         """Get or create the configured AI provider (singleton pattern)."""
@@ -64,15 +71,40 @@ class AIService:
                 ollama_host = self.db.get_setting('ollama_host', 'localhost')
                 ollama_port = self.db.get_setting('ollama_port', 11434)
                 ollama_model = self.db.get_setting('ollama_model', 'deepseek-r1:latest')
-                
+
+                base_urls = [
+                    f'http://{ollama_host}:{ollama_port}',
+                    f'http://localhost:{ollama_port}',
+                    f'http://127.0.0.1:{ollama_port}',
+                ]
+
+                resolved_base_url = None
+                for candidate in base_urls:
+                    if self._ollama_url_reachable(candidate):
+                        resolved_base_url = candidate
+                        break
+
+                if not resolved_base_url:
+                    resolved_base_url = base_urls[0]
+                    logger.warning(
+                        "No reachable Ollama host found from candidates %s; using configured URL and allowing provider-level retry",
+                        base_urls
+                    )
+                elif resolved_base_url != base_urls[0]:
+                    logger.warning(
+                        "Configured Ollama host %s unreachable; falling back to %s",
+                        base_urls[0],
+                        resolved_base_url
+                    )
+
                 config = {
-                    'base_url': f'http://{ollama_host}:{ollama_port}',
+                    'base_url': resolved_base_url,
                     'model_name': ollama_model
                 }
-                
+
                 self._provider = create_provider('ollama', 'configured-ollama', config)
                 ai_manager.register_provider(self._provider, is_default=True)
-                logger.info(f"Initialized Ollama provider: {ollama_host}:{ollama_port} with {ollama_model}")
+                logger.info(f"Initialized Ollama provider: {resolved_base_url} with {ollama_model}")
                 
             elif ai_provider_type == 'openai':
                 api_key = self.db.get_credentials('openai', {}).get('api_key')
@@ -90,6 +122,14 @@ class AIService:
         except Exception as e:
             logger.error(f"Failed to initialize AI provider: {e}")
             self._provider = None
+
+    def _ollama_url_reachable(self, base_url: str) -> bool:
+        """Check whether Ollama tags endpoint is reachable for a base URL."""
+        try:
+            response = httpx.get(f"{base_url}/api/tags", timeout=2.5)
+            return response.status_code == 200
+        except Exception:
+            return False
     
     def build_user_profile(self, force_refresh: bool = False) -> Dict[str, Any]:
         """
@@ -285,6 +325,408 @@ class AIService:
             pass
         
         return {'style': 'Professional and friendly', 'tone': 'Helpful and concise'}
+
+    def _ensure_memory_files(self):
+        """Ensure markdown memory files exist."""
+        try:
+            if not self.long_term_memory_path.exists():
+                self.long_term_memory_path.write_text(
+                    self._render_memory_document(
+                        'Long-Term Memory',
+                        OrderedDict([
+                            ('Identity', ['- Populate from the user profile and recurring facts.']),
+                            ('Goals', ['- Track durable goals and recurring priorities.']),
+                            ('Preferences', ['- Capture likes, dislikes, and communication preferences.']),
+                            ('Work Style', ['- Record planning habits, work cadence, and scheduling patterns.']),
+                            ('Relationships', ['- Note important people, teams, and recurring stakeholders.']),
+                            ('Standing Instructions', ['- Save stable instructions the assistant should follow.']),
+                            ('Last Updated', [f"- {datetime.now().isoformat()}"])
+                        ])
+                    ),
+                    encoding='utf-8'
+                )
+
+            if not self.short_term_memory_path.exists():
+                self.short_term_memory_path.write_text(
+                    self._render_memory_document(
+                        'Short-Term Memory',
+                        OrderedDict([
+                            ('Active Focus', ['- Track the user\'s current priorities and active work streams.']),
+                            ('Open Loops', ['- Record pending follow-ups and unresolved threads.']),
+                            ('Recent Conversations', ['- Keep a compact rolling summary of recent assistant exchanges.']),
+                            ('Recent Research', ['- Store useful recent findings and decisions.']),
+                            ('Last Updated', [f"- {datetime.now().isoformat()}"])
+                        ])
+                    ),
+                    encoding='utf-8'
+                )
+        except Exception as e:
+            logger.warning(f"Unable to ensure memory files: {e}")
+
+    def _render_memory_document(self, title: str, sections: OrderedDict) -> str:
+        """Render a markdown memory document from ordered sections."""
+        lines = [f"# {title}", ""]
+        for section_name, section_lines in sections.items():
+            lines.append(f"## {section_name}")
+            lines.extend(section_lines or ['- None yet'])
+            lines.append("")
+        return "\n".join(lines).rstrip() + "\n"
+
+    def _read_memory_file(self, path: Path) -> str:
+        """Read a markdown memory file safely."""
+        try:
+            return path.read_text(encoding='utf-8')
+        except Exception as e:
+            logger.warning(f"Unable to read memory file {path.name}: {e}")
+            return ""
+
+    def _parse_memory_sections(self, path: Path, default_title: str, default_sections: List[str]) -> OrderedDict:
+        """Parse markdown memory sections into an ordered mapping."""
+        self._ensure_memory_files()
+        content = self._read_memory_file(path)
+        sections: OrderedDict[str, List[str]] = OrderedDict((name, []) for name in default_sections)
+        current_section = None
+
+        for raw_line in content.splitlines():
+            line = raw_line.rstrip()
+            if line.startswith('## '):
+                current_section = line[3:].strip()
+                if current_section not in sections:
+                    sections[current_section] = []
+                continue
+            if current_section is not None:
+                if line or sections[current_section]:
+                    sections[current_section].append(line)
+
+        cleaned_sections: OrderedDict[str, List[str]] = OrderedDict()
+        for name in list(sections.keys()):
+            lines = [line for line in sections.get(name, []) if line.strip()]
+            cleaned_sections[name] = lines or ['- None yet']
+
+        if not content.strip():
+            rendered = self._render_memory_document(default_title, cleaned_sections)
+            try:
+                path.write_text(rendered, encoding='utf-8')
+            except Exception as e:
+                logger.warning(f"Unable to initialize {path.name}: {e}")
+
+        return cleaned_sections
+
+    def _update_memory_file(
+        self,
+        path: Path,
+        title: str,
+        section_order: List[str],
+        updates: Dict[str, List[str]],
+        section_limits: Optional[Dict[str, int]] = None
+    ):
+        """Merge updates into a markdown memory file while preserving section order."""
+        try:
+            sections = self._parse_memory_sections(path, title, section_order)
+            limits = section_limits or {}
+
+            for section_name in section_order:
+                sections.setdefault(section_name, ['- None yet'])
+
+            for section_name, new_entries in (updates or {}).items():
+                if not new_entries:
+                    continue
+
+                existing_values = [
+                    self._normalize_memory_entry(line)
+                    for line in sections.get(section_name, [])
+                    if self._normalize_memory_entry(line)
+                    and self._normalize_memory_entry(line).lower() != 'none yet'
+                ]
+
+                combined = existing_values[:]
+                seen = {value.lower() for value in combined}
+                for entry in new_entries:
+                    normalized = self._normalize_memory_entry(entry)
+                    if not normalized:
+                        continue
+                    lowered = normalized.lower()
+                    if lowered in seen:
+                        continue
+                    combined.append(normalized)
+                    seen.add(lowered)
+
+                limit = limits.get(section_name)
+                if limit and len(combined) > limit:
+                    combined = combined[-limit:]
+
+                sections[section_name] = [f"- {value}" for value in combined] or ['- None yet']
+
+            sections['Last Updated'] = [f"- {datetime.now().isoformat()}"]
+            rendered = self._render_memory_document(
+                title,
+                OrderedDict((name, sections.get(name, ['- None yet'])) for name in section_order)
+            )
+            path.write_text(rendered, encoding='utf-8')
+            self._context_cache = None
+            self._context_cache_time = None
+        except Exception as e:
+            logger.warning(f"Unable to update memory file {path.name}: {e}")
+
+    def _normalize_memory_entry(self, entry: str) -> str:
+        """Normalize markdown bullet entries."""
+        if not entry:
+            return ''
+        cleaned = re.sub(r'^[-*]\s*', '', str(entry).strip())
+        cleaned = re.sub(r'\s+', ' ', cleaned)
+        return cleaned[:300].strip()
+
+    def _get_memory_excerpt(self, path: Path, limit: int = 2500) -> str:
+        """Read and trim markdown memory for prompt context."""
+        content = self._read_memory_file(path).strip()
+        if not content:
+            return 'Unavailable'
+        return content[:limit]
+
+    def _safe_profile_items(self, user_profile: Any) -> Dict[str, Any]:
+        """Convert the stored user profile into a plain dictionary."""
+        if not user_profile:
+            return {}
+        if isinstance(user_profile, dict):
+            return user_profile
+        if hasattr(user_profile, 'keys'):
+            return {key: user_profile[key] for key in user_profile.keys()}
+        return {}
+
+    def _hydrate_memory_from_profile(self):
+        """Seed long-term memory from the database user profile."""
+        try:
+            user_profile = self._safe_profile_items(self.db.get_user_profile())
+            if not user_profile:
+                return
+
+            identity_updates = []
+            goal_updates = []
+            preference_updates = []
+            work_style_updates = []
+
+            preferred_name = user_profile.get('preferred_name') or user_profile.get('full_name')
+            if preferred_name:
+                identity_updates.append(f"Preferred name: {preferred_name}")
+            if user_profile.get('company'):
+                identity_updates.append(f"Company: {user_profile['company']}")
+            if user_profile.get('role'):
+                identity_updates.append(f"Role: {user_profile['role']}")
+            if user_profile.get('work_focus'):
+                goal_updates.append(f"Primary work focus: {user_profile['work_focus']}")
+            if user_profile.get('communication_style'):
+                preference_updates.append(f"Communication style: {user_profile['communication_style']}")
+            if user_profile.get('preferred_tone'):
+                preference_updates.append(f"Preferred tone: {user_profile['preferred_tone']}")
+            if user_profile.get('priorities'):
+                work_style_updates.append(f"Stated priorities: {user_profile['priorities']}")
+            if user_profile.get('work_hours'):
+                work_style_updates.append(f"Work hours: {user_profile['work_hours']}")
+            if user_profile.get('timezone'):
+                work_style_updates.append(f"Timezone: {user_profile['timezone']}")
+
+            self._update_memory_file(
+                self.long_term_memory_path,
+                'Long-Term Memory',
+                ['Identity', 'Goals', 'Preferences', 'Work Style', 'Relationships', 'Standing Instructions', 'Last Updated'],
+                {
+                    'Identity': identity_updates,
+                    'Goals': goal_updates,
+                    'Preferences': preference_updates,
+                    'Work Style': work_style_updates,
+                },
+                section_limits={
+                    'Identity': 12,
+                    'Goals': 12,
+                    'Preferences': 20,
+                    'Work Style': 20,
+                    'Relationships': 20,
+                    'Standing Instructions': 20,
+                }
+            )
+        except Exception as e:
+            logger.warning(f"Unable to hydrate long-term memory from profile: {e}")
+
+    def _truncate_for_memory(self, value: str, limit: int = 180) -> str:
+        """Trim memory text to a compact single line."""
+        normalized = re.sub(r'\s+', ' ', (value or '').strip())
+        if len(normalized) <= limit:
+            return normalized
+        return normalized[: limit - 3].rstrip() + '...'
+
+    def _extract_long_term_updates(self, message: str) -> Dict[str, List[str]]:
+        """Extract durable memory candidates from the user's message."""
+        lowered = (message or '').lower()
+        updates = {
+            'Identity': [],
+            'Goals': [],
+            'Preferences': [],
+            'Work Style': [],
+            'Relationships': [],
+            'Standing Instructions': [],
+        }
+
+        pattern_map = [
+            ('Identity', r"\b(?:my name is|i am|i'm)\s+([^.!?\n]+)"),
+            ('Goals', r"\b(?:my goal is|our goal is|we need to|i need to|i want to)\s+([^.!?\n]+)"),
+            ('Preferences', r"\b(?:i prefer|i like|i dislike|i don't like)\s+([^.!?\n]+)"),
+            ('Standing Instructions', r"\b(?:remember to|please always|always|never)\s+([^.!?\n]+)"),
+            ('Work Style', r"\b(?:i usually|i typically|my workflow is|i work best when)\s+([^.!?\n]+)"),
+        ]
+
+        for section_name, pattern in pattern_map:
+            for match in re.findall(pattern, message or '', flags=re.IGNORECASE):
+                candidate = self._truncate_for_memory(match, 180)
+                if len(candidate) >= 6:
+                    updates[section_name].append(candidate)
+
+        if 'calendar' in lowered or 'schedule' in lowered:
+            updates['Work Style'].append(self._truncate_for_memory(f"Scheduling context emphasized: {message}"))
+        if 'email' in lowered or 'inbox' in lowered:
+            updates['Work Style'].append(self._truncate_for_memory(f"Email workflow context emphasized: {message}"))
+        if 'team' in lowered or 'with ' in lowered:
+            updates['Relationships'].append(self._truncate_for_memory(message))
+
+        return {key: value for key, value in updates.items() if value}
+
+    def _extract_short_term_updates(self, message: str, response: str) -> Dict[str, List[str]]:
+        """Extract short-lived context from the latest exchange."""
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M')
+        convo_summary = (
+            f"{timestamp} | User: {self._truncate_for_memory(message, 160)} | "
+            f"Assistant: {self._truncate_for_memory(response, 180)}"
+        )
+
+        updates = {
+            'Recent Conversations': [convo_summary],
+            'Active Focus': [],
+            'Open Loops': [],
+            'Recent Research': [],
+        }
+
+        lowered = (message or '').lower()
+        if any(keyword in lowered for keyword in ['today', 'priority', 'prioritize', 'focus', 'plan', 'schedule', 'calendar', 'email', 'task']):
+            updates['Active Focus'].append(self._truncate_for_memory(message))
+        if any(keyword in lowered for keyword in ['follow up', 'follow-up', 'remind', 'todo', 'task', 'next step', 'need to', 'should']):
+            updates['Open Loops'].append(self._truncate_for_memory(message))
+        if any(keyword in lowered for keyword in ['research', 'look into', 'find', 'compare', 'investigate', 'analyze']):
+            updates['Recent Research'].append(self._truncate_for_memory(response, 220))
+
+        return {key: value for key, value in updates.items() if value}
+
+    def _update_conversation_memory(self, message: str, response: str):
+        """Persist short-term and long-term memory updates after a response."""
+        self._hydrate_memory_from_profile()
+
+        long_term_updates = self._extract_long_term_updates(message)
+        if long_term_updates:
+            self._update_memory_file(
+                self.long_term_memory_path,
+                'Long-Term Memory',
+                ['Identity', 'Goals', 'Preferences', 'Work Style', 'Relationships', 'Standing Instructions', 'Last Updated'],
+                long_term_updates,
+                section_limits={
+                    'Identity': 12,
+                    'Goals': 16,
+                    'Preferences': 24,
+                    'Work Style': 24,
+                    'Relationships': 24,
+                    'Standing Instructions': 24,
+                }
+            )
+
+        short_term_updates = self._extract_short_term_updates(message, response)
+        if short_term_updates:
+            self._update_memory_file(
+                self.short_term_memory_path,
+                'Short-Term Memory',
+                ['Active Focus', 'Open Loops', 'Recent Conversations', 'Recent Research', 'Last Updated'],
+                short_term_updates,
+                section_limits={
+                    'Active Focus': 20,
+                    'Open Loops': 20,
+                    'Recent Conversations': 25,
+                    'Recent Research': 20,
+                }
+            )
+
+    def get_memory_snapshot(self) -> Dict[str, Any]:
+        """Return current markdown memory contents."""
+        self._ensure_memory_files()
+        self._hydrate_memory_from_profile()
+        return {
+            'long_term': self._read_memory_file(self.long_term_memory_path),
+            'short_term': self._read_memory_file(self.short_term_memory_path),
+            'paths': {
+                'long_term': str(self.long_term_memory_path),
+                'short_term': str(self.short_term_memory_path),
+            }
+        }
+
+    def save_memory_content(self, memory_type: str, content: str) -> bool:
+        """Persist edited markdown memory content."""
+        self._ensure_memory_files()
+        target_map = {
+            'long_term': self.long_term_memory_path,
+            'short_term': self.short_term_memory_path,
+        }
+        target_path = target_map.get(memory_type)
+        if not target_path:
+            raise ValueError('Invalid memory type')
+
+        normalized_content = (content or '').strip()
+        if not normalized_content:
+            raise ValueError('Memory content cannot be empty')
+
+        if memory_type == 'long_term' and not normalized_content.startswith('# Long-Term Memory'):
+            normalized_content = f"# Long-Term Memory\n\n{normalized_content}"
+        if memory_type == 'short_term' and not normalized_content.startswith('# Short-Term Memory'):
+            normalized_content = f"# Short-Term Memory\n\n{normalized_content}"
+
+        target_path.write_text(normalized_content.rstrip() + '\n', encoding='utf-8')
+        self._context_cache = None
+        self._context_cache_time = None
+        return True
+
+    def reset_memory(self, memory_type: str) -> bool:
+        """Reset memory file to its default structure."""
+        if memory_type == 'long_term':
+            self.long_term_memory_path.write_text(
+                self._render_memory_document(
+                    'Long-Term Memory',
+                    OrderedDict([
+                        ('Identity', ['- Populate from the user profile and recurring facts.']),
+                        ('Goals', ['- Track durable goals and recurring priorities.']),
+                        ('Preferences', ['- Capture likes, dislikes, and communication preferences.']),
+                        ('Work Style', ['- Record planning habits, work cadence, and scheduling patterns.']),
+                        ('Relationships', ['- Note important people, teams, and recurring stakeholders.']),
+                        ('Standing Instructions', ['- Save stable instructions the assistant should follow.']),
+                        ('Last Updated', [f"- {datetime.now().isoformat()}"])
+                    ])
+                ),
+                encoding='utf-8'
+            )
+            self._hydrate_memory_from_profile()
+        elif memory_type == 'short_term':
+            self.short_term_memory_path.write_text(
+                self._render_memory_document(
+                    'Short-Term Memory',
+                    OrderedDict([
+                        ('Active Focus', ['- Track the user\'s current priorities and active work streams.']),
+                        ('Open Loops', ['- Record pending follow-ups and unresolved threads.']),
+                        ('Recent Conversations', ['- Keep a compact rolling summary of recent assistant exchanges.']),
+                        ('Recent Research', ['- Store useful recent findings and decisions.']),
+                        ('Last Updated', [f"- {datetime.now().isoformat()}"])
+                    ])
+                ),
+                encoding='utf-8'
+            )
+        else:
+            raise ValueError('Invalid memory type')
+
+        self._context_cache = None
+        self._context_cache_time = None
+        return True
     
     async def build_context(self, user_message: str = "", force_refresh: bool = False) -> str:
         """
@@ -297,6 +739,7 @@ class AIService:
                 return self._context_cache
         
         try:
+            self._hydrate_memory_from_profile()
             context_parts = []
             
             # 1. User Profile
@@ -309,11 +752,34 @@ class AIService:
                 context_parts.append(f"Company: {user_info['company']}")
             if user_info.get('role'):
                 context_parts.append(f"Role: {user_info['role']}")
+
+            raw_user_profile = self._safe_profile_items(self.db.get_user_profile())
+            profile_prompt_fields = []
+            excluded_fields = {'id', 'created_at', 'updated_at'}
+            for key, value in raw_user_profile.items():
+                if key in excluded_fields or value in (None, '', [], {}):
+                    continue
+                if isinstance(value, (list, dict)):
+                    value = json.dumps(value)
+                display_key = key.replace('_', ' ').title()
+                profile_prompt_fields.append(f"{display_key}: {self._truncate_for_memory(str(value), 200)}")
+
+            if profile_prompt_fields:
+                context_parts.append("\n=== DATABASE PROFILE PROMPTS ===")
+                context_parts.extend(profile_prompt_fields[:15])
+
+            context_parts.append("\n=== LONG-TERM MEMORY ===")
+            context_parts.append(self._get_memory_excerpt(self.long_term_memory_path, limit=3200))
+
+            context_parts.append("\n=== SHORT-TERM MEMORY ===")
+            context_parts.append(self._get_memory_excerpt(self.short_term_memory_path, limit=2600))
             
             # 2. Current Time Context
             now = datetime.now()
             context_parts.append(f"\n=== CURRENT CONTEXT ===")
             context_parts.append(f"Current Time: {now.strftime('%A, %B %d, %Y at %I:%M %p')}")
+            if user_message:
+                context_parts.append(f"Current User Request: {self._truncate_for_memory(user_message, 240)}")
             
             # 3. Active Tasks (top priority)
             context_parts.append(f"\n=== ACTIVE TASKS ===")
@@ -527,8 +993,244 @@ class AIService:
     def get_context_hash(self, context: str) -> str:
         """Generate hash of context for change detection."""
         return hashlib.sha256(context.encode('utf-8')).hexdigest()
+
+    def _looks_like_privacy_refusal(self, response_text: str) -> bool:
+        """Detect model replies that incorrectly deny access to user-authorized app data."""
+        if not response_text:
+            return False
+
+        lowered = response_text.lower()
+        refusal_markers = [
+            "i don't have access",
+            "i do not have access",
+            "can't access",
+            "cannot access",
+            "can't review",
+            "cannot review",
+            "not allowed to access",
+            "not permitted to access",
+            "no access to your",
+            "violation of privacy",
+            "privacy violation",
+            "i can't view your",
+            "i cannot view your",
+        ]
+        return any(marker in lowered for marker in refusal_markers)
+
+    def _strip_privacy_refusal_sentences(self, response_text: str) -> str:
+        """Remove refusal sentences if a model still emits policy-style denial text."""
+        if not response_text:
+            return response_text
+
+        sentence_split = re.split(r'(?<=[.!?])\s+', response_text.strip())
+        filtered = [s for s in sentence_split if not self._looks_like_privacy_refusal(s)]
+
+        if filtered:
+            return " ".join(filtered).strip()
+        return response_text
+
+    def _get_active_assistant_profile(self, assistant_id: Optional[str] = None) -> Dict[str, Any]:
+        """Get active AI assistant persona from settings."""
+        try:
+            config = self.db.get_setting('ai_assistants', {})
+            if not isinstance(config, dict):
+                return {}
+
+            assistants = config.get('assistants', [])
+            if not isinstance(assistants, list) or not assistants:
+                return {}
+
+            selected_id = assistant_id or config.get('active_assistant_id')
+            for assistant in assistants:
+                if assistant.get('id') == selected_id:
+                    return assistant
+
+            return assistants[0]
+        except Exception as e:
+            logger.warning(f"Unable to load assistant profile: {e}")
+            return {}
+
+    def _is_daily_brief_request(self, message: str) -> bool:
+        """Detect requests for summary/review/prioritization style responses."""
+        lowered = (message or '').lower()
+        triggers = [
+            'daily brief', 'summarize', 'summary', 'review my', 'review today',
+            'priorities', 'prioritize', 'top priorities', 'today plan',
+            'what should i work on today', 'what should i do today',
+            'work on today', 'focus on today', 'today focus'
+        ]
+        return any(trigger in lowered for trigger in triggers)
+
+    def _looks_generic_priority_response(self, response_text: str) -> bool:
+        """Detect vague priority answers that ignore concrete dashboard context."""
+        lowered = (response_text or '').lower()
+        generic_markers = [
+            'view and analyze tasks, calendar, emails',
+            'prioritize tasks based on',
+            'as a beginner',
+            'best of luck',
+            'please feel free to ask',
+            'leave it to you to determine what is applicable',
+            'based on their urgency and importance levels',
+        ]
+        return any(marker in lowered for marker in generic_markers)
+
+    def _response_references_context(self, response_text: str, context: str) -> bool:
+        """Check whether response mentions at least one concrete task/event/email from context."""
+        try:
+            response_lower = (response_text or '').lower()
+            if not response_lower.strip():
+                return False
+
+            candidates: List[str] = []
+            for raw_line in (context or '').splitlines():
+                line = raw_line.strip()
+
+                if line.startswith('- [') or line.startswith('  - ['):
+                    cleaned = re.sub(r'^-\s*\[[^\]]+\]\s*', '', line.replace('  - ', '- ')).strip()
+                    cleaned = re.sub(r'\s*\(due:.*?\)\s*$', '', cleaned).strip()
+                    if cleaned:
+                        candidates.append(cleaned)
+                    continue
+
+                if line.startswith('- ') or line.startswith('  - '):
+                    cleaned = line.replace('  - ', '- ')[2:].strip()
+                    if ': ' in cleaned:
+                        cleaned = cleaned.split(': ', 1)[1].strip()
+                    cleaned = re.sub(r'\s*\(.*?\)\s*$', '', cleaned).strip()
+                    if cleaned and len(cleaned) >= 6:
+                        candidates.append(cleaned)
+
+            normalized_candidates = []
+            seen = set()
+            for item in candidates:
+                compact = re.sub(r'\s+', ' ', item).strip()
+                if len(compact) < 6:
+                    continue
+                lowered = compact.lower()
+                if lowered in seen:
+                    continue
+                seen.add(lowered)
+                normalized_candidates.append(compact)
+                if len(normalized_candidates) >= 20:
+                    break
+
+            if not normalized_candidates:
+                return False
+
+            for candidate in normalized_candidates:
+                pieces = [piece for piece in re.split(r'\W+', candidate.lower()) if len(piece) >= 4]
+                if not pieces:
+                    continue
+                overlap = [piece for piece in pieces if piece in response_lower]
+                if len(overlap) >= min(2, len(pieces)):
+                    return True
+
+            return False
+        except Exception:
+            return False
+
+    def _matches_daily_brief_format(self, response_text: str) -> bool:
+        """Check whether response follows expected daily brief structure."""
+        lowered = (response_text or '').lower()
+        return (
+            'today snapshot' in lowered
+            and 'top priorities' in lowered
+            and 'follow-ups' in lowered
+        )
+
+    def _build_fallback_daily_brief(self, context: str) -> str:
+        """Build a deterministic daily brief from context if model output is unstructured."""
+        try:
+            raw_lines = (context or '').splitlines()
+            sections: Dict[str, List[str]] = {
+                'tasks': [],
+                'calendar': [],
+                'emails': [],
+            }
+            current = None
+
+            for line in raw_lines:
+                stripped = line.strip()
+                if stripped == "=== ACTIVE TASKS ===":
+                    current = 'tasks'
+                    continue
+                if stripped == "=== TODAY'S SCHEDULE ===":
+                    current = 'calendar'
+                    continue
+                if stripped == "=== RECENT EMAILS ===":
+                    current = 'emails'
+                    continue
+                if stripped.startswith('=== ') and stripped.endswith(' ==='):
+                    current = None
+                    continue
+                if current:
+                    sections[current].append(stripped)
+
+            task_lines = [line for line in sections['tasks'] if line.startswith('- [') or line.startswith('  - [')]
+            calendar_lines = [line for line in sections['calendar'] if line.startswith('- ') or line.startswith('  - ')][:3]
+            email_lines = [line for line in sections['emails'] if line.startswith('- ') or line.startswith('  - ')][:3]
+
+            snapshot = []
+            if calendar_lines:
+                snapshot.append(f"- Calendar: {calendar_lines[0].replace('  - ', '').replace('- ', '').strip()}")
+            else:
+                snapshot.append("- Calendar: unavailable or no upcoming events")
+
+            if email_lines:
+                snapshot.append(f"- Email: {email_lines[0].replace('  - ', '').replace('- ', '').strip()}")
+            else:
+                snapshot.append("- Email: unavailable or no recent emails")
+
+            if task_lines:
+                snapshot.append(f"- Tasks: {len(task_lines)} active priority items detected")
+            else:
+                snapshot.append("- Tasks: no high-priority tasks detected")
+
+            priorities = []
+            for idx, task in enumerate(task_lines[:3], 1):
+                cleaned = task.replace('  - ', '').replace('- ', '').strip()
+                priorities.append(f"{idx}) {cleaned} — why now: active and actionable")
+            if not priorities:
+                priorities = [
+                    "1) Review upcoming calendar commitments — why now: aligns day planning",
+                    "2) Triage inbox for urgent replies — why now: prevents blockers",
+                    "3) Confirm top task for focused block — why now: drives momentum",
+                ]
+
+            followups = [
+                "- Calendar check | You | next 30 minutes",
+                "- Inbox triage | You | this morning",
+                "- Priority task focus block | You | next available 60 minutes",
+            ]
+
+            return "\n".join([
+                "Today Snapshot",
+                *snapshot,
+                "",
+                "Top Priorities",
+                *priorities,
+                "",
+                "Follow-ups",
+                *followups,
+            ])
+        except Exception:
+            return (
+                "Today Snapshot\n"
+                "- Calendar: unavailable\n"
+                "- Email: unavailable\n"
+                "- Tasks: unavailable\n\n"
+                "Top Priorities\n"
+                "1) Review calendar commitments — why now: day planning\n"
+                "2) Triage inbox for urgent items — why now: remove blockers\n"
+                "3) Focus on highest-impact task — why now: momentum\n\n"
+                "Follow-ups\n"
+                "- Calendar check | You | today\n"
+                "- Inbox triage | You | today\n"
+                "- Focus block | You | today"
+            )
     
-    async def chat(self, message: str, conversation_id: str = None, include_context: bool = True) -> Dict[str, Any]:
+    async def chat(self, message: str, conversation_id: str = None, include_context: bool = True, assistant_id: Optional[str] = None) -> Dict[str, Any]:
         """
         Main chat interface - uses configured provider with full context.
         
@@ -550,6 +1252,7 @@ class AIService:
             
             # Build context
             context = await self.build_context(message) if include_context else ""
+            assistant_profile = self._get_active_assistant_profile(assistant_id)
             
             # Build messages for chat
             messages = []
@@ -557,8 +1260,18 @@ class AIService:
             # System message with context
             if context:
                 # Put strong directive BEFORE the context data - KEEP IT SHORT
-                system_message = """You are a personal AI assistant with access to the user's data shown below.
+                assistant_name = assistant_profile.get('name', 'AI Assistant')
+                personality = assistant_profile.get('personality', 'Clear, concise, and proactive')
+                tagline = assistant_profile.get('tagline', '')
+                key_phrases = assistant_profile.get('key_phrases', []) or []
+
+                system_message = f"""You are {assistant_name}, a personal AI assistant with access to the user's data shown below.
 IMPORTANT: When asked about calendar, emails, tasks - USE THE DATA IN THIS MESSAGE. Never say "I don't have access."
+PRIVACY NOTE: The user has explicitly authorized this app assistant to review and summarize their in-app personal data.
+Do not refuse due to privacy policy concerns for this in-app context.
+PERSONALITY: {personality}
+TAGLINE: {tagline if tagline else 'None'}
+KEY PHRASES: {', '.join(key_phrases[:6]) if key_phrases else 'None'}
 
 """
                 system_message += context
@@ -568,6 +1281,13 @@ IMPORTANT: When asked about calendar, emails, tasks - USE THE DATA IN THIS MESSA
 RULES:
 - Answer questions using the data above
 - Reference specific events, emails, and tasks by name
+- Do not invent calendar events, email messages, or notes that are not present in context
+- If a section is missing, clearly say that section is unavailable and continue with available sections
+- For summarize/review/prioritize requests, format as:
+    1) Today Snapshot (max 3 bullets)
+    2) Top Priorities (ranked with reason and urgency)
+    3) Follow-ups (concrete next actions)
+- Use tagline at most once and only when it fits naturally
 - Be concise and helpful"""
                 messages.append({'role': 'system', 'content': system_message})
             
@@ -589,6 +1309,80 @@ RULES:
             
             # Get AI response
             response = await provider.chat(messages, stream=False)
+
+            # Some models may still emit generic privacy refusals despite app context.
+            # Retry once with a strict corrective system directive.
+            if self._looks_like_privacy_refusal(response):
+                logger.warning("AI response contained privacy-refusal language; retrying with corrective prompt")
+                retry_messages = []
+
+                if context:
+                    corrective_system_message = """You are the user's in-app personal assistant.
+The user has explicitly granted permission for you to access and summarize their app data context (calendar, email, notes, tasks, GitHub, news).
+Do NOT claim you cannot access data due to privacy policy.
+If some sections are missing in the provided context, state exactly which sections are unavailable and continue with the rest.
+Do not fabricate personal data details not present in context.
+When asked to summarize/prioritize, return: Today Snapshot, Top Priorities, Follow-ups.
+
+Use the context below to provide concrete prioritization and summaries.
+
+"""
+                    corrective_system_message += context
+                    retry_messages.append({'role': 'system', 'content': corrective_system_message})
+
+                retry_messages.append({'role': 'user', 'content': message})
+                response = await provider.chat(retry_messages, stream=False)
+
+            # Final safeguard: remove refusal sentence if model still includes it.
+            if self._looks_like_privacy_refusal(response):
+                logger.warning("AI response still contains privacy-refusal language after retry; sanitizing response")
+                response = self._strip_privacy_refusal_sentences(response)
+
+            # Enforce concise daily-brief format when requested.
+            if self._is_daily_brief_request(message):
+                needs_reformat = (
+                    not self._matches_daily_brief_format(response)
+                    or self._looks_generic_priority_response(response)
+                    or not self._response_references_context(response, context)
+                )
+
+                if needs_reformat:
+                    logger.info("Daily-priority request detected; enforcing structured context-specific response")
+                brief_messages = []
+                if context:
+                    brief_messages.append({
+                        'role': 'system',
+                        'content': (
+                            "Use ONLY the provided context to produce a concise daily brief in this exact structure:\n"
+                            "Today Snapshot\n"
+                            "- bullet\n"
+                            "- bullet\n"
+                            "Top Priorities\n"
+                            "1) priority — why now\n"
+                            "2) priority — why now\n"
+                            "3) priority — why now\n"
+                            "Follow-ups\n"
+                            "- action | owner | when\n"
+                            "If calendar/email/notes data is unavailable, say that explicitly and continue with available sections.\n\n"
+                            f"{context}"
+                        )
+                    })
+                brief_messages.append({'role': 'user', 'content': message})
+                reformatted = await provider.chat(brief_messages, stream=False)
+                if reformatted:
+                    response = reformatted
+
+                still_not_specific = (
+                    not self._matches_daily_brief_format(response)
+                    or self._looks_generic_priority_response(response)
+                    or not self._response_references_context(response, context)
+                )
+
+                if still_not_specific:
+                    logger.warning("Model response still generic/unstructured; using deterministic fallback brief")
+                    response = self._build_fallback_daily_brief(context)
+
+            self._update_conversation_memory(message, response)
             
             # Save to conversation history
             if conversation_id:

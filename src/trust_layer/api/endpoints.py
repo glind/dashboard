@@ -3,6 +3,7 @@ Trust Layer REST API Endpoints
 """
 
 import logging
+import json
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 
@@ -84,39 +85,87 @@ async def get_report(thread_id: str, db=Depends(get_db)):
     generator = ReportGenerator(db)
     
     # Try to get existing report
-    report = generator.get_report(thread_id)
+    try:
+        report = generator.get_report(thread_id)
+    except Exception as e:
+        logger.warning(f"Trust report lookup failed for thread {thread_id}: {e}")
+        report = None
     
     if not report:
         # Try to get email from database and generate report
         with db.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('''
-                SELECT thread_id, message_id, sender, sender_name, subject,
-                       body_text, body_html, snippet, headers, received_date
+
+            cursor.execute("PRAGMA table_info(emails)")
+            email_columns = {row[1] for row in cursor.fetchall()}
+
+            thread_col = 'thread_id' if 'thread_id' in email_columns else 'id'
+
+            select_fields = {
+                'thread_id': 'thread_id' if 'thread_id' in email_columns else 'id',
+                'message_id': 'message_id' if 'message_id' in email_columns else 'id',
+                'sender': 'sender' if 'sender' in email_columns else "''",
+                'sender_name': 'sender_name' if 'sender_name' in email_columns else "''",
+                'subject': 'subject' if 'subject' in email_columns else "''",
+                'body_text': (
+                    'body_text' if 'body_text' in email_columns
+                    else ('body' if 'body' in email_columns else "''")
+                ),
+                'body_html': 'body_html' if 'body_html' in email_columns else "''",
+                'snippet': (
+                    'snippet' if 'snippet' in email_columns
+                    else ("substr(body, 1, 240)" if 'body' in email_columns else "''")
+                ),
+                'headers': 'headers' if 'headers' in email_columns else "''",
+                'received_date': (
+                    'received_date' if 'received_date' in email_columns
+                    else ('created_at' if 'created_at' in email_columns else "''")
+                ),
+            }
+
+            select_sql = ', '.join([f"{expr} AS {alias}" for alias, expr in select_fields.items()])
+            query = f"""
+                SELECT {select_sql}
                 FROM emails
-                WHERE thread_id = ?
+                WHERE {thread_col} = ?
                 LIMIT 1
-            ''', (thread_id,))
+            """
+            cursor.execute(query, (thread_id,))
             
             row = cursor.fetchone()
             if not row:
                 raise HTTPException(status_code=404, detail="Email not found")
             
             # Generate report
+            raw_headers = row['headers'] if 'headers' in row.keys() else ''
+            parsed_headers = {}
+            if raw_headers:
+                try:
+                    parsed_headers = json.loads(raw_headers)
+                except Exception:
+                    try:
+                        parsed_headers = eval(raw_headers)
+                    except Exception:
+                        parsed_headers = {}
+
             email_dict = {
-                'thread_id': row[0],
-                'message_id': row[1],
-                'sender': row[2],
-                'sender_name': row[3],
-                'subject': row[4],
-                'body_text': row[5],
-                'body_html': row[6],
-                'snippet': row[7],
-                'headers': eval(row[8]) if row[8] else {},
-                'received_date': row[9]
+                'thread_id': row['thread_id'] or thread_id,
+                'message_id': row['message_id'] or thread_id,
+                'sender': row['sender'] or '',
+                'sender_name': row['sender_name'] or '',
+                'subject': row['subject'] or '',
+                'body_text': row['body_text'] or '',
+                'body_html': row['body_html'] or '',
+                'snippet': row['snippet'] or '',
+                'headers': parsed_headers,
+                'received_date': row['received_date'] or ''
             }
             
-            report = await generator.generate_report_from_email(email_dict)
+            try:
+                report = await generator.generate_report_from_email(email_dict)
+            except Exception as e:
+                logger.warning(f"Trust report generation failed for thread {thread_id}: {e}")
+                raise HTTPException(status_code=404, detail="Trust report unavailable for this email")
     
     return TrustReportResponse(
         report_id=report.report_id,

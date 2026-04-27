@@ -229,6 +229,32 @@ class VanityAlertsCollector:
         
         return min(score, 1.0)
     
+    def _is_reddit_banned(self, post_data: Dict[str, Any]) -> bool:
+        """Check if a Reddit post is from a banned/quarantined subreddit or has been removed."""
+        # Flags that indicate banned/removed content
+        is_removed = (
+            post_data.get('removed_by_category') is not None or
+            post_data.get('author') == '[deleted]' or
+            post_data.get('title', '').startswith('[removed]') or
+            post_data.get('title', '').startswith('[deleted]') or
+            not post_data.get('selftext') and not post_data.get('title')
+        )
+        
+        # Check for quarantined flag
+        is_quarantined = post_data.get('quarantine', False)
+        
+        # List of known banned subreddits to watch out for
+        # (This can be expanded or loaded from a database)
+        banned_subreddits = [
+            'incels', 'the_donald', 'fatpeoplehate', 'cringeanarchy',
+            'redpill', 'braincels', 'gender_critical'
+        ]
+        
+        subreddit = (post_data.get('subreddit', '') or '').lower()
+        is_banned_subreddit = subreddit in banned_subreddits
+        
+        return is_removed or is_quarantined or is_banned_subreddit
+    
     async def search_google_news(self, search_term: str) -> List[VanityAlert]:
         """Search Google News RSS for mentions."""
         alerts = []
@@ -278,6 +304,12 @@ class VanityAlertsCollector:
                         
                         for post in data.get('data', {}).get('children', []):
                             post_data = post.get('data', {})
+                            subreddit = post_data.get('subreddit', 'unknown')
+                            
+                            # Check for banned/quarantined subreddits
+                            if self._is_reddit_banned(post_data):
+                                logger.warning(f"Skipping banned/removed Reddit thread: r/{subreddit} - {post_data.get('title', '')}")
+                                continue
                             
                             alert = VanityAlert(
                                 id=self._generate_alert_id(post_data.get('title', ''), 
@@ -286,7 +318,7 @@ class VanityAlertsCollector:
                                 title=post_data.get('title', ''),
                                 content=post_data.get('selftext', ''),
                                 url=f"https://reddit.com{post_data.get('permalink', '')}",
-                                source=f"Reddit r/{post_data.get('subreddit', 'unknown')}",
+                                source=f"Reddit r/{subreddit}",
                                 search_term=search_term,
                                 timestamp=datetime.fromtimestamp(post_data.get('created_utc', 0)),
                                 confidence_score=self._calculate_confidence_score(
@@ -563,49 +595,49 @@ class VanityAlertsCollector:
     
     def save_alerts_to_database(self, alerts: List[VanityAlert]):
         """Save alerts to database for persistence and liking functionality."""
-        import sqlite3
+        from database import get_db
         
         try:
-            # Connect directly to database
-            conn = sqlite3.connect('dashboard.db')
-            cursor = conn.cursor()
-            
-            # Create table if it doesn't exist
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS vanity_alerts (
-                    id TEXT PRIMARY KEY,
-                    title TEXT NOT NULL,
-                    url TEXT NOT NULL,
-                    source TEXT NOT NULL,
-                    search_term TEXT NOT NULL,
-                    timestamp TEXT NOT NULL,
-                    confidence_score REAL NOT NULL,
-                    is_liked INTEGER DEFAULT NULL,
-                    is_validated INTEGER DEFAULT NULL,
-                    snippet TEXT,
-                    sentiment TEXT DEFAULT NULL
-                )
-            ''')
-            
-            # Insert or update alerts
-            for alert in alerts:
+            db = get_db()
+            with db.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Create table if it doesn't exist
                 cursor.execute('''
-                INSERT OR REPLACE INTO vanity_alerts 
-                (id, title, url, source, search_term, timestamp, confidence_score, snippet)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                alert.id,
-                alert.title,
-                alert.url,
-                alert.source,
-                alert.search_term,
-                alert.timestamp.isoformat(),
-                alert.confidence_score,
-                alert.snippet or ''
-            ))
-        
-            conn.commit()
-            conn.close()
+                    CREATE TABLE IF NOT EXISTS vanity_alerts (
+                        id TEXT PRIMARY KEY,
+                        title TEXT NOT NULL,
+                        url TEXT NOT NULL,
+                        source TEXT NOT NULL,
+                        search_term TEXT NOT NULL,
+                        timestamp TEXT NOT NULL,
+                        confidence_score REAL NOT NULL,
+                        is_liked INTEGER DEFAULT NULL,
+                        is_dismissed INTEGER DEFAULT 0,
+                        is_validated INTEGER DEFAULT NULL,
+                        content TEXT,
+                        snippet TEXT,
+                        sentiment TEXT DEFAULT NULL
+                    )
+                ''')
+                
+                # Insert or update alerts
+                for alert in alerts:
+                    cursor.execute('''
+                    INSERT OR REPLACE INTO vanity_alerts 
+                    (id, title, url, source, search_term, timestamp, confidence_score, snippet)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    alert.id,
+                    alert.title,
+                    alert.url,
+                    alert.source,
+                    alert.search_term,
+                    alert.timestamp.isoformat(),
+                    alert.confidence_score,
+                    alert.snippet or ''
+                ))
+            
             logger.info(f"Saved {len(alerts)} alerts to database")
             
         except Exception as e:
@@ -658,20 +690,19 @@ class VanityAlertsCollector:
     
     def update_alert_like_status(self, alert_id: str, is_liked: bool):
         """Update the like status of an alert."""
-        import sqlite3
+        from database import get_db
         
         try:
-            conn = sqlite3.connect('dashboard.db')
-            cursor = conn.cursor()
+            db = get_db()
+            with db.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                cursor.execute('''
+                    UPDATE vanity_alerts 
+                    SET is_liked = ? 
+                    WHERE id = ?
+                ''', (1 if is_liked else 0, alert_id))
             
-            cursor.execute('''
-                UPDATE vanity_alerts 
-                SET is_liked = ? 
-                WHERE id = ?
-            ''', (1 if is_liked else 0, alert_id))
-            
-            conn.commit()
-            conn.close()
             logger.info(f"Updated like status for alert {alert_id}: {is_liked}")
             
         except Exception as e:

@@ -21,7 +21,7 @@ class JokesCollector(BaseCollector):
         super().__init__(settings)
         self.api_url = "https://icanhazdadjoke.com/"
         
-    async def collect_data(self, start_date: datetime, end_date: datetime) -> CollectionResult:
+    async def collect_data(self, start_date: datetime = None, end_date: datetime = None) -> CollectionResult:
         """
         Collect jokes data.
         For jokes, we don't use date range but fetch current jokes.
@@ -40,7 +40,7 @@ class JokesCollector(BaseCollector):
             )
             
         except Exception as e:
-            self.logger.error(f"Error collecting jokes: {e}")
+            logger.error(f"Error collecting jokes: {e}")
             return CollectionResult(
                 source="jokes",
                 data=[],
@@ -74,7 +74,7 @@ class JokesCollector(BaseCollector):
                 jokes.append(joke)
                 
             except Exception as e:
-                self.logger.warning(f"Error fetching individual joke: {e}")
+                logger.warning(f"Error fetching individual joke: {e}")
                 # Add fallback joke
                 jokes.append({
                     'id': f'fallback_{datetime.now().timestamp()}',
@@ -102,7 +102,7 @@ class JokesCollector(BaseCollector):
                     'is_liked': False
                 }
         except Exception as e:
-            self.logger.error(f"Error fetching single joke: {e}")
+            logger.error(f"Error fetching single joke: {e}")
             # Return fallback joke
             return {
                 'id': f'fallback_{datetime.now().timestamp()}',
@@ -147,15 +147,15 @@ class JokesCollector(BaseCollector):
             from database import get_db
             
             db = get_db()
-            cursor = db.cursor()
-            cursor.execute("SELECT is_liked FROM jokes WHERE joke_id = ?", (joke_id,))
-            result = cursor.fetchone()
-            cursor.close()
+            with db.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT is_liked FROM jokes WHERE joke_id = ?", (joke_id,))
+                result = cursor.fetchone()
             
             return result[0] if result else False
             
         except Exception as e:
-            self.logger.debug(f"Error checking joke like status: {e}")
+            logger.debug(f"Error checking joke like status: {e}")
             return False
     
     async def like_joke(self, joke_id: str, is_liked: bool) -> Dict[str, Any]:
@@ -164,20 +164,17 @@ class JokesCollector(BaseCollector):
             from database import get_db
             
             db = get_db()
-            cursor = db.cursor()
-            
-            cursor.execute("""
-                INSERT OR REPLACE INTO jokes (joke_id, is_liked, liked_at, fetched_at) 
-                VALUES (?, ?, ?, ?)
-            """, (
-                joke_id, 
-                is_liked, 
-                datetime.now().isoformat() if is_liked else None,
-                datetime.now().isoformat()
-            ))
-            
-            db.commit()
-            cursor.close()
+            with db.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT OR REPLACE INTO jokes (joke_id, is_liked, liked_at, fetched_at) 
+                    VALUES (?, ?, ?, ?)
+                """, (
+                    joke_id, 
+                    is_liked, 
+                    datetime.now().isoformat() if is_liked else None,
+                    datetime.now().isoformat()
+                ))
             
             return {
                 'success': True,
@@ -186,7 +183,7 @@ class JokesCollector(BaseCollector):
             }
             
         except Exception as e:
-            self.logger.error(f"Error updating joke like status: {e}")
+            logger.error(f"Error updating joke like status: {e}")
             return {
                 'success': False,
                 'error': str(e)
@@ -198,15 +195,15 @@ class JokesCollector(BaseCollector):
             from database import get_db
             
             db = get_db()
-            cursor = db.cursor()
-            cursor.execute("""
-                SELECT joke_id, liked_at, fetched_at 
-                FROM jokes 
-                WHERE is_liked = 1 
-                ORDER BY liked_at DESC
-            """)
-            results = cursor.fetchall()
-            cursor.close()
+            with db.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT joke_id, liked_at, fetched_at 
+                    FROM jokes 
+                    WHERE is_liked = 1 
+                    ORDER BY liked_at DESC
+                """)
+                results = cursor.fetchall()
             
             return [
                 {
@@ -218,7 +215,7 @@ class JokesCollector(BaseCollector):
             ]
             
         except Exception as e:
-            self.logger.error(f"Error getting liked jokes: {e}")
+            logger.error(f"Error getting liked jokes: {e}")
             return []
     
     def get_data_schema(self) -> Dict[str, Any]:

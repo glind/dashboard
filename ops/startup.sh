@@ -296,11 +296,24 @@ check_ollama() {
         [ -n "$db_port" ] && ollama_port="$db_port"
     fi
     
-    local ollama_url="http://${ollama_host}:${ollama_port}"
-    
-    # Check if Ollama is reachable
-    if ! curl -s --connect-timeout 5 "${ollama_url}/api/tags" > /dev/null 2>&1; then
-        echo -e "${YELLOW}   ⚠️  Ollama server not reachable at ${ollama_url}${NC}"
+    local preferred_url="http://${ollama_host}:${ollama_port}"
+    local fallback_localhost="http://localhost:${ollama_port}"
+    local fallback_loopback="http://127.0.0.1:${ollama_port}"
+    local ollama_url=""
+
+    if curl -s --connect-timeout 5 "${preferred_url}/api/tags" > /dev/null 2>&1; then
+        ollama_url="$preferred_url"
+    elif curl -s --connect-timeout 5 "${fallback_localhost}/api/tags" > /dev/null 2>&1; then
+        ollama_url="$fallback_localhost"
+        echo -e "${YELLOW}   ⚠️  Configured Ollama host unavailable (${preferred_url})${NC}"
+        echo -e "${GREEN}   ✅ Using local fallback: ${fallback_localhost}${NC}"
+    elif curl -s --connect-timeout 5 "${fallback_loopback}/api/tags" > /dev/null 2>&1; then
+        ollama_url="$fallback_loopback"
+        echo -e "${YELLOW}   ⚠️  Configured Ollama host unavailable (${preferred_url})${NC}"
+        echo -e "${GREEN}   ✅ Using loopback fallback: ${fallback_loopback}${NC}"
+    else
+        echo -e "${YELLOW}   ⚠️  Ollama server not reachable at configured or fallback URLs${NC}"
+        echo -e "${YELLOW}      Tried: ${preferred_url}, ${fallback_localhost}, ${fallback_loopback}${NC}"
         echo -e "${YELLOW}   AI assistant features may be limited${NC}"
         echo -e "${BLUE}   To install Ollama: curl -fsSL https://ollama.com/install.sh | sh${NC}"
         return 0

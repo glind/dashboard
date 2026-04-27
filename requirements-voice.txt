@@ -32,3 +32,12 @@ websockets>=11.0
 #   export PERSONAPLEX_ENABLED=true
 #   export HF_TOKEN=your_huggingface_token
 # ============================================
+# Note: Piper TTS works without these packages as it's a separate binary
+# Only voice commands (listening) require PyAudio
+
+# ============================================
+# Optional Coqui TTS (offline Python engine)
+# ============================================
+# Install when using voice.engine=coqui in config.yaml
+# NOTE: This package is large and installs torch/audio dependencies.
+# coqui-tts==0.27.5

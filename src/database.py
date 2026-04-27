@@ -134,6 +134,10 @@ class DatabaseManager:
                     category TEXT,
                     source TEXT NOT NULL,
                     source_id TEXT,
+                    source_title TEXT,
+                    source_url TEXT,
+                    source_preview TEXT,
+                    creation_reason TEXT,
                     status TEXT DEFAULT 'pending',
                     assigned_to_service TEXT,
                     requires_response INTEGER DEFAULT 0,
@@ -310,6 +314,29 @@ class DatabaseManager:
                 )
             """)
             
+            # Deleted tasks table - tracks tasks deleted by user to prevent re-import
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS deleted_tasks (
+                    id TEXT PRIMARY KEY,
+                    source TEXT NOT NULL,
+                    source_id TEXT,
+                    original_title TEXT,
+                    original_url TEXT,
+                    deleted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    reason TEXT DEFAULT 'user-deleted'
+                )
+            """)
+
+            # Jokes table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS jokes (
+                    joke_id TEXT PRIMARY KEY,
+                    is_liked INTEGER DEFAULT 0,
+                    liked_at TIMESTAMP,
+                    fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
             # Add new columns if they don't exist (migration)
             try:
                 cursor.execute("ALTER TABLE dashboard_projects ADD COLUMN production_url TEXT")
@@ -320,6 +347,19 @@ class DatabaseManager:
                 cursor.execute("ALTER TABLE dashboard_projects ADD COLUMN api_url TEXT")
             except sqlite3.OperationalError:
                 pass  # Column already exists
+
+            # Migration: Ensure universal_todos has task provenance/detail fields
+            todo_migrations = [
+                ("source_title", "TEXT"),
+                ("source_url", "TEXT"),
+                ("source_preview", "TEXT"),
+                ("creation_reason", "TEXT"),
+            ]
+            for column_name, column_type in todo_migrations:
+                try:
+                    cursor.execute(f"ALTER TABLE universal_todos ADD COLUMN {column_name} {column_type}")
+                except sqlite3.OperationalError:
+                    pass
             
             # Create indexes for better performance
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_collected_data_service_date ON collected_data(service_name, collection_date)")
@@ -332,6 +372,9 @@ class DatabaseManager:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_todos_priority ON universal_todos(priority)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_todos_status ON universal_todos(status)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_todos_source ON universal_todos(source)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_deleted_tasks_source ON deleted_tasks(source)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_deleted_tasks_source_id ON deleted_tasks(source_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_deleted_tasks_deleted_at ON deleted_tasks(deleted_at)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_news_articles_liked ON news_articles(is_liked)")
             
             # Migration: Add is_read column to news_articles if it doesn't exist
@@ -352,6 +395,26 @@ class DatabaseManager:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_user_feedback_type ON user_feedback(feedback_type)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_user_feedback_item ON user_feedback(item_type, item_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_user_feedback_timestamp ON user_feedback(feedback_timestamp)")
+
+            # Migration: keep vanity_alerts schema compatible across old/new collectors
+            vanity_columns = set()
+            try:
+                cursor.execute("PRAGMA table_info(vanity_alerts)")
+                vanity_columns = {row[1] for row in cursor.fetchall()}
+            except Exception:
+                vanity_columns = set()
+
+            vanity_migrations = {
+                'content': "ALTER TABLE vanity_alerts ADD COLUMN content TEXT",
+                'sentiment': "ALTER TABLE vanity_alerts ADD COLUMN sentiment TEXT DEFAULT NULL",
+                'is_dismissed': "ALTER TABLE vanity_alerts ADD COLUMN is_dismissed INTEGER DEFAULT 0",
+            }
+            for column_name, alter_sql in vanity_migrations.items():
+                if column_name not in vanity_columns:
+                    try:
+                        cursor.execute(alter_sql)
+                    except sqlite3.OperationalError:
+                        pass
             
             # Scanned sources tracking table - prevents rescanning same items
             cursor.execute("""
@@ -1046,19 +1109,80 @@ class DatabaseManager:
             logger.error(f"Error saving email: {e}")
             return False
     
+    def is_task_deleted(self, task_id: str) -> bool:
+        """Check if a task has been deleted by the user."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT id FROM deleted_tasks WHERE id = ?", (task_id,))
+                return cursor.fetchone() is not None
+        except Exception as e:
+            logger.error(f"Error checking if task is deleted: {e}")
+            return False
+    
+    def record_task_deletion(self, task_id: str, source: str, source_id: str = None, 
+                           original_title: str = None, original_url: str = None) -> bool:
+        """Record a task deletion to prevent re-importing from sources."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT OR REPLACE INTO deleted_tasks 
+                    (id, source, source_id, original_title, original_url, deleted_at, reason)
+                    VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, 'user-deleted')
+                """, (task_id, source, source_id, original_title, original_url))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error recording task deletion: {e}")
+            return False
+    
+    def get_deleted_task_ids(self, source: str = None) -> List[str]:
+        """Get list of deleted task IDs to prevent re-import."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                if source:
+                    cursor.execute("SELECT id FROM deleted_tasks WHERE source = ?", (source,))
+                else:
+                    cursor.execute("SELECT id FROM deleted_tasks")
+                return [row[0] for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Error getting deleted task IDs: {e}")
+            return []
+    
+    def restore_deleted_task(self, task_id: str) -> bool:
+        """Remove a task from the deleted list (restore it)."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM deleted_tasks WHERE id = ?", (task_id,))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error restoring deleted task: {e}")
+            return False
+    
     def save_todo(self, todo_data: Dict[str, Any]) -> bool:
         """Save a todo item to the universal todos table."""
         try:
+            task_id = todo_data.get('id')
+            
+            # Skip saving if task was previously deleted by user
+            if self.is_task_deleted(task_id):
+                logger.info(f"Skipping import of previously deleted task: {task_id}")
+                return True  # Return True to indicate no error, just skipped
+            
             with self.get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
                     INSERT OR REPLACE INTO universal_todos 
                     (id, title, description, due_date, priority, category, 
-                     source, source_id, status, assigned_to_service, 
-                     requires_response, email_id)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     source, source_id, source_title, source_url, source_preview, creation_reason,
+                     status, assigned_to_service, requires_response, email_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
-                    todo_data.get('id'),
+                    task_id,
                     todo_data.get('title'),
                     todo_data.get('description'),
                     todo_data.get('due_date'),
@@ -1066,6 +1190,10 @@ class DatabaseManager:
                     todo_data.get('category'),
                     todo_data.get('source'),
                     todo_data.get('source_id'),
+                    todo_data.get('source_title'),
+                    todo_data.get('source_url'),
+                    todo_data.get('source_preview'),
+                    todo_data.get('creation_reason'),
                     todo_data.get('status', 'pending'),
                     todo_data.get('assigned_to_service'),
                     1 if todo_data.get('requires_response') else 0,
@@ -1156,6 +1284,8 @@ class DatabaseManager:
                         'source_id': row['source_id'],
                         'source_title': row['source_title'],
                         'source_url': row['source_url'],
+                        'source_preview': row['source_preview'],
+                        'creation_reason': row['creation_reason'],
                         'status': row['status'],
                         'assigned_to_service': row['assigned_to_service'],
                         'requires_response': bool(row['requires_response']),
@@ -1209,23 +1339,29 @@ class DatabaseManager:
                 
                 todos = []
                 for row in rows:
+                    row_keys = set(row.keys())
+                    def get_row_value(key: str, default=None):
+                        return row[key] if key in row_keys else default
+
                     todos.append({
-                        'id': row['id'],
-                        'title': row['title'],
-                        'description': row['description'],
-                        'due_date': row['due_date'],
-                        'priority': row['priority'],
-                        'category': row['category'],
-                        'source': row['source'],
-                        'source_id': row['source_id'],
-                        'source_title': row['source_title'],
-                        'source_url': row['source_url'],
-                        'status': row['status'],
-                        'assigned_to_service': row['assigned_to_service'],
-                        'requires_response': bool(row['requires_response']),
-                        'email_id': row['email_id'],
-                        'created_at': row['created_at'],
-                        'completed_at': row['completed_at']
+                        'id': get_row_value('id', ''),
+                        'title': get_row_value('title', ''),
+                        'description': get_row_value('description', ''),
+                        'due_date': get_row_value('due_date'),
+                        'priority': get_row_value('priority', 'medium'),
+                        'category': get_row_value('category', 'general'),
+                        'source': get_row_value('source', 'manual'),
+                        'source_id': get_row_value('source_id'),
+                        'source_title': get_row_value('source_title', ''),
+                        'source_url': get_row_value('source_url', ''),
+                        'source_preview': get_row_value('source_preview', ''),
+                        'creation_reason': get_row_value('creation_reason', ''),
+                        'status': get_row_value('status', 'pending'),
+                        'assigned_to_service': get_row_value('assigned_to_service'),
+                        'requires_response': bool(get_row_value('requires_response', 0)),
+                        'email_id': get_row_value('email_id'),
+                        'created_at': get_row_value('created_at'),
+                        'completed_at': get_row_value('completed_at')
                     })
                 
                 return todos
@@ -1261,16 +1397,87 @@ class DatabaseManager:
             logger.error(f"Error updating todo status: {e}")
             return False
 
+    def is_task_deleted(self, task_id: str) -> bool:
+        """Check if a task has been deleted by the user."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT id FROM deleted_tasks WHERE id = ?", (task_id,))
+                return cursor.fetchone() is not None
+        except Exception as e:
+            logger.error(f"Error checking if task is deleted: {e}")
+            return False
+    
+    def record_task_deletion(self, task_id: str, source: str, source_id: str = None, 
+                           original_title: str = None, original_url: str = None) -> bool:
+        """Record a task deletion to prevent re-importing from sources."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT OR REPLACE INTO deleted_tasks 
+                    (id, source, source_id, original_title, original_url, deleted_at, reason)
+                    VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, 'user-deleted')
+                """, (task_id, source, source_id, original_title, original_url))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error recording task deletion: {e}")
+            return False
+    
+    def get_deleted_task_ids(self, source: str = None) -> List[str]:
+        """Get list of deleted task IDs to prevent re-import."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                if source:
+                    cursor.execute("SELECT id FROM deleted_tasks WHERE source = ?", (source,))
+                else:
+                    cursor.execute("SELECT id FROM deleted_tasks")
+                return [row[0] for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Error getting deleted task IDs: {e}")
+            return []
+    
+    def restore_deleted_task(self, task_id: str) -> bool:
+        """Remove a task from the deleted list (restore it for re-import)."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM deleted_tasks WHERE id = ?", (task_id,))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error restoring deleted task: {e}")
+            return False
+    
     def delete_todo(self, todo_id: str) -> bool:
         """Mark a todo as deleted (soft delete) to prevent recreation."""
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
+                
+                # Get task details before deleting for deletion tracking
+                cursor.execute(
+                    "SELECT source, source_id, title FROM universal_todos WHERE id = ?",
+                    (todo_id,)
+                )
+                task_row = cursor.fetchone()
+                
+                # Update task status to deleted
                 cursor.execute("""
                     UPDATE universal_todos 
                     SET status = 'deleted', completed_at = CURRENT_TIMESTAMP
                     WHERE id = ?
                 """, (todo_id,))
+                
+                # Record deletion to prevent re-import from sources
+                if task_row:
+                    source = task_row[0] if task_row[0] else None
+                    source_id = task_row[1] if len(task_row) > 1 and task_row[1] else None
+                    title = task_row[2] if len(task_row) > 2 and task_row[2] else None
+                    self.record_task_deletion(todo_id, source, source_id, title)
+                
                 conn.commit()
                 return cursor.rowcount > 0
                 
@@ -1591,24 +1798,40 @@ class DatabaseManager:
                 if not row:
                     logger.error(f"Suggested todo {suggestion_id} not found")
                     return False
+
+                row_keys = set(row.keys())
+
+                def get_value(key: str, fallback=None):
+                    return row[key] if key in row_keys else fallback
+
+                source = get_value('source', 'unknown')
+                source_title = get_value('source_title') or get_value('title')
+                source_url = get_value('source_url')
+                context = get_value('context') or ''
+                source_content = get_value('source_content') or ''
+                preview = (context or source_content or get_value('description') or '')[:400]
+                reason = f"Created from suggested task extracted from {source.replace('_', ' ')}"
                 
                 # Create the actual todo
                 import uuid
                 todo_id = str(uuid.uuid4())
                 cursor.execute("""
                     INSERT INTO universal_todos 
-                    (id, title, description, source, source_id, source_title, source_url, priority, due_date, status)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+                    (id, title, description, source, source_id, source_title, source_url, source_preview,
+                     creation_reason, priority, due_date, status)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
                 """, (
                     todo_id,
-                    row[1],  # title
-                    row[2] or row[3],  # description or context
-                    row[4],  # source
-                    row[5],  # source_id
-                    row[6],  # source_title
-                    row[7],  # source_url
-                    row[8],  # priority
-                    row[9]   # due_date
+                    get_value('title', ''),
+                    get_value('description') or context,
+                    source,
+                    get_value('source_id'),
+                    source_title,
+                    source_url,
+                    preview,
+                    reason,
+                    get_value('priority', 'medium'),
+                    get_value('due_date')
                 ))
                 
                 # Mark suggestion as approved
@@ -1632,30 +1855,32 @@ class DatabaseManager:
                             
                             # Map priority: 0=None, 1=Low, 3=Medium, 5=High
                             priority_map = {'low': 1, 'medium': 3, 'high': 5}
-                            ticktick_priority = priority_map.get(row[8], 0) if row[8] else 0
+                            priority_value = get_value('priority')
+                            ticktick_priority = priority_map.get(priority_value, 0) if priority_value else 0
                             
                             # Parse due date if present
                             due_date = None
-                            if row[9]:  # due_date
+                            due_date_value = get_value('due_date')
+                            if due_date_value:
                                 from datetime import datetime
                                 try:
-                                    due_date = datetime.fromisoformat(row[9])
+                                    due_date = datetime.fromisoformat(due_date_value)
                                 except:
                                     pass
                             
                             # Create task in TickTick
                             result = await ticktick.create_task(
-                                title=row[1],  # title
-                                content=row[2] or row[3] or "",  # description or context
+                                title=get_value('title', ''),
+                                content=get_value('description') or context,
                                 due_date=due_date,
                                 priority=ticktick_priority,
                                 tags=['dashboard']
                             )
                             
                             if result:
-                                logger.info(f"Synced todo '{row[1]}' to TickTick")
+                                logger.info(f"Synced todo '{get_value('title', '')}' to TickTick")
                             else:
-                                logger.warning(f"Failed to sync todo '{row[1]}' to TickTick")
+                                logger.warning(f"Failed to sync todo '{get_value('title', '')}' to TickTick")
                                 
                         except Exception as e:
                             logger.error(f"Error syncing to TickTick: {e}")

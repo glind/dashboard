@@ -268,6 +268,9 @@ try {
         this.voiceSignatureEnabled = localStorage.getItem('voiceSignatureEnabled') === 'true'; // "Roger Roger" signature
         this.conversationId = null; // Current AI conversation ID
         this.userProfile = null; // User profile for AI
+        this.aiAssistants = []; // Configured assistant personas
+        this.activeAssistantId = null; // Selected assistant persona
+        this.aiMemory = { long_term: '', short_term: '' }; // Editable AI memory panes
         this.overviewSummary = null; // 5-minute overview summary for AI Assistant
         this.personalizedSuggestion = null; // Random personalized suggestion
         this.showReadArticles = false; // Show read articles in news section
@@ -296,6 +299,8 @@ try {
             this.loadTaskSyncSettings();
             this.loadVoiceSettings();
             this.loadUserProfile();
+            this.loadAIAssistants();
+            this.loadAIMemory();
             this.updateGlobalMuteButton();
         } catch (error) {
             console.error('Error initializing dashboard components:', error);
@@ -377,6 +382,53 @@ try {
         
         this.updateAllCounts();
     }
+
+    async fetchJsonWithTimeout(url, options = {}, timeoutMs = 12000) {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+        try {
+            const response = await fetch(url, { ...options, signal: controller.signal });
+            return response;
+        } finally {
+            clearTimeout(timeoutId);
+        }
+    }
+
+    getLoadErrorMessage(defaultMessage, error) {
+        if (error && error.name === 'AbortError') {
+            return `${defaultMessage} (request timed out)`;
+        }
+        return defaultMessage;
+    }
+
+    setSectionLoading(containerId, message = 'Loading...') {
+        const container = document.getElementById(containerId);
+        if (!container) return;
+
+        container.innerHTML = `
+            <div class="col-span-full text-center py-12">
+                <div class="inline-flex items-center gap-3 text-purple-400 mb-2">
+                    <span class="w-5 h-5 border-2 border-purple-400 border-t-transparent rounded-full animate-spin"></span>
+                    <span class="font-medium">${this.escapeHtml(message)}</span>
+                </div>
+                <p class="text-gray-500 text-sm animate-pulse">Please wait...</p>
+            </div>
+        `;
+    }
+
+    setSectionError(containerId, message = 'Failed to load data.') {
+        const container = document.getElementById(containerId);
+        if (!container) return;
+
+        container.innerHTML = `
+            <div class="col-span-full text-center py-12">
+                <div class="text-3xl mb-2">⚠️</div>
+                <h3 class="text-lg font-semibold text-white mb-1">Load Failed</h3>
+                <p class="text-gray-400 text-sm">${this.escapeHtml(message)}</p>
+            </div>
+        `;
+    }
     
     async loadNewJoke() {
         try {
@@ -440,17 +492,22 @@ try {
     
     // TODOS
     async loadTodos() {
+        this.setSectionLoading('todos-grid', 'Loading tasks...');
         try {
             // By default, don't include completed tasks
-            const response = await fetch('/api/tasks?include_completed=false');
+            const response = await this.fetchJsonWithTimeout('/api/tasks?include_completed=false', {}, 12000);
             if (response.ok) {
                 const data = await response.json();
                 this.todos = data.tasks || [];
                 this.renderTodos();
                 this.renderOverviewTasks();
+                this.updateAllCounts();
+            } else {
+                this.setSectionError('todos-grid', 'Unable to load tasks right now.');
             }
         } catch (error) {
             console.error('Error loading todos:', error);
+            this.setSectionError('todos-grid', this.getLoadErrorMessage('Unable to load tasks right now.', error));
         }
     }
     
@@ -497,9 +554,11 @@ try {
             const isCompleted = todo.status === 'completed';
             const isStarted = todo.status === 'in_progress';
             const isDeleted = todo.status === 'deleted';
+            const sourceLabel = (todo.source_title || todo.source || 'Source').toString();
+            const reasonShort = (todo.creation_reason || '').toString().slice(0, 80);
             
             return `
-            <div class="dashboard-card bg-gray-800 rounded-xl p-6 border border-gray-700 cursor-pointer todo-item" 
+            <div class="dashboard-card bg-gray-800 rounded-xl p-6 border border-gray-700 cursor-pointer todo-item select-none" 
                  data-status="${todo.status || 'pending'}"
                  data-priority="${todo.priority || ''}"
                  data-source="${todo.source || ''}"
@@ -523,10 +582,18 @@ try {
                         <h3 class="font-semibold text-white mb-1 ${isCompleted ? 'line-through opacity-60' : ''}">
                             ${isStarted && !isCompleted ? '🚀 ' : ''}${this.escapeHtml(todo.title)}
                         </h3>
+                        <div class="flex flex-wrap gap-1 mb-2 text-[10px]">
+                            <span class="bg-indigo-700 px-2 py-1 rounded">Origin: ${this.escapeHtml(sourceLabel)}</span>
+                            ${todo.source_url || todo.gmail_link ? `<span class="bg-purple-700 px-2 py-1 rounded">Linked</span>` : ''}
+                            ${reasonShort ? `<span class="bg-gray-700 px-2 py-1 rounded" title="${this.escapeHtml(todo.creation_reason)}">Why: ${this.escapeHtml(reasonShort)}${todo.creation_reason && todo.creation_reason.length > 80 ? '…' : ''}</span>` : ''}
+                        </div>
+                        ${todo.creation_reason ? `<p class="text-xs text-purple-300 mb-2">Why: ${this.escapeHtml(todo.creation_reason)}</p>` : ''}
                         ${todo.description ? `<p class="text-sm text-gray-400 mb-2">${this.escapeHtml(todo.description)}</p>` : ''}
+                        ${todo.source_preview ? `<p class="text-xs text-gray-500 mb-2 italic">Preview: ${this.escapeHtml(todo.source_preview)}</p>` : ''}
                         <div class="flex flex-wrap gap-2 text-xs mb-3">
                             ${todo.priority ? `<span class="bg-${this.getPriorityColor(todo.priority)}-600 px-2 py-1 rounded">${todo.priority}</span>` : ''}
                             ${todo.due_date ? `<span class="bg-gray-700 px-2 py-1 rounded">📅 ${this.formatDate(todo.due_date)}</span>` : ''}
+                            ${todo.created_at ? `<span class="bg-gray-700 px-2 py-1 rounded text-gray-400">🕐 ${this.formatDate(todo.created_at)}</span>` : ''}
                             ${todo.source ? `<span class="bg-blue-700 px-2 py-1 rounded">${this.escapeHtml(todo.source)}</span>` : ''}
                             ${todo.source_url ? `<span class="bg-purple-700 px-2 py-1 rounded">🔗 Linked</span>` : ''}
                         </div>
@@ -678,17 +745,22 @@ try {
     
     // CALENDAR
     async loadCalendar() {
+        this.setSectionLoading('calendar-content', 'Loading calendar...');
         try {
-            const response = await fetch('/api/calendar');
+            const response = await this.fetchJsonWithTimeout('/api/calendar', {}, 12000);
             if (response.ok) {
                 const data = await response.json();
                 this.calendar = data.events || [];
                 this.renderCalendar();
                 this.renderOverviewCalendar();
                 this.startUpcomingEventMonitor();
+                this.updateAllCounts();
+            } else {
+                this.setSectionError('calendar-content', 'Unable to load calendar right now.');
             }
         } catch (error) {
             console.error('Error loading calendar:', error);
+            this.setSectionError('calendar-content', this.getLoadErrorMessage('Unable to load calendar right now.', error));
         }
     }
     
@@ -826,12 +898,13 @@ try {
     
     // EMAILS
     async loadEmails(forceRefresh = false) {
+        this.setSectionLoading('emails-grid', 'Loading emails...');
         try {
             // Add cache-busting parameter if force refresh
             const url = forceRefresh 
                 ? `/api/email?refresh=${Date.now()}` 
                 : '/api/email';
-            const response = await fetch(url);
+            const response = await this.fetchJsonWithTimeout(url, {}, 15000);
             if (response.ok) {
                 const data = await response.json();
                 // Filter out noreply and no-reply emails
@@ -844,9 +917,13 @@ try {
                 const readCount = this.emails.filter(e => e.read).length;
                 console.log(`Loaded ${this.emails.length} emails (${unreadCount} unread, ${readCount} read)`);
                 this.renderEmails();
+                this.updateAllCounts();
+            } else {
+                this.setSectionError('emails-grid', 'Unable to load emails right now.');
             }
         } catch (error) {
             console.error('Error loading emails:', error);
+            this.setSectionError('emails-grid', this.getLoadErrorMessage('Unable to load emails right now.', error));
         }
     }
     
@@ -1644,36 +1721,63 @@ try {
     
     // GITHUB
     async loadGithub() {
+        this.setSectionLoading('github-content', 'Loading GitHub activity...');
         try {
-            const response = await fetch('/api/github');
-            if (response.ok) {
-                const data = await response.json();
-                this.github = data;
+            const response = await this.fetchJsonWithTimeout('/api/github', {}, 12000);
+            if (!response.ok) {
+                this.github = {};
                 this.renderGithub();
+                return;
             }
+
+            const data = await response.json();
+            if (Array.isArray(data.items) && !data.repos && !data.issues && !data.prs) {
+                const items = data.items;
+                this.github = {
+                    repos: items
+                        .filter(item => item.type === 'Recent Repository')
+                        .map(item => ({
+                            name: item.repo || item.title || 'Repository',
+                            description: item.description || '',
+                            url: item.html_url || item.github_url || ''
+                        })),
+                    prs: items.filter(item => item.type === 'Pull Request' || item.type === 'Review Requested'),
+                    issues: items.filter(item => item.type && item.type.includes('Issue')),
+                    items
+                };
+            } else {
+                this.github = data || {};
+            }
+            this.renderGithub();
+            this.updateAllCounts();
         } catch (error) {
             console.error('Error loading GitHub:', error);
+            this.github = {};
+            this.setSectionError('github-content', this.getLoadErrorMessage('Unable to load GitHub activity right now.', error));
         }
     }
     
     renderGithub() {
         const container = document.getElementById('github-content');
         if (!container) return;
-        
-        // API returns { items: [...] } not { repos, issues, prs }
+
         const items = this.github?.items || [];
-        
-        // Group items by type
-        const repos = items.filter(i => i.type === 'Recent Repository');
-        const prs = items.filter(i => i.type === 'Pull Request' || i.type === 'Review Requested');
-        const issues = items.filter(i => i.type === 'Issue Assigned');
-        
-        if (items.length === 0) {
+        const repos = (this.github?.repos && this.github.repos.length)
+            ? this.github.repos
+            : items.filter(i => i.type === 'Recent Repository');
+        const prs = (this.github?.prs && this.github.prs.length)
+            ? this.github.prs
+            : items.filter(i => i.type === 'Pull Request' || i.type === 'Review Requested');
+        const issues = (this.github?.issues && this.github.issues.length)
+            ? this.github.issues
+            : items.filter(i => i.type && i.type.includes('Issue'));
+
+        if (repos.length === 0 && issues.length === 0 && prs.length === 0) {
             container.innerHTML = `
-                <div class="text-center py-12">
-                    <div class="text-6xl mb-4">🐙</div>
-                    <h3 class="text-xl font-semibold mb-2">No GitHub Activity</h3>
-                    <p class="text-gray-400 mb-4">Connect your GitHub account to see activity</p>
+                <div class="bg-gray-800 rounded-xl p-8 border border-gray-700 text-center">
+                    <div class="text-5xl mb-4">🐙</div>
+                    <h3 class="text-xl font-semibold mb-2">No GitHub activity found</h3>
+                    <p class="text-gray-400 mb-4">Check your GitHub connection in Providers or refresh this tab.</p>
                     <a href="#" onclick="showSection('settings'); return false;" 
                        class="inline-block px-6 py-3 bg-purple-600 hover:bg-purple-700 rounded-lg font-semibold">
                         Configure GitHub
@@ -1771,11 +1875,11 @@ try {
                             <span class="text-blue-400">📁</span> Recent Repositories
                         </h3>
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            ${repos.map(repo => `
+                            ${repos.slice(0, 6).map(repo => `
                                 <div class="bg-gray-800 rounded-lg p-4 border border-gray-700 hover:border-blue-500 transition-colors">
                                     <div class="flex items-start justify-between mb-2">
-                                        <a href="${repo.html_url || repo.github_url}" target="_blank" class="font-semibold text-blue-400 hover:underline">
-                                            ${this.escapeHtml(repo.title || repo.repo)}
+                                        <a href="${repo.html_url || repo.github_url || repo.url || '#'}" target="_blank" class="font-semibold text-blue-400 hover:underline">
+                                            ${this.escapeHtml(repo.title || repo.repo || repo.name || 'Repository')}
                                         </a>
                                         ${repo.private ? '<span class="px-2 py-0.5 text-xs bg-gray-700 rounded">🔒 Private</span>' : ''}
                                     </div>
@@ -1796,16 +1900,20 @@ try {
     
     // NEWS
     async loadNews() {
+        this.setSectionLoading('news-grid', 'Loading news...');
         try {
             const includeRead = this.showReadArticles ? 'true' : 'false';
-            const response = await fetch(`/api/news?include_read=${includeRead}`);
+            const response = await this.fetchJsonWithTimeout(`/api/news?include_read=${includeRead}`, {}, 12000);
             if (response.ok) {
                 const data = await response.json();
                 this.news = data.articles || [];
                 this.renderNews();
+            } else {
+                this.setSectionError('news-grid', 'Unable to load news right now.');
             }
         } catch (error) {
             console.error('Error loading news:', error);
+            this.setSectionError('news-grid', this.getLoadErrorMessage('Unable to load news right now.', error));
         }
     }
     
@@ -2246,15 +2354,19 @@ try {
     
     // WEATHER
     async loadWeather() {
+        this.setSectionLoading('weather-content', 'Loading weather...');
         try {
-            const response = await fetch('/api/weather');
+            const response = await this.fetchJsonWithTimeout('/api/weather', {}, 12000);
             if (response.ok) {
                 const data = await response.json();
                 this.weather = data;
                 this.renderWeather();
+            } else {
+                this.setSectionError('weather-content', 'Unable to load weather right now.');
             }
         } catch (error) {
             console.error('Error loading weather:', error);
+            this.setSectionError('weather-content', this.getLoadErrorMessage('Unable to load weather right now.', error));
         }
     }
     
@@ -2316,8 +2428,15 @@ try {
     }
     
     async loadNotes() {
+        this.setSectionLoading('notes-grid', 'Loading notes...');
+        const statsContainer = document.getElementById('notes-stats');
+        if (statsContainer) {
+            statsContainer.innerHTML = `
+                <div class="col-span-4 text-center py-4 text-gray-400 animate-pulse">Loading note stats...</div>
+            `;
+        }
         try {
-            const response = await fetch('/api/notes');
+            const response = await this.fetchJsonWithTimeout('/api/notes', {}, 22000);
             if (response.ok) {
                 const data = await response.json();
                 this.notes = data.notes || [];
@@ -2328,9 +2447,12 @@ try {
                     tasks_created: data.tasks_created || 0
                 };
                 this.renderNotes();
+            } else {
+                this.setSectionError('notes-grid', 'Unable to load notes right now.');
             }
         } catch (error) {
             console.error('Error loading notes:', error);
+            this.setSectionError('notes-grid', this.getLoadErrorMessage('Unable to load notes right now.', error));
         }
     }
     
@@ -2499,20 +2621,25 @@ try {
         }
         
         container.innerHTML = this.notes.map(note => {
-            const sourceIcon = note.source === 'obsidian' ? '📓' : '📄';
-            const sourceLabel = note.source === 'obsidian' ? 'Obsidian' : 'Google Drive';
-            const sourceColor = note.source === 'obsidian' ? 'purple' : 'blue';
+            const isObsidian = note.source === 'obsidian';
+            const isGoogleDrive = note.source === 'google_drive' || note.source === 'gdrive';
+            const sourceIcon = isObsidian ? '📓' : '📄';
+            const sourceLabel = isObsidian ? 'Obsidian' : 'Google Drive';
+            const sourceColor = isObsidian ? 'purple' : 'blue';
             
-            // Format link
-            let noteLink = '#';
-            if (note.source === 'obsidian' && note.path) {
-                // Use obsidian:// protocol for local notes
-                const vaultName = note.path.split('/').find(p => p && p !== '..' && p !== '.');
-                const relPath = note.path.split('/').slice(-2).join('/');
-                noteLink = `obsidian://open?vault=${encodeURIComponent(vaultName || 'MyVault')}&file=${encodeURIComponent(relPath)}`;
-            } else if (note.source === 'gdrive' && note.url) {
+            // Resolve note link for all connected sources
+            let noteLink = '';
+            if (isGoogleDrive && note.url) {
                 noteLink = note.url;
+            } else if (isObsidian) {
+                if (note.relative_path) {
+                    noteLink = `obsidian://open?file=${encodeURIComponent(note.relative_path)}`;
+                } else if (note.path) {
+                    noteLink = `obsidian://open?path=${encodeURIComponent(note.path)}`;
+                }
             }
+
+            const hasLink = Boolean(noteLink);
             
             return `
                 <div class="bg-gray-800 rounded-lg p-5 hover:bg-gray-750 transition-all duration-200">
@@ -2554,10 +2681,17 @@ try {
                     ` : ''}
                     
                     <div class="flex gap-2">
-                        <a href="${noteLink}" target="_blank" 
-                           class="flex-1 px-3 py-2 bg-${sourceColor}-600 hover:bg-${sourceColor}-700 rounded text-sm font-medium text-center transition-all duration-200">
-                            Open Note
-                        </a>
+                        ${hasLink ? `
+                            <a href="${this.escapeHtml(noteLink)}" target="_blank" rel="noopener noreferrer"
+                               class="flex-1 px-3 py-2 bg-${sourceColor}-600 hover:bg-${sourceColor}-700 rounded text-sm font-medium text-center transition-all duration-200">
+                                Open Note
+                            </a>
+                        ` : `
+                            <button disabled
+                               class="flex-1 px-3 py-2 bg-gray-700 text-gray-400 rounded text-sm font-medium text-center cursor-not-allowed">
+                                Link Unavailable
+                            </button>
+                        `}
                         <button data-item-type="note" 
                                 data-item-id="${note.doc_id || note.relative_path}" 
                                 data-item-data="${this.escapeHtml(JSON.stringify(note))}"
@@ -2584,11 +2718,36 @@ try {
         const todosCount = this.todos.filter(t => t.status !== 'completed' && t.status !== 'deleted').length;
         this.updateBadge('todos-count', todosCount);
         this.updateStat('stat-tasks', todosCount);
+        this.updateStat('tasks-count', todosCount);
+
+        // Calendar - upcoming events only
+        const now = new Date();
+        const upcomingCalendarCount = this.calendar.filter(event => {
+            const startDate = event.start && event.start.dateTime ? event.start.dateTime : event.start;
+            if (!startDate) return false;
+            const eventTime = new Date(startDate);
+            return !isNaN(eventTime.getTime()) && eventTime >= now;
+        }).length;
+        this.updateStat('calendar-count', upcomingCalendarCount);
         
         // Emails - only count unread
-        const unreadEmailsCount = this.emails.filter(e => !e.read).length;
+        const unreadEmailsCount = this.emails.filter(e => {
+            if (typeof e.unread === 'boolean') return e.unread;
+            if (typeof e.read === 'boolean') return !e.read;
+            if (typeof e.is_read === 'boolean') return !e.is_read;
+            return true;
+        }).length;
         this.updateBadge('emails-count', unreadEmailsCount);
         this.updateStat('stat-emails', unreadEmailsCount);
+        this.updateStat('email-count', unreadEmailsCount);
+
+        // GitHub - open issues count for top overview tile
+        const githubIssuesCount = Array.isArray(this.github?.issues)
+            ? this.github.issues.length
+            : (Array.isArray(this.github?.items)
+                ? this.github.items.filter(item => item.type && item.type.includes('Issue')).length
+                : 0);
+        this.updateStat('github-count', githubIssuesCount);
         
         // News - only count unread
         const unreadNewsCount = this.news.filter(n => !n.is_read).length;
@@ -2944,25 +3103,50 @@ try {
     }
     
     // DETAIL MODALS
-    showTodoDetail(id) {
-        const todo = this.todos.find(t => t.id === id);
-        if (!todo) return;
+    async showTodoDetail(id) {
+        const localTodo = this.todos.find(t => t.id === id);
+        if (!localTodo) return;
+
+        let todo = localTodo;
+        try {
+            const response = await fetch(`/api/tasks/${encodeURIComponent(id)}`);
+            if (response.ok) {
+                const detail = await response.json();
+                if (detail && detail.task) {
+                    todo = { ...localTodo, ...detail.task };
+                }
+            }
+        } catch (error) {
+            console.warn('Could not load full task detail, using local task data:', error);
+        }
         
         // Determine source icon
         const sourceIcon = {
             'email': '📧',
             'calendar': '📅',
             'note': '📝',
+            'notes_obsidian': '📝',
+            'notes_google_drive': '📄',
             'ticktick': '✓',
             'default': '📌'
         }[todo.source?.toLowerCase()] || '📌';
+
+        const sourceLink = todo.source_url || todo.gmail_link || (todo.source_info && todo.source_info.link);
+        const sourceButtonLabel = todo.source_info?.display_text || `View Original ${todo.source_title || todo.source || 'Source'}`;
         
-        const sourceButton = todo.source_url ? `
-            <button onclick="openSourceContent('${this.escapeHtml(todo.id)}', '${this.escapeHtml(todo.source_url)}')" 
+        const sourceButton = sourceLink ? `
+            <button onclick="window.open('${this.escapeHtml(sourceLink)}', '_blank')" 
                     class="w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-semibold">
-                🔗 View Original ${this.escapeHtml(todo.source_title || todo.source || 'Source')}
+                🔗 ${this.escapeHtml(sourceButtonLabel)}
             </button>
         ` : '';
+
+        const createdLabel = todo.created_at ? this.formatDate(todo.created_at) : 'Unknown';
+        const completedLabel = todo.completed_at ? this.formatDate(todo.completed_at) : '—';
+        const statusLabel = (todo.status || 'pending').replace('_', ' ');
+        const requiresResponse = todo.requires_response ? 'Yes' : 'No';
+        const previewText = (todo.source_preview || '').toString();
+        const fullReason = (todo.creation_reason || '').toString();
         
         const content = `
             <div class="space-y-4">
@@ -2971,10 +3155,44 @@ try {
                     <div>
                         <p class="text-xs font-semibold text-gray-400 uppercase">${this.escapeHtml(todo.source || 'Task')}</p>
                         <h1 class="text-2xl font-bold">${this.escapeHtml(todo.title)}</h1>
+                        ${todo.source_title ? `<p class="text-sm text-gray-400 mt-1">From: ${this.escapeHtml(todo.source_title)}</p>` : ''}
                     </div>
                 </div>
                 
                 ${todo.description ? `<p class="text-gray-300 bg-gray-700 rounded-lg p-4">${this.escapeHtml(todo.description)}</p>` : ''}
+
+                ${todo.creation_reason ? `
+                    <div class="bg-purple-900/30 border border-purple-700 rounded-lg p-4">
+                        <p class="text-xs text-purple-300 uppercase mb-1">Why This Task Was Created</p>
+                        <p class="text-sm text-purple-100">${this.escapeHtml(todo.creation_reason)}</p>
+                    </div>
+                ` : ''}
+
+                <div class="grid grid-cols-2 gap-3">
+                    <div class="bg-gray-700 rounded-lg p-3">
+                        <p class="text-xs text-gray-400">Status</p>
+                        <p class="text-lg font-semibold">${this.escapeHtml(statusLabel)}</p>
+                    </div>
+                    <div class="bg-gray-700 rounded-lg p-3">
+                        <p class="text-xs text-gray-400">Needs Response</p>
+                        <p class="text-lg font-semibold">${requiresResponse}</p>
+                    </div>
+                    <div class="bg-gray-700 rounded-lg p-3">
+                        <p class="text-xs text-gray-400">Created</p>
+                        <p class="text-lg font-semibold">${this.escapeHtml(createdLabel)}</p>
+                    </div>
+                    <div class="bg-gray-700 rounded-lg p-3">
+                        <p class="text-xs text-gray-400">Completed</p>
+                        <p class="text-lg font-semibold">${this.escapeHtml(completedLabel)}</p>
+                    </div>
+                </div>
+
+                ${todo.source_preview ? `
+                    <div class="bg-gray-750 border border-gray-700 rounded-lg p-4">
+                        <p class="text-xs text-gray-400 uppercase mb-1">Source Preview</p>
+                        <p class="text-sm text-gray-300">${this.escapeHtml(todo.source_preview)}</p>
+                    </div>
+                ` : ''}
                 
                 <div class="grid grid-cols-2 gap-3">
                     ${todo.priority ? `
@@ -2990,6 +3208,15 @@ try {
                         </div>
                     ` : ''}
                 </div>
+
+                ${(todo.source_id || todo.email_id || sourceLink) ? `
+                    <div class="bg-gray-800 border border-gray-700 rounded-lg p-4">
+                        <p class="text-xs text-gray-400 uppercase mb-2">Origin Metadata</p>
+                        ${todo.source_id ? `<p class="text-sm text-gray-300 break-all"><span class="text-gray-500">source_id:</span> ${this.escapeHtml(todo.source_id)}</p>` : ''}
+                        ${todo.email_id ? `<p class="text-sm text-gray-300 break-all"><span class="text-gray-500">email_id:</span> ${this.escapeHtml(todo.email_id)}</p>` : ''}
+                        ${sourceLink ? `<p class="text-sm text-gray-300 break-all"><span class="text-gray-500">link:</span> ${this.escapeHtml(sourceLink)}</p>` : ''}
+                    </div>
+                ` : ''}
                 
                 ${sourceButton}
                 
@@ -3607,6 +3834,10 @@ Then ask me: "What would you like to do with this email?"`,
                 message: message,
                 conversation_id: this.conversationId || ''
             });
+
+            if (this.activeAssistantId) {
+                params.set('assistant_id', this.activeAssistantId);
+            }
             
             const streamUrl = `/api/ai/chat/stream?${params.toString()}`;
             console.log('🚀 Opening AI stream:', streamUrl);
@@ -3680,6 +3911,8 @@ Then ask me: "What would you like to do with this email?"`,
                         if (this.aiVoiceEnabled && this.speechSynthesis && accumulatedResponse) {
                             this.speakText(accumulatedResponse);
                         }
+
+                        this.loadAIMemory();
                         
                         eventSource.close();
                         
@@ -3689,17 +3922,21 @@ Then ask me: "What would you like to do with this email?"`,
                         if (statusIndex >= 0) {
                             this.aiMessages.splice(statusIndex, 1);
                         }
-                        
-                        const errorMsg = data.message || 'Sorry, I encountered an error. Please try again.';
-                        this.aiMessages.push({ 
-                            role: 'assistant', 
-                            content: errorMsg,
-                            id: messageId
-                        });
-                        this.renderAIChat();
-                        
-                        if (this.aiVoiceEnabled && this.speechSynthesis) {
-                            this.speakText(errorMsg);
+
+                        if (!hasSeenResponse) {
+                            this.sendAIMessageFallback(message, messageId, statusMessageId);
+                        } else {
+                            const errorMsg = data.message || 'Sorry, I encountered an error. Please try again.';
+                            this.aiMessages.push({
+                                role: 'assistant',
+                                content: errorMsg,
+                                id: messageId
+                            });
+                            this.renderAIChat();
+
+                            if (this.aiVoiceEnabled && this.speechSynthesis) {
+                                this.speakText(errorMsg);
+                            }
                         }
                         
                         eventSource.close();
@@ -3722,17 +3959,7 @@ Then ask me: "What would you like to do with this email?"`,
                 
                 // Only show error if no response was received
                 if (!hasSeenResponse) {
-                    const errorMsg = 'Sorry, I encountered an error. Please try again.';
-                    this.aiMessages.push({ 
-                        role: 'assistant', 
-                        content: errorMsg,
-                        id: messageId
-                    });
-                    this.renderAIChat();
-                    
-                    if (this.aiVoiceEnabled && this.speechSynthesis) {
-                        this.speakText(errorMsg);
-                    }
+                    this.sendAIMessageFallback(message, messageId, statusMessageId);
                 }
             };
         } catch (error) {
@@ -3744,6 +3971,71 @@ Then ask me: "What would you like to do with this email?"`,
             });
             this.renderAIChat();
             
+            if (this.aiVoiceEnabled && this.speechSynthesis) {
+                this.speakText(errorMsg);
+            }
+        }
+    }
+
+    async sendAIMessageFallback(message, messageId, statusMessageId) {
+        try {
+            const existingStatusIndex = this.aiMessages.findIndex(m => m.id === statusMessageId);
+            if (existingStatusIndex >= 0) {
+                this.aiMessages[existingStatusIndex].content = '⚠️ Stream interrupted, retrying...';
+                this.renderAIChat();
+            }
+
+            const response = await fetch('/api/ai/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    message,
+                    conversation_id: this.conversationId || null,
+                    stream: false,
+                    assistant_id: this.activeAssistantId || undefined
+                })
+            });
+
+            const data = await response.json();
+
+            const statusIndex = this.aiMessages.findIndex(m => m.id === statusMessageId);
+            if (statusIndex >= 0) {
+                this.aiMessages.splice(statusIndex, 1);
+            }
+
+            if (response.ok && data.success && data.response) {
+                this.aiMessages.push({
+                    role: 'assistant',
+                    content: data.response,
+                    id: messageId,
+                    conversation_id: data.conversation_id || this.conversationId
+                });
+
+                if (data.conversation_id) {
+                    this.conversationId = data.conversation_id;
+                }
+
+                this.renderAIChat();
+
+                if (this.aiVoiceEnabled && this.speechSynthesis) {
+                    this.speakText(data.response);
+                }
+
+                this.loadAIMemory();
+                return;
+            }
+
+            throw new Error(data.error || 'Fallback request failed');
+        } catch (fallbackError) {
+            console.error('Fallback chat request failed:', fallbackError);
+            const errorMsg = 'Sorry, I encountered an error. Please try again.';
+            this.aiMessages.push({
+                role: 'assistant',
+                content: errorMsg,
+                id: messageId
+            });
+            this.renderAIChat();
+
             if (this.aiVoiceEnabled && this.speechSynthesis) {
                 this.speakText(errorMsg);
             }
@@ -3914,6 +4206,9 @@ Then ask me: "What would you like to do with this email?"`,
             console.log('🔇 Voice muted globally');
             return;
         }
+
+        const activeAssistant = this.getActiveAssistant();
+        const effectiveBrowserVoice = activeAssistant?.browser_voice || this.selectedVoice;
         
         // Sanitize text for natural speech
         const cleanedText = this.sanitizeTextForSpeech(text);
@@ -3923,52 +4218,47 @@ Then ask me: "What would you like to do with this email?"`,
         }
         
         // Check if Rogr is selected (default)
-        if (!this.selectedVoice || this.selectedVoice === 'rogr') {
+        if (!effectiveBrowserVoice || effectiveBrowserVoice === 'rogr') {
             // Use Rogr battle-droid voice system
             // If forceSignature is true (from test button), use it; otherwise use setting
-            this.speakWithRogr(cleanedText, 'droid', forceSignature ? true : null);
+            const assistantStyle = activeAssistant?.voice_style || 'droid';
+            this.speakWithRogr(cleanedText, assistantStyle, forceSignature ? true : null);
         } else {
             // Use browser TTS for other voices
-            this.speakWithBrowserTTS(cleanedText);
+            this.speakWithBrowserTTS(cleanedText, activeAssistant);
         }
     }
     
-    speakWithBrowserTTS(text) {
+    speakWithBrowserTTS(text, assistant = null) {
         // Fallback to browser Text-to-Speech
         if ('speechSynthesis' in window) {
             // Cancel any ongoing speech
             window.speechSynthesis.cancel();
-            
-            // Sanitize text if not already done
+
             const cleanedText = this.sanitizeTextForSpeech(text);
             if (!cleanedText || cleanedText.length < 2) return;
-            
+
             const utterance = new SpeechSynthesisUtterance(cleanedText);
+            const selectedVoiceName = assistant?.browser_voice || this.selectedVoice;
             
             // Find and set the selected voice
-            if (this.selectedVoice) {
-                const voice = this.availableVoices.find(v => v.name === this.selectedVoice);
+            if (selectedVoiceName) {
+                const voice = this.availableVoices.find(v => v.name === selectedVoiceName);
                 if (voice) {
                     utterance.voice = voice;
                 }
             }
-            
-            // Set voice properties - use audio state volume if available
-            utterance.rate = 0.9;
-            utterance.pitch = 1.0;
-            utterance.volume = this.audioState?.volume ?? 0.8;
-            
-            // Show audio control panel
+
+            // Set voice properties (per-assistant if provided)
+            const assistantRate = Number(assistant?.voice_speed ?? 0.95);
+            const assistantPitch = Number(assistant?.voice_pitch ?? 1.0);
+            utterance.rate = Math.max(0.5, Math.min(1.8, assistantRate));
+            utterance.pitch = Math.max(0.5, Math.min(1.8, assistantPitch));
+            utterance.volume = this.audioState?.volume ?? 1.0;
+
             this.showAudioControlPanel('speech', 'Speaking...');
-            
-            // Hide panel when speech ends
-            utterance.onend = () => {
-                this.hideAudioControlPanel();
-            };
-            
-            utterance.onerror = () => {
-                this.hideAudioControlPanel();
-            };
+            utterance.onend = () => this.hideAudioControlPanel();
+            utterance.onerror = () => this.hideAudioControlPanel();
             
             window.speechSynthesis.speak(utterance);
         } else {
@@ -3977,9 +4267,10 @@ Then ask me: "What would you like to do with this email?"`,
     }
     
     async speakWithRogr(text, style = 'droid', addSignature = null) {
+        const activeAssistant = this.getActiveAssistant();
         // Use setting if not explicitly specified
         if (addSignature === null) {
-            addSignature = this.voiceSignatureEnabled;
+            addSignature = activeAssistant ? !!activeAssistant.signature_enabled : this.voiceSignatureEnabled;
         }
         
         // Show audio control panel
@@ -3992,7 +4283,8 @@ Then ask me: "What would you like to do with this email?"`,
                 body: JSON.stringify({
                     message: text,
                     style: style,
-                    signature: addSignature
+                    signature: addSignature,
+                    assistant_id: this.activeAssistantId
                 })
             });
             
@@ -4450,6 +4742,291 @@ Then ask me: "What would you like to do with this email?"`,
             this.showNotification('Failed to save profile', 'error');
         }
     }
+
+    getActiveAssistant() {
+        if (!this.aiAssistants || this.aiAssistants.length === 0) return null;
+        return this.aiAssistants.find(a => a.id === this.activeAssistantId) || this.aiAssistants[0];
+    }
+
+    async loadAIAssistants() {
+        try {
+            const response = await fetch('/api/ai/assistants');
+            const data = await response.json();
+            if (!data.success) return;
+
+            this.aiAssistants = data.assistants || [];
+            this.activeAssistantId = data.active_assistant_id || (this.aiAssistants[0] && this.aiAssistants[0].id);
+            this.renderAIAssistantEditor();
+        } catch (error) {
+            console.error('Error loading AI assistants:', error);
+        }
+    }
+
+    async loadAIMemory() {
+        const status = document.getElementById('ai-memory-status');
+
+        try {
+            if (status) status.textContent = 'Loading memory...';
+
+            const response = await fetch('/api/ai/memory');
+            const data = await response.json();
+            if (!data.success) {
+                if (status) status.textContent = data.error || 'Failed to load memory';
+                return;
+            }
+
+            this.aiMemory = data.memory || { long_term: '', short_term: '' };
+
+            const longTermInput = document.getElementById('ai-long-term-memory');
+            const shortTermInput = document.getElementById('ai-short-term-memory');
+
+            if (longTermInput) longTermInput.value = this.aiMemory.long_term || '';
+            if (shortTermInput) shortTermInput.value = this.aiMemory.short_term || '';
+            if (status) status.textContent = 'Memory loaded.';
+        } catch (error) {
+            console.error('Error loading AI memory:', error);
+            if (status) status.textContent = 'Failed to load memory';
+        }
+    }
+
+    async saveAIMemory(memoryType) {
+        const inputId = memoryType === 'long_term' ? 'ai-long-term-memory' : 'ai-short-term-memory';
+        const input = document.getElementById(inputId);
+        const status = document.getElementById('ai-memory-status');
+        const content = input?.value?.trim();
+
+        if (!content) {
+            this.showNotification('Memory content cannot be empty', 'error');
+            return;
+        }
+
+        try {
+            if (status) status.textContent = `Saving ${memoryType.replace('_', ' ')}...`;
+
+            const response = await fetch('/api/ai/memory', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ memory_type: memoryType, content })
+            });
+            const data = await response.json();
+
+            if (!data.success) {
+                throw new Error(data.error || 'Failed to save memory');
+            }
+
+            this.aiMemory = data.memory || this.aiMemory;
+            const longTermInput = document.getElementById('ai-long-term-memory');
+            const shortTermInput = document.getElementById('ai-short-term-memory');
+            if (longTermInput) longTermInput.value = this.aiMemory.long_term || '';
+            if (shortTermInput) shortTermInput.value = this.aiMemory.short_term || '';
+
+            if (status) status.textContent = data.message || 'Memory saved.';
+            this.showNotification(data.message || 'Memory saved', 'success');
+        } catch (error) {
+            console.error('Error saving AI memory:', error);
+            if (status) status.textContent = error.message || 'Failed to save memory';
+            this.showNotification(error.message || 'Failed to save memory', 'error');
+        }
+    }
+
+    async clearAIMemory(memoryType) {
+        if (!confirm(`Reset ${memoryType.replace('_', ' ')} memory?`)) {
+            return;
+        }
+
+        const status = document.getElementById('ai-memory-status');
+
+        try {
+            if (status) status.textContent = `Resetting ${memoryType.replace('_', ' ')}...`;
+
+            const response = await fetch('/api/ai/memory/clear', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ memory_type: memoryType })
+            });
+            const data = await response.json();
+
+            if (!data.success) {
+                throw new Error(data.error || 'Failed to reset memory');
+            }
+
+            this.aiMemory = data.memory || this.aiMemory;
+            const longTermInput = document.getElementById('ai-long-term-memory');
+            const shortTermInput = document.getElementById('ai-short-term-memory');
+            if (longTermInput) longTermInput.value = this.aiMemory.long_term || '';
+            if (shortTermInput) shortTermInput.value = this.aiMemory.short_term || '';
+
+            if (status) status.textContent = data.message || 'Memory reset.';
+            this.showNotification(data.message || 'Memory reset', 'success');
+        } catch (error) {
+            console.error('Error resetting AI memory:', error);
+            if (status) status.textContent = error.message || 'Failed to reset memory';
+            this.showNotification(error.message || 'Failed to reset memory', 'error');
+        }
+    }
+
+    renderAIAssistantEditor() {
+        const selector = document.getElementById('ai-assistant-selector');
+        if (!selector) return;
+
+        selector.innerHTML = this.aiAssistants.map(a => {
+            const selected = a.id === this.activeAssistantId ? 'selected' : '';
+            return `<option value="${a.id}" ${selected}>${this.escapeHtml(a.name || 'Assistant')}</option>`;
+        }).join('');
+
+        const active = this.getActiveAssistant();
+        if (!active) return;
+
+        const nameInput = document.getElementById('ai-assistant-name');
+        const personalityInput = document.getElementById('ai-assistant-personality');
+        const taglineInput = document.getElementById('ai-assistant-tagline');
+        const keyPhrasesInput = document.getElementById('ai-assistant-key-phrases');
+        const signatureInput = document.getElementById('ai-assistant-signature');
+        const voiceStyleInput = document.getElementById('ai-assistant-voice-style');
+        const voiceModelInput = document.getElementById('ai-assistant-voice-model');
+        const voiceSpeedInput = document.getElementById('ai-assistant-voice-speed');
+        const voicePitchInput = document.getElementById('ai-assistant-voice-pitch');
+        const status = document.getElementById('ai-assistant-status');
+
+        if (nameInput) nameInput.value = active.name || '';
+        if (personalityInput) personalityInput.value = active.personality || '';
+        if (taglineInput) taglineInput.value = active.tagline || '';
+        if (keyPhrasesInput) keyPhrasesInput.value = (active.key_phrases || []).join(', ');
+        if (signatureInput) signatureInput.value = active.signature_phrase || 'roger, roger';
+        if (voiceStyleInput) voiceStyleInput.value = active.voice_style || 'droid';
+        if (voiceModelInput) voiceModelInput.value = active.voice_model || 'auto';
+        if (voiceSpeedInput) voiceSpeedInput.value = Number(active.voice_speed ?? 0.75).toFixed(2);
+        if (voicePitchInput) voicePitchInput.value = Number(active.voice_pitch ?? 0.85).toFixed(2);
+        if (status) status.textContent = `Active: ${active.name}`;
+
+        if (active.browser_voice) {
+            this.selectedVoice = active.browser_voice;
+            localStorage.setItem('selectedVoice', this.selectedVoice);
+        }
+    }
+
+    async selectAIAssistant(assistantId) {
+        try {
+            const response = await fetch('/api/ai/assistants/select', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ assistant_id: assistantId })
+            });
+            const data = await response.json();
+            if (!data.success) {
+                this.showNotification(data.error || 'Failed to select assistant', 'error');
+                return;
+            }
+
+            this.activeAssistantId = assistantId;
+            this.renderAIAssistantEditor();
+            this.showNotification('Assistant switched', 'success');
+        } catch (error) {
+            console.error('Error selecting assistant:', error);
+        }
+    }
+
+    createAIAssistant() {
+        const nameInput = document.getElementById('ai-assistant-name');
+        const personalityInput = document.getElementById('ai-assistant-personality');
+        const taglineInput = document.getElementById('ai-assistant-tagline');
+        const keyPhrasesInput = document.getElementById('ai-assistant-key-phrases');
+        const signatureInput = document.getElementById('ai-assistant-signature');
+        const voiceStyleInput = document.getElementById('ai-assistant-voice-style');
+        const voiceModelInput = document.getElementById('ai-assistant-voice-model');
+        const voiceSpeedInput = document.getElementById('ai-assistant-voice-speed');
+        const voicePitchInput = document.getElementById('ai-assistant-voice-pitch');
+
+        if (nameInput) nameInput.value = 'New Assistant';
+        if (personalityInput) personalityInput.value = 'Helpful, concise, personalized';
+        if (taglineInput) taglineInput.value = '';
+        if (keyPhrasesInput) keyPhrasesInput.value = '';
+        if (signatureInput) signatureInput.value = 'roger, roger';
+        if (voiceStyleInput) voiceStyleInput.value = 'droid';
+        if (voiceModelInput) voiceModelInput.value = 'auto';
+        if (voiceSpeedInput) voiceSpeedInput.value = '0.75';
+        if (voicePitchInput) voicePitchInput.value = '0.85';
+
+        const status = document.getElementById('ai-assistant-status');
+        if (status) status.textContent = 'Creating a new assistant profile... click Save';
+    }
+
+    async saveAIAssistant() {
+        const active = this.getActiveAssistant();
+        const payload = {
+            id: active ? active.id : undefined,
+            name: (document.getElementById('ai-assistant-name')?.value || '').trim(),
+            personality: (document.getElementById('ai-assistant-personality')?.value || '').trim(),
+            tagline: (document.getElementById('ai-assistant-tagline')?.value || '').trim(),
+            key_phrases: (document.getElementById('ai-assistant-key-phrases')?.value || '').trim(),
+            signature_phrase: (document.getElementById('ai-assistant-signature')?.value || '').trim(),
+            voice_style: document.getElementById('ai-assistant-voice-style')?.value || 'droid',
+            voice_model: document.getElementById('ai-assistant-voice-model')?.value || 'auto',
+            voice_speed: parseFloat(document.getElementById('ai-assistant-voice-speed')?.value || '0.75'),
+            voice_pitch: parseFloat(document.getElementById('ai-assistant-voice-pitch')?.value || '0.85'),
+            signature_enabled: this.voiceSignatureEnabled,
+            browser_voice: this.selectedVoice || 'rogr'
+        };
+
+        if (!payload.name) {
+            this.showNotification('Assistant name is required', 'error');
+            return;
+        }
+
+        try {
+            const response = await fetch('/api/ai/assistants/save', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ assistant: payload })
+            });
+            const data = await response.json();
+            if (!data.success) {
+                this.showNotification(data.error || 'Failed to save assistant', 'error');
+                return;
+            }
+
+            await this.loadAIAssistants();
+            if (data.assistant && data.assistant.id) {
+                await this.selectAIAssistant(data.assistant.id);
+            }
+            this.showNotification('Assistant saved', 'success');
+        } catch (error) {
+            console.error('Error saving assistant:', error);
+            this.showNotification('Failed to save assistant', 'error');
+        }
+    }
+
+    async deleteAIAssistant() {
+        const active = this.getActiveAssistant();
+        if (!active) return;
+
+        if (!confirm(`Delete assistant "${active.name}"?`)) {
+            return;
+        }
+
+        try {
+            const response = await fetch(`/api/ai/assistants/${encodeURIComponent(active.id)}`, {
+                method: 'DELETE'
+            });
+            const data = await response.json();
+            if (!data.success) {
+                this.showNotification(data.error || 'Failed to delete assistant', 'error');
+                return;
+            }
+
+            await this.loadAIAssistants();
+            this.showNotification('Assistant deleted', 'success');
+        } catch (error) {
+            console.error('Error deleting assistant:', error);
+            this.showNotification('Failed to delete assistant', 'error');
+        }
+    }
+
+    testAIAssistantVoice() {
+        const assistant = this.getActiveAssistant();
+        const phrase = assistant?.tagline || 'Voice check complete.';
+        this.speakText(phrase, !!assistant?.signature_enabled);
+    }
     
     showUserProfileModal() {
         const profile = this.userProfile || {};
@@ -4670,15 +5247,35 @@ Then ask me: "What would you like to do with this email?"`,
     
     // VANITY ALERTS
     async loadVanityAlerts() {
+        this.setSectionLoading('vanity-grid', 'Loading vanity alerts...');
         try {
-            const response = await fetch('/api/vanity-alerts');
-            if (response.ok) {
-                const data = await response.json();
-                this.vanityAlerts = data.alerts || [];
+            const response = await this.fetchJsonWithTimeout('/api/vanity-alerts', {}, 12000);
+            if (!response.ok) {
+                this.vanityAlerts = [];
                 this.renderVanityAlerts();
+                return;
             }
+
+            const data = await response.json();
+            this.vanityAlerts = data.alerts || [];
+
+            if (!this.vanityAlerts.length) {
+                try {
+                    const fallbackResponse = await fetch('/api/vanity');
+                    if (fallbackResponse.ok) {
+                        const fallbackData = await fallbackResponse.json();
+                        this.vanityAlerts = fallbackData.alerts || [];
+                    }
+                } catch (fallbackError) {
+                    console.warn('Vanity fallback fetch failed:', fallbackError);
+                }
+            }
+
+            this.renderVanityAlerts();
         } catch (error) {
             console.error('Error loading vanity alerts:', error);
+            this.vanityAlerts = [];
+            this.setSectionError('vanity-grid', this.getLoadErrorMessage('Unable to load vanity alerts right now.', error));
         }
     }
     
@@ -4701,7 +5298,7 @@ Then ask me: "What would you like to do with this email?"`,
             const feedback = this.feedbackData[`vanity-${alert.id}`] || null;
             return `
             <div class="bg-gray-800 rounded-xl p-6 border border-gray-700 relative">
-                <button onclick="dismissAlert('${alert.id}')" 
+                <button onclick="dataLoader.dismissAlert('${alert.id}')" 
                         class="absolute top-2 right-2 text-gray-400 hover:text-white px-2 py-1 rounded hover:bg-gray-700" 
                         title="Dismiss">✕</button>
                 <div class="flex items-start gap-3 mb-3">
@@ -4874,8 +5471,9 @@ Then ask me: "What would you like to do with this email?"`,
     
     // MUSIC NEWS
     async loadMusicNews() {
+        this.setSectionLoading('music-grid', 'Loading music updates...');
         try {
-            const response = await fetch('/api/music');
+            const response = await this.fetchJsonWithTimeout('/api/music', {}, 12000);
             if (response.ok) {
                 const data = await response.json();
                 // Combine all music-related data into one array
@@ -4942,9 +5540,12 @@ Then ask me: "What would you like to do with this email?"`,
                 // Load music player data
                 this.loadUnifiedLibrary();
                 this.loadPlaylists();
+            } else {
+                this.setSectionError('music-grid', 'Unable to load music updates right now.');
             }
         } catch (error) {
             console.error('Error loading music news:', error);
+            this.setSectionError('music-grid', this.getLoadErrorMessage('Unable to load music updates right now.', error));
         }
     }
     
@@ -5081,14 +5682,18 @@ Then ask me: "What would you like to do with this email?"`,
     }
     
     async loadUnifiedLibrary() {
+        this.setSectionLoading('unified-library', 'Loading library...');
         try {
-            const response = await fetch('/api/music/unified-library');
+            const response = await this.fetchJsonWithTimeout('/api/music/unified-library', {}, 12000);
             if (response.ok) {
                 const data = await response.json();
                 this.renderUnifiedLibrary(data.tracks || []);
+            } else {
+                this.setSectionError('unified-library', 'Unable to load music library right now.');
             }
         } catch (error) {
             console.error('Error loading unified library:', error);
+            this.setSectionError('unified-library', this.getLoadErrorMessage('Unable to load music library right now.', error));
         }
     }
     
@@ -5197,14 +5802,18 @@ Then ask me: "What would you like to do with this email?"`,
     }
     
     async loadPlaylists() {
+        this.setSectionLoading('playlists-grid', 'Loading playlists...');
         try {
-            const response = await fetch('/api/music/playlists');
+            const response = await this.fetchJsonWithTimeout('/api/music/playlists', {}, 12000);
             if (response.ok) {
                 const data = await response.json();
                 this.renderPlaylists(data.playlists || []);
+            } else {
+                this.setSectionError('playlists-grid', 'Unable to load playlists right now.');
             }
         } catch (error) {
             console.error('Error loading playlists:', error);
+            this.setSectionError('playlists-grid', this.getLoadErrorMessage('Unable to load playlists right now.', error));
         }
     }
     
@@ -5653,10 +6262,12 @@ Then ask me: "What would you like to do with this email?"`,
     }
     
     testAIVoice() {
-        if (this.selectedVoice === 'rogr') {
-            this.speakText('Roger roger. Voice system operational. All systems ready.', true);
+        const assistant = this.getActiveAssistant();
+        const testLine = assistant?.tagline || 'Voice system operational. All systems ready.';
+        if (this.selectedVoice === 'rogr' || !this.selectedVoice) {
+            this.speakText(testLine, !!assistant?.signature_enabled);
         } else {
-            this.speakText('Hello! This is your AI assistant. How does my voice sound?');
+            this.speakText(`Hello, this is ${assistant?.name || 'your AI assistant'}. ${testLine}`);
         }
     }
     
@@ -6828,6 +7439,8 @@ Then ask me: "What would you like to do with this email?"`,
                 this.loadNews().catch(e => console.warn('Error loading news:', e)),
                 this.loadWeather().catch(e => console.warn('Error loading weather:', e))
             ]);
+
+            this.updateAllCounts();
             
             console.log('Dashboard initialization complete');
         } catch (error) {
@@ -7058,7 +7671,7 @@ window.handleGoogleAuth = async function() {
         const statusResponse = await fetch('/api/auth/google/status');
         const status = await statusResponse.json();
         
-        if (status.authenticated && !status.expired) {
+        if (status.authenticated && !status.expired && !status.needs_reconnect) {
             showNotification('✅ Already connected to Google', 'success');
             return;
         }
@@ -7099,12 +7712,12 @@ async function updateGoogleAuthButton() {
         
         if (!btn || !text) return;
         
-        if (status.authenticated && !status.expired) {
+        if (status.authenticated && !status.expired && !status.needs_reconnect) {
             btn.className = btn.className.replace('bg-blue-600 hover:bg-blue-700', 'bg-green-600 hover:bg-green-700');
             text.textContent = '✓ Google Connected';
-        } else if (status.expired) {
+        } else if (status.expired || status.needs_reconnect) {
             btn.className = btn.className.replace('bg-blue-600 hover:bg-blue-700', 'bg-yellow-600 hover:bg-yellow-700');
-            text.textContent = '⚠️ Reconnect Google';
+            text.textContent = status.can_modify_gmail === false ? '⚠️ Reconnect Google (Mail Access)' : '⚠️ Reconnect Google';
         } else {
             btn.className = btn.className.replace('bg-green-600 hover:bg-green-700', 'bg-blue-600 hover:bg-blue-700');
             btn.className = btn.className.replace('bg-yellow-600 hover:bg-yellow-700', 'bg-blue-600 hover:bg-blue-700');
@@ -7161,7 +7774,23 @@ function renderSuggestedTodos(suggestions) {
     
     if (!section || !list) return;
     
-    const html = suggestions.map(suggestion => {
+    const header = `
+        <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+            <div class="text-xs text-yellow-200">${suggestions.length} pending suggestion${suggestions.length === 1 ? '' : 's'}</div>
+            <div class="flex gap-2">
+                <button onclick="approveAllSuggestedTodos()"
+                        class="px-3 py-1 bg-green-700 hover:bg-green-600 text-white text-xs rounded transition-colors">
+                    ✓ Accept All
+                </button>
+                <button onclick="rejectAllSuggestedTodos()"
+                        class="px-3 py-1 bg-gray-700 hover:bg-gray-600 text-white text-xs rounded transition-colors">
+                    ✕ Dismiss All
+                </button>
+            </div>
+        </div>
+    `;
+
+    const cards = suggestions.map(suggestion => {
         const sourceIcon = {
             'email': '📧',
             'calendar': '📅',
@@ -7212,8 +7841,41 @@ function renderSuggestedTodos(suggestions) {
         `;
     }).join('');
     
-    list.innerHTML = html;
+    list.innerHTML = header + cards;
     section.style.display = 'block';
+}
+
+async function bulkProcessSuggestedTodos(action) {
+    try {
+        const response = await fetch('/api/suggested-todos/bulk', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action })
+        });
+
+        const result = await response.json();
+        if (!response.ok || !result.success) {
+            throw new Error(result.detail || result.error || 'Bulk action failed');
+        }
+
+        showNotification(`✅ ${result.message}`, 'success');
+        await loadSuggestedTodos();
+
+        if (window.dataLoader) {
+            await dataLoader.loadTodos();
+        }
+    } catch (error) {
+        console.error(`Error processing ${action} for suggestions:`, error);
+        showNotification(`Error running bulk ${action}`, 'error');
+    }
+}
+
+async function approveAllSuggestedTodos() {
+    await bulkProcessSuggestedTodos('approve');
+}
+
+async function rejectAllSuggestedTodos() {
+    await bulkProcessSuggestedTodos('reject');
 }
 
 async function approveSuggestedTodo(suggestionId) {

@@ -28,7 +28,6 @@ from typing import Optional, Literal
 
 logger = logging.getLogger(__name__)
 
-
 def strip_markdown(text: str) -> str:
     """
     Strip Markdown syntax from text for speech.
@@ -186,7 +185,6 @@ class VoiceConfig:
     default_style: str = "droid"
     speed: float = 0.75
     pitch: float = 0.85
-
 
 class VoiceSystem:
     """Unified voice system using NVIDIA PersonaPlex."""

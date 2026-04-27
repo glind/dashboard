@@ -727,15 +727,31 @@ class GmailCollector:
                             continue
                         
                         # Create new todo only if it doesn't exist
+                        labels_upper = [label.upper() for label in email_data.get('labels', [])]
+                        is_email_flagged = (
+                            'STARRED' in labels_upper or
+                            'IMPORTANT' in labels_upper or
+                            initial_priority == 'high' or
+                            ollama_priority == 'high'
+                        )
+                        derived_priority = 'high' if is_email_flagged else todo.get('priority', 'medium')
+                        creation_reason = todo.get('reason', 'Detected actionable email task')
+                        if is_email_flagged:
+                            creation_reason = f"{creation_reason}. Elevated because the source email is flagged/prioritized"
+
                         todo_db_data = {
                             'id': todo_id,
                             'title': todo.get('task', ''),
                             'description': todo.get('task', ''),
                             'due_date': todo.get('deadline'),
-                            'priority': todo.get('priority', 'medium'),
+                            'priority': derived_priority,
                             'category': todo.get('category', 'email'),
                             'source': 'email',
                             'source_id': email_id,
+                            'source_title': email_data.get('subject', ''),
+                            'source_url': f"https://mail.google.com/mail/u/0/#inbox/{email_id}" if email_id else None,
+                            'source_preview': (email_data.get('snippet') or email_data.get('body') or '')[:280],
+                            'creation_reason': creation_reason,
                             'status': 'pending',
                             'requires_response': todo.get('requires_response', False),
                             'email_id': email_id

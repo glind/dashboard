@@ -1,6 +1,10 @@
 # Rogr Voice System 🤖
 
-The dashboard includes **Rogr**, a voice assistant powered by NVIDIA PersonaPlex for real-time, full-duplex voice conversations.
+The dashboard includes **Rogr**, a voice assistant with three backend options:
+
+1. **PersonaPlex (NVIDIA)** - Full-duplex real-time conversations (recommended)
+2. **Piper TTS** - Local text-to-speech with battle-droid audio effects (fallback)
+3. **Coqui TTS (Offline Python)** - Richer offline voice model/speaker variety
 
 ## Quick Start
 
@@ -21,6 +25,34 @@ SSL_DIR=$(mktemp -d); python -m moshi.server --ssl "$SSL_DIR"
 ./ops/startup.sh
 ```
 
+### Option 2: Piper TTS (Fallback)
+
+Piper TTS provides local text-to-speech with robot/radio voice effects.
+
+```bash
+chmod +x scripts/setup_voice.sh
+./scripts/setup_voice.sh
+```
+
+### Option 3: Coqui TTS (Offline Variety)
+
+Coqui provides high-variety offline synthesis, including multi-speaker models.
+
+```bash
+source .venv/bin/activate
+pip install coqui-tts==0.27.5
+```
+
+Then set in `config/config.yaml`:
+
+```yaml
+voice:
+  enabled: true
+  engine: "coqui"
+  coqui_model: "tts_models/en/vctk/vits"
+  coqui_speaker: null   # optional: e.g. p225
+  default_style: "clean"
+```
 ---
 
 ## Features
@@ -209,4 +241,3 @@ Or in config.yaml:
 voice:
   persona: "You are a professional business assistant. Be concise and formal."
 ```
-

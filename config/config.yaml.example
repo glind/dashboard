@@ -57,23 +57,37 @@ dashboard:
 # See devdocs/VOICE_SYSTEM.md for full setup
 voice:
   enabled: true
+
+  # Offline voice engine:
+  #   - piper (default, binary-based, lightweight)
+  #   - coqui (python package, richer voice options)
+  engine: "piper"
+
+  # Coqui model config (used when engine=coqui)
+  # Default model: tts_models/en/ljspeech/tacotron2-DDC (works without system espeak)
+  # Multi-speaker option: tts_models/en/vctk/vits (requires system espeak/espeak-ng)
+  coqui_model: "tts_models/en/ljspeech/tacotron2-DDC"
+  # Optional fixed speaker/language override
+  coqui_speaker: null
+  coqui_language: null
   
   # PersonaPlex server URL (start server separately)
   server_url: "wss://localhost:8998"
-  
+
   # Voice preset - choose from:
   #   Natural female: NATF0, NATF1, NATF2, NATF3
   #   Natural male:   NATM0, NATM1, NATM2, NATM3  (NATM1 = default)
   #   Variety female: VARF0, VARF1, VARF2, VARF3, VARF4
   #   Variety male:   VARM0, VARM1, VARM2, VARM4
   voice_preset: "NATM1"
+
+  # Voice style/effect to apply
+  # Options: clean, droid, radio, pa_system, cinematic, glitch
+  default_style: "droid"
   
   # Persona/role for the assistant
   # Options: rogr, assistant, casual (or custom prompt)
   persona: "rogr"
-  
-  # Announce on startup
-  announce_on_startup: true
   
   # When to announce
   announce_on_startup: true

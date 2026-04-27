@@ -4886,6 +4886,7 @@ Then ask me: "What would you like to do with this email?"`,
         const voiceModelInput = document.getElementById('ai-assistant-voice-model');
         const voiceSpeedInput = document.getElementById('ai-assistant-voice-speed');
         const voicePitchInput = document.getElementById('ai-assistant-voice-pitch');
+        const signatureCheckbox = document.querySelector('input[onchange*="setVoiceSignature"]');
         const status = document.getElementById('ai-assistant-status');
 
         if (nameInput) nameInput.value = active.name || '';
@@ -4897,8 +4898,14 @@ Then ask me: "What would you like to do with this email?"`,
         if (voiceModelInput) voiceModelInput.value = active.voice_model || 'auto';
         if (voiceSpeedInput) voiceSpeedInput.value = Number(active.voice_speed ?? 0.75).toFixed(2);
         if (voicePitchInput) voicePitchInput.value = Number(active.voice_pitch ?? 0.85).toFixed(2);
+        if (signatureCheckbox) signatureCheckbox.checked = active.signature_enabled ?? true;
         if (status) status.textContent = `Active: ${active.name}`;
 
+        // Update global state from loaded assistant
+        if (active.signature_enabled !== undefined) {
+            this.voiceSignatureEnabled = active.signature_enabled;
+            localStorage.setItem('voiceSignatureEnabled', active.signature_enabled);
+        }
         if (active.browser_voice) {
             this.selectedVoice = active.browser_voice;
             localStorage.setItem('selectedVoice', this.selectedVoice);
@@ -4953,6 +4960,8 @@ Then ask me: "What would you like to do with this email?"`,
 
     async saveAIAssistant() {
         const active = this.getActiveAssistant();
+        const signatureCheckbox = document.querySelector('input[onchange*=\"setVoiceSignature\"]');
+        
         const payload = {
             id: active ? active.id : undefined,
             name: (document.getElementById('ai-assistant-name')?.value || '').trim(),
@@ -4964,7 +4973,7 @@ Then ask me: "What would you like to do with this email?"`,
             voice_model: document.getElementById('ai-assistant-voice-model')?.value || 'auto',
             voice_speed: parseFloat(document.getElementById('ai-assistant-voice-speed')?.value || '0.75'),
             voice_pitch: parseFloat(document.getElementById('ai-assistant-voice-pitch')?.value || '0.85'),
-            signature_enabled: this.voiceSignatureEnabled,
+            signature_enabled: signatureCheckbox?.checked ?? this.voiceSignatureEnabled ?? true,
             browser_voice: this.selectedVoice || 'rogr'
         };
 
@@ -4985,11 +4994,19 @@ Then ask me: "What would you like to do with this email?"`,
                 return;
             }
 
+            // Update global state
+            this.voiceSignatureEnabled = payload.signature_enabled;
+            localStorage.setItem('voiceSignatureEnabled', payload.signature_enabled);
+            if (payload.browser_voice) {
+                this.selectedVoice = payload.browser_voice;
+                localStorage.setItem('selectedVoice', this.selectedVoice);
+            }
+
             await this.loadAIAssistants();
             if (data.assistant && data.assistant.id) {
                 await this.selectAIAssistant(data.assistant.id);
             }
-            this.showNotification('Assistant saved', 'success');
+            this.showNotification('✓ Assistant saved successfully', 'success');
         } catch (error) {
             console.error('Error saving assistant:', error);
             this.showNotification('Failed to save assistant', 'error');

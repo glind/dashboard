@@ -11,15 +11,23 @@ from collectors.calendar_collector import CalendarCollector
 from collectors.notes_collector import collect_all_notes
 from database import DatabaseManager, get_credentials
 from processors.task_generator import TaskGenerator, generate_tasks_from_all_sources
-from config.settings import Settings
+
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
-# Initialize database and settings
+# Initialize database
 db = DatabaseManager()
-app_settings = Settings()
+
+# Settings import is optional here so task collection API stays available
+# even when external config module wiring is temporarily broken.
+try:
+    from config.settings import Settings
+    app_settings = Settings()
+except Exception as e:
+    logger.warning(f"Task settings unavailable; using defaults for notes collection: {e}")
+    app_settings = None
 
 
 @router.post("/collect")

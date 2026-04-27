@@ -24,10 +24,11 @@ import time
 import secrets
 from typing import Dict, Any, Optional, List
 
-# Add the src directory to path for imports
+# Add the src directory and project root to path for imports
 src_dir = Path(__file__).parent
 project_root = src_dir.parent  # One level up from src/
 sys.path.insert(0, str(src_dir))
+sys.path.insert(0, str(project_root))  # Also add project root for config/ imports
 
 # Import database manager
 from database import db
@@ -154,14 +155,21 @@ try:
 except ImportError as e:
     logging.warning(f"Could not load focus playlists router: {e}")
 
-# Register custom module routers
+# Register tasks router independently so it is available even if other modules fail
+try:
+    from modules.tasks.endpoints import router as tasks_router
+    app.include_router(tasks_router)
+    logging.info("✅ Tasks module registered")
+except ImportError as e:
+    logging.warning(f"Could not load tasks module: {e}")
+
+# Register remaining custom module routers
 try:
     from modules.music_news.endpoints import router as music_news_router
     from modules.vanity_alerts.endpoints import router as vanity_alerts_router
     from modules.comms.endpoints import router as comms_router
     from modules.foundershield.endpoints import router as foundershield_router
     from modules.leads.endpoints import router as leads_router
-    from modules.tasks.endpoints import router as tasks_router
     from modules.ai_summarizer.endpoints import router as ai_summarizer_router
     from modules.providers.endpoints import router as providers_router
     from modules.providers.oauth import router as providers_oauth_router
@@ -171,13 +179,12 @@ try:
     app.include_router(comms_router)
     app.include_router(foundershield_router, prefix="/foundershield")
     app.include_router(leads_router)
-    app.include_router(tasks_router)
     app.include_router(ai_summarizer_router)
     app.include_router(providers_router)
     app.include_router(providers_oauth_router)
-    logging.info("✅ Custom modules registered (music_news, vanity_alerts, comms, foundershield, leads, tasks, ai_summarizer, providers)")
+    logging.info("✅ Custom modules registered (music_news, vanity_alerts, comms, foundershield, leads, ai_summarizer, providers)")
 except ImportError as e:
-    logging.warning(f"Could not load custom modules: {e}")
+    logging.warning(f"Could not load non-task custom modules: {e}")
 
 # Register Trust Layer API
 try:

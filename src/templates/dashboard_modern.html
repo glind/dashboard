@@ -16,8 +16,8 @@
         ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 4px; }
         ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.3); }
         
-        /* Smooth transitions */
-        * { transition: background-color 0.2s ease; }
+        /* FIX: Removed global * { transition } - this was causing ResizeObserver errors
+           Transitions now only on specific elements that need them */
         
         /* Modal backdrop */
         .modal-backdrop {
@@ -72,9 +72,9 @@
             animation: slideIn 0.3s ease;
         }
         
-        /* Card hover effects */
+        /* Card hover effects - use transform only (no reflow) */
         .dashboard-card {
-            transition: all 0.2s ease;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
         }
         
         .dashboard-card:hover {
@@ -82,13 +82,14 @@
             box-shadow: 0 8px 16px rgba(0,0,0,0.3);
         }
         
-        /* News accordion styles */
+        /* News accordion styles - use opacity instead of max-height to avoid reflow */
         .news-accordion-header {
             transition: background-color 0.2s ease;
         }
         
         .news-accordion-content {
-            transition: max-height 0.3s ease, opacity 0.3s ease;
+            transition: opacity 0.3s ease;
+            will-change: opacity;
         }
         
         .news-chevron {
@@ -651,12 +652,6 @@
                    class="nav-link flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-gray-700 text-gray-300 hover:text-white">
                     <span>🔌</span>
                     <span>Email Providers</span>
-                </a>
-                
-                <a href="#" onclick="showSection('settings'); return false;" 
-                   class="nav-link flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-gray-700 text-gray-300 hover:text-white">
-                    <span>⚙️</span>
-                    <span>Settings</span>
                 </a>
                 
                 <a href="#" onclick="showSection('liked'); return false;" 
@@ -1296,7 +1291,9 @@
                                 <div>
                                     <label class="block text-xs text-gray-400 mb-1">Active Assistant</label>
                                     <select id="ai-assistant-selector" onchange="window.dataLoader && dataLoader.selectAIAssistant(this.value)"
-                                            class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm"></select>
+                                            class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm">
+                                        <option value="">Loading assistants...</option>
+                                    </select>
                                 </div>
                             </div>
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
@@ -1317,9 +1314,11 @@
                                 <button onclick="window.dataLoader && dataLoader.createAIAssistant()"
                                         class="bg-blue-600 hover:bg-blue-700 px-3 py-2 rounded text-xs">+ New</button>
                                 <button onclick="window.dataLoader && dataLoader.saveAIAssistant()"
-                                        class="bg-green-600 hover:bg-green-700 px-3 py-2 rounded text-xs">Save</button>
+                                        class="bg-green-600 hover:bg-green-700 px-3 py-2 rounded text-xs">💾 Save</button>
                                 <button onclick="window.dataLoader && dataLoader.deleteAIAssistant()"
                                         class="bg-red-600 hover:bg-red-700 px-3 py-2 rounded text-xs">Delete</button>
+                                <button onclick="window.dataLoader && dataLoader.loadAIAssistants()"
+                                        class="bg-slate-600 hover:bg-slate-700 px-3 py-2 rounded text-xs">🔄 Refresh</button>
                             </div>
                             <p id="ai-assistant-status" class="text-xs text-gray-400 mt-2"></p>
                         </div>

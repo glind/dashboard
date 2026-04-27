@@ -146,7 +146,13 @@ except ImportError as e:
     logging.warning(f"Could not load music playlist router: {e}")
 
 
-# Register new music playlist endpoint (to be implemented)
+# Register Focus Playlists router
+try:
+    from modules.music.focus_playlists_endpoints import router as focus_playlists_router
+    app.include_router(focus_playlists_router)
+    logging.info("✅ Focus Playlists router registered")
+except ImportError as e:
+    logging.warning(f"Could not load focus playlists router: {e}")
 
 # Register custom module routers
 try:

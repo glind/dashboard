@@ -79,7 +79,8 @@ async def collect_tasks(
                 notes_result = collect_all_notes(
                     obsidian_path=obsidian_path,
                     gdrive_folder_id=gdrive_folder_id,
-                    limit=100
+                    limit=100,
+                    settings=app_settings  # Pass settings for Apple Notes configuration
                 )
                 
                 notes_data = notes_result

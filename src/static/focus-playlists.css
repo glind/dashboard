@@ -1,0 +1,386 @@
+/**
+ * Focus Playlists Styles
+ */
+
+#focus-playlists-section {
+    background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+    border-radius: 12px;
+    padding: 24px;
+    margin: 16px 0;
+    color: white;
+}
+
+.section-header {
+    margin-bottom: 24px;
+}
+
+.section-header h2 {
+    font-size: 28px;
+    margin: 0 0 8px 0;
+    color: #fff;
+}
+
+.section-header p {
+    margin: 0;
+    color: rgba(255, 255, 255, 0.8);
+}
+
+/* Mood Selector Grid */
+.mood-selector-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+    margin-bottom: 24px;
+}
+
+.mood-card {
+    background: rgba(255, 255, 255, 0.1);
+    border: 2px solid rgba(255, 255, 255, 0.2);
+    border-radius: 8px;
+    padding: 16px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    backdrop-filter: blur(10px);
+}
+
+.mood-card:hover {
+    background: rgba(255, 255, 255, 0.15);
+    border-color: rgba(255, 255, 255, 0.4);
+    transform: translateY(-2px);
+}
+
+.mood-card.active {
+    background: rgba(76, 175, 80, 0.3);
+    border-color: #4CAF50;
+    box-shadow: 0 0 12px rgba(76, 175, 80, 0.3);
+}
+
+.mood-card h4 {
+    margin: 0 0 8px 0;
+    font-size: 16px;
+    font-weight: 600;
+    color: #fff;
+}
+
+.mood-card p {
+    margin: 0 0 8px 0;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.7);
+    line-height: 1.4;
+}
+
+.mood-card .energy-level {
+    display: inline-block;
+    font-size: 11px;
+    background: rgba(255, 193, 7, 0.2);
+    color: #FFC107;
+    padding: 4px 8px;
+    border-radius: 4px;
+}
+
+/* Playlist Generator Controls */
+.playlist-generator-controls {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    margin-bottom: 24px;
+    flex-wrap: wrap;
+    background: rgba(255, 255, 255, 0.05);
+    padding: 16px;
+    border-radius: 8px;
+}
+
+.playlist-generator-controls label {
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.9);
+}
+
+.playlist-generator-controls select {
+    padding: 8px 12px;
+    border-radius: 4px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    background: rgba(0, 0, 0, 0.2);
+    color: white;
+    cursor: pointer;
+}
+
+.playlist-generator-controls select option {
+    background: #333;
+    color: white;
+}
+
+.btn {
+    padding: 10px 16px;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    transition: all 0.2s ease;
+}
+
+.btn-primary {
+    background: #4CAF50;
+    color: white;
+}
+
+.btn-primary:hover:not(:disabled) {
+    background: #45a049;
+    transform: scale(1.02);
+}
+
+.btn-primary:disabled {
+    background: #888;
+    cursor: not-allowed;
+}
+
+.btn-secondary {
+    background: rgba(255, 255, 255, 0.2);
+    color: white;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+.btn-secondary:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.3);
+}
+
+.btn-danger {
+    background: #f44336;
+    color: white;
+}
+
+.btn-danger:hover {
+    background: #da190b;
+}
+
+.btn-sm {
+    padding: 6px 12px;
+    font-size: 12px;
+}
+
+/* Playlist Playback Area */
+.playlist-playback {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 24px;
+}
+
+.youtube-player-container {
+    margin-bottom: 16px;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+/* Playlist Controls */
+.playlist-controls {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    justify-content: center;
+    margin: 16px 0;
+    flex-wrap: wrap;
+    padding: 12px;
+    background: rgba(0, 0, 0, 0.1);
+    border-radius: 6px;
+}
+
+.track-info {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.8);
+    margin-left: 16px;
+    flex-grow: 1;
+    text-align: right;
+}
+
+/* Sync Buttons */
+.sync-buttons {
+    display: flex;
+    gap: 12px;
+    margin: 16px 0;
+    flex-wrap: wrap;
+}
+
+/* Playlist Tracks */
+.playlist-tracks {
+    max-height: 300px;
+    overflow-y: auto;
+    border-radius: 6px;
+    background: rgba(0, 0, 0, 0.1);
+}
+
+.playlist-track {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    cursor: pointer;
+    transition: background 0.2s ease;
+}
+
+.playlist-track:hover {
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.track-number {
+    min-width: 24px;
+    text-align: center;
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 12px;
+}
+
+.track-details {
+    flex-grow: 1;
+    min-width: 0;
+}
+
+.track-title {
+    font-weight: 500;
+    color: #fff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.track-artist {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.6);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.match-badge {
+    font-size: 11px;
+    background: rgba(76, 175, 80, 0.3);
+    color: #4CAF50;
+    padding: 4px 8px;
+    border-radius: 4px;
+    white-space: nowrap;
+}
+
+.match-badge.warning {
+    background: rgba(255, 193, 7, 0.3);
+    color: #FFC107;
+}
+
+/* Saved Playlists */
+.saved-playlists {
+    background: rgba(0, 0, 0, 0.1);
+    border-radius: 8px;
+    padding: 16px;
+}
+
+.saved-playlists h3 {
+    margin: 0 0 16px 0;
+    font-size: 18px;
+    color: #fff;
+}
+
+.playlists-list {
+    display: grid;
+    gap: 12px;
+}
+
+.playlist-item {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    padding: 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+}
+
+.playlist-item:hover {
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.playlist-info h4 {
+    margin: 0 0 4px 0;
+    color: #fff;
+    font-size: 16px;
+}
+
+.playlist-info p {
+    margin: 0 0 8px 0;
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 12px;
+}
+
+.mood-badge {
+    display: inline-block;
+    background: rgba(76, 175, 80, 0.2);
+    color: #4CAF50;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+}
+
+.playlist-actions {
+    display: flex;
+    gap: 8px;
+}
+
+/* Loading and Empty States */
+.loading-spinner {
+    text-align: center;
+    color: rgba(255, 255, 255, 0.6);
+    padding: 24px;
+}
+
+.empty-state {
+    text-align: center;
+    color: rgba(255, 255, 255, 0.6);
+    padding: 24px;
+    font-style: italic;
+}
+
+.error {
+    color: #f44336;
+    padding: 12px;
+    background: rgba(244, 67, 54, 0.1);
+    border-left: 3px solid #f44336;
+    border-radius: 4px;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    #focus-playlists-section {
+        padding: 16px;
+    }
+
+    .mood-selector-grid {
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    }
+
+    .playlist-generator-controls {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .playlist-generator-controls select,
+    .btn-primary {
+        width: 100%;
+    }
+
+    .playlist-item {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .playlist-actions {
+        width: 100%;
+    }
+
+    .playlist-actions button {
+        flex: 1;
+    }
+
+    .youtube-player-container iframe {
+        max-height: 300px;
+    }
+}

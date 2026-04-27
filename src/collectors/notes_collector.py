@@ -8,6 +8,7 @@ Extracts TODOs and creates tasks automatically.
 
 import os
 import re
+import subprocess
 from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Any, Optional
@@ -415,15 +416,16 @@ class AppleNotesCollector:
         import platform
         self.is_macos = platform.system() == 'Darwin'
         
-    def get_recent_notes(self, limit: int = 10) -> List[Dict[str, Any]]:
+    def get_recent_notes(self, limit: int = 10, timeout: int = 10) -> List[Dict[str, Any]]:
         """
         Get the most recently modified notes from Apple Notes.
         
         Args:
             limit: Maximum number of notes to return
+            timeout: Timeout in seconds (default 10, can be configured via settings)
             
         Returns:
-            List of note dictionaries with metadata
+            List of note dictionaries with metadata (empty list if timeout or error)
         """
         if not self.is_macos:
             logger.warning("Apple Notes collector only works on macOS")
@@ -473,10 +475,10 @@ class AppleNotesCollector:
             return output
             '''
             
-            # Execute AppleScript with longer timeout
+            # Execute AppleScript with configurable timeout
             result = subprocess.run(
                 ['osascript', '-e', script],
-                capture_output=True, text=True, timeout=120
+                capture_output=True, text=True, timeout=timeout
             )
             
             if result.returncode != 0:
@@ -813,22 +815,26 @@ class GoogleKeepCollector:
 
 def collect_all_notes(obsidian_path: Optional[str] = None, 
                       gdrive_folder_id: Optional[str] = None,
-                      include_apple_notes: bool = True,
+                      include_apple_notes: bool = False,
                       google_keep_email: Optional[str] = None,
                       google_keep_token: Optional[str] = None,
                       google_keep_labels: Optional[List[str]] = None,
-                      limit: int = 10) -> Dict[str, Any]:
+                      apple_notes_timeout: int = 10,
+                      limit: int = 10,
+                      settings=None) -> Dict[str, Any]:
     """
     Collect notes from all configured sources.
     
     Args:
         obsidian_path: Path to Obsidian vault
         gdrive_folder_id: Google Drive folder ID
-        include_apple_notes: Whether to include Apple Notes (macOS only)
+        include_apple_notes: Whether to include Apple Notes (disabled by default - can hang)
         google_keep_email: Google account email for Keep
         google_keep_token: Google Keep master token
         google_keep_labels: Optional list of Keep labels to filter by
+        apple_notes_timeout: Timeout in seconds for Apple Notes collection (default 10s)
         limit: Max notes per source
+        settings: Settings object to read Apple Notes config from
         
     Returns:
         Dictionary with notes from all sources
@@ -836,34 +842,45 @@ def collect_all_notes(obsidian_path: Optional[str] = None,
     all_notes = []
     todos_to_create = []
     
+    # Check settings for Apple Notes collection preference
+    if settings is not None and hasattr(settings, 'notes'):
+        include_apple_notes = settings.notes.collect_apple_notes
+        apple_notes_timeout = settings.notes.apple_notes_timeout
+    
     # Collect from Obsidian
     if obsidian_path:
-        obsidian = ObsidianNotesCollector(obsidian_path)
-        obsidian_notes = obsidian.get_recent_notes(limit)
-        all_notes.extend(obsidian_notes)
-        
-        # Extract todos for auto-creation
-        for note in obsidian_notes:
-            for todo in note.get('todos', []):
-                todos_to_create.append({
-                    'text': todo['text'],
-                    'source': 'obsidian',
-                    'source_title': note['title'],
-                    'source_path': note.get('path'),
-                    'context': todo.get('context', '')
-                })
+        try:
+            obsidian = ObsidianNotesCollector(obsidian_path)
+            obsidian_notes = obsidian.get_recent_notes(limit)
+            all_notes.extend(obsidian_notes)
+            
+            # Extract todos for auto-creation
+            for note in obsidian_notes:
+                for todo in note.get('todos', []):
+                    todos_to_create.append({
+                        'text': todo['text'],
+                        'source': 'obsidian',
+                        'source_title': note['title'],
+                        'source_path': note.get('path'),
+                        'context': todo.get('context', '')
+                    })
+        except Exception as e:
+            logger.error(f"Error collecting Obsidian notes: {e}")
     
-    # Collect from Apple Notes (macOS only)
+    # Collect from Apple Notes (macOS only) - OPTIONAL due to potential hangs
     apple_notes_count = 0
     if include_apple_notes:
         try:
             import platform
             if platform.system() == 'Darwin':
-                logger.info("Collecting Apple Notes...")
+                logger.info(f"Collecting Apple Notes (timeout: {apple_notes_timeout}s)...")
                 apple_collector = AppleNotesCollector()
-                apple_notes = apple_collector.get_recent_notes(limit)
+                apple_notes = apple_collector.get_recent_notes(limit, timeout=apple_notes_timeout)
                 all_notes.extend(apple_notes)
                 apple_notes_count = len(apple_notes)
+                
+                if apple_notes_count > 0:
+                    logger.info(f"Collected {apple_notes_count} Apple Notes")
                 
                 # Extract todos
                 for note in apple_notes:
@@ -874,6 +891,9 @@ def collect_all_notes(obsidian_path: Optional[str] = None,
                             'source_title': note['title'],
                             'context': todo.get('context', '')
                         })
+        except subprocess.TimeoutExpired:
+            logger.warning(f"Apple Notes collection timed out after {apple_notes_timeout}s. " +
+                          "Enable NOTES_COLLECT_APPLE_NOTES=true in .env only if you need this.")
         except Exception as e:
             logger.error(f"Error collecting Apple Notes: {e}")
     

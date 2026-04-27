@@ -24,10 +24,18 @@ class OllamaSettings(BaseSettings):
 class GoogleSettings(BaseSettings):
     """Google APIs configuration."""
     credentials_file: Optional[str] = Field(default=None, description="Path to Google credentials JSON")
+    token_file: Optional[str] = Field(default=None, description="Path to Google OAuth token JSON (auto-set)")
     scopes: list = Field(default_factory=lambda: [
         'https://www.googleapis.com/auth/gmail.readonly',
+        'https://www.googleapis.com/auth/gmail.send',
+        'https://www.googleapis.com/auth/gmail.modify',
+        'https://www.googleapis.com/auth/gmail.labels',
         'https://www.googleapis.com/auth/calendar.readonly',
-        'https://www.googleapis.com/auth/drive.readonly'
+        'https://www.googleapis.com/auth/calendar.events',
+        'https://www.googleapis.com/auth/drive.readonly',
+        'https://www.googleapis.com/auth/userinfo.profile',
+        'https://www.googleapis.com/auth/userinfo.email',
+        'openid'
     ])
     drive_notes_folder_id: Optional[str] = Field(default=None, description="Google Drive folder ID for meeting notes")
 
@@ -110,7 +118,25 @@ class ObsidianSettings(BaseSettings):
     recent_days: int = Field(default=7, description="Only check notes modified in last N days")
 
 
-class MicrosoftSettings(BaseSettings):
+class GoogleDriveNotesSettings(BaseSettings):
+    """Google Drive notes configuration."""
+    enabled: bool = Field(default=False, description="Enable Google Drive notes integration")
+    meeting_notes_folder_id: Optional[str] = Field(default=None, description="Google Drive folder ID for meeting notes")
+    credentials_file: Optional[str] = Field(default=None, description="Path to Google credentials JSON")
+
+
+class NotesSettings(BaseSettings):
+    """Notes and knowledge management configuration."""
+    obsidian: ObsidianSettings = Field(default_factory=ObsidianSettings)
+    google_drive: GoogleDriveNotesSettings = Field(default_factory=GoogleDriveNotesSettings)
+    auto_create_tasks: bool = Field(default=True, description="Automatically create tasks from notes TODOs")
+    
+    # Apple Notes collection settings
+    collect_apple_notes: bool = Field(default=False, description="Collect from Apple Notes (can hang if Notes doesn't respond)")
+    apple_notes_timeout: int = Field(default=10, description="Timeout in seconds for Apple Notes collection")
+    
+    class Config:
+        env_prefix = "NOTES_"
     """Microsoft Office 365 configuration."""
     client_id: Optional[str] = Field(default=None, description="Microsoft OAuth client ID")
     client_secret: Optional[str] = Field(default=None, description="Microsoft OAuth client secret")

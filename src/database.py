@@ -729,6 +729,92 @@ class DatabaseManager:
                 )
             """)
 
+            # Focus Playlists - Mood Presets
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS mood_presets (
+                    id TEXT PRIMARY KEY,
+                    name TEXT UNIQUE NOT NULL,
+                    description TEXT,
+                    energy_level INTEGER DEFAULT 5,
+                    genres TEXT,
+                    tempo_range TEXT,
+                    instrumental_preference TEXT,
+                    default_duration_minutes INTEGER DEFAULT 60,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Focus Playlists - Main Playlist Table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS focus_playlists (
+                    id TEXT PRIMARY KEY,
+                    user_id TEXT DEFAULT 'default',
+                    title TEXT NOT NULL,
+                    mood TEXT,
+                    description TEXT,
+                    duration_minutes INTEGER,
+                    source TEXT DEFAULT 'buildly',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Focus Playlists - Tracks
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS focus_playlist_tracks (
+                    id TEXT PRIMARY KEY,
+                    playlist_id TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    artist TEXT NOT NULL,
+                    album TEXT,
+                    duration_seconds INTEGER,
+                    position INTEGER NOT NULL,
+                    youtube_video_id TEXT,
+                    spotify_track_id TEXT,
+                    apple_music_track_id TEXT,
+                    match_confidence REAL DEFAULT 0.0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (playlist_id) REFERENCES focus_playlists(id),
+                    UNIQUE(playlist_id, position)
+                )
+            """)
+            
+            # Focus Playlists - User Music Connections (OAuth Tokens)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS user_music_connections (
+                    id TEXT PRIMARY KEY,
+                    user_id TEXT DEFAULT 'default',
+                    provider TEXT NOT NULL,
+                    access_token TEXT,
+                    refresh_token TEXT,
+                    token_expires_at TIMESTAMP,
+                    provider_user_id TEXT,
+                    is_default INTEGER DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(user_id, provider)
+                )
+            """)
+            
+            # Focus Playlists - Sync Jobs
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS sync_jobs (
+                    id TEXT PRIMARY KEY,
+                    user_id TEXT DEFAULT 'default',
+                    playlist_id TEXT NOT NULL,
+                    provider TEXT NOT NULL,
+                    status TEXT DEFAULT 'pending',
+                    external_playlist_id TEXT,
+                    matched_tracks INTEGER DEFAULT 0,
+                    failed_tracks INTEGER DEFAULT 0,
+                    error_message TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (playlist_id) REFERENCES focus_playlists(id),
+                    UNIQUE(playlist_id, provider)
+                )
+            """)
+
             # AI Assistant indexes
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_ai_providers_active ON ai_providers(is_active)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_ai_providers_default ON ai_providers(is_default)")

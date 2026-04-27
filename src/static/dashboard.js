@@ -7845,6 +7845,7 @@ function renderSuggestedTodos(suggestions) {
     section.style.display = 'block';
 }
 
+<<<<<<< HEAD
 async function bulkProcessSuggestedTodos(action) {
     try {
         const response = await fetch('/api/suggested-todos/bulk', {
@@ -7879,6 +7880,9 @@ async function rejectAllSuggestedTodos() {
 }
 
 async function approveSuggestedTodo(suggestionId) {
+=======
+window.approveSuggestedTodo = async function approveSuggestedTodo(suggestionId) {
+>>>>>>> 451f96d (stage changes)
     try {
         const response = await fetch(`/api/suggested-todos/${suggestionId}/approve`, {
             method: 'POST'
@@ -7900,9 +7904,9 @@ async function approveSuggestedTodo(suggestionId) {
         console.error('Error approving suggestion:', error);
         showNotification('Error approving task', 'error');
     }
-}
+};
 
-async function rejectSuggestedTodo(suggestionId) {
+window.rejectSuggestedTodo = async function rejectSuggestedTodo(suggestionId) {
     try {
         const response = await fetch(`/api/suggested-todos/${suggestionId}/reject`, {
             method: 'POST'
@@ -7920,9 +7924,9 @@ async function rejectSuggestedTodo(suggestionId) {
         console.error('Error rejecting suggestion:', error);
         showNotification('Error dismissing suggestion', 'error');
     }
-}
+};
 
-async function openSourceContent(suggestionId, sourceUrl) {
+window.openSourceContent = async function openSourceContent(suggestionId, sourceUrl) {
     try {
         // Create a modal to show the source content
         const modal = document.createElement('div');
@@ -7952,7 +7956,7 @@ async function openSourceContent(suggestionId, sourceUrl) {
         console.error('Error opening source:', error);
         showNotification('Could not open source content', 'error');
     }
-}
+};
 
 function escapeHtml(unsafe) {
     if (!unsafe) return '';

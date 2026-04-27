@@ -234,6 +234,7 @@ try {
         this.emails = [];
         this.github = {};
         this.news = [];
+        this.newsArticles = {}; // For article modal lookup
         this.weather = {};
         this.dashboards = {}; // Marketing dashboards (projects & websites)
         this.aiSuggestions = [];
@@ -316,7 +317,22 @@ try {
     }
     
     updateGlobalMuteButton() {
-        // ...existing code for updateGlobalMuteButton (if any, or leave empty if not needed)...
+        // Update the global mute button UI based on current state
+        const iconEl = document.getElementById('mute-icon');
+        const textEl = document.getElementById('mute-text');
+        const btnEl = document.getElementById('global-mute-btn');
+        
+        if (iconEl && textEl && btnEl) {
+            if (this.globalMuted) {
+                iconEl.textContent = '🔇';
+                textEl.textContent = 'Voice Alerts Off';
+                btnEl.className = 'mt-2 w-full flex items-center justify-center gap-2 px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white text-sm font-medium rounded-lg transition-colors shadow-lg';
+            } else {
+                iconEl.textContent = '🔊';
+                textEl.textContent = 'Voice Alerts On';
+                btnEl.className = 'mt-2 w-full flex items-center justify-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm font-medium rounded-lg transition-colors shadow-lg';
+            }
+        }
     }
 
     checkOAuthCallbackStatus() {
@@ -1644,13 +1660,34 @@ try {
         const container = document.getElementById('github-content');
         if (!container) return;
         
-        const { repos = [], issues = [], prs = [] } = this.github;
+        // API returns { items: [...] } not { repos, issues, prs }
+        const items = this.github?.items || [];
+        
+        // Group items by type
+        const repos = items.filter(i => i.type === 'Recent Repository');
+        const prs = items.filter(i => i.type === 'Pull Request' || i.type === 'Review Requested');
+        const issues = items.filter(i => i.type === 'Issue Assigned');
+        
+        if (items.length === 0) {
+            container.innerHTML = `
+                <div class="text-center py-12">
+                    <div class="text-6xl mb-4">🐙</div>
+                    <h3 class="text-xl font-semibold mb-2">No GitHub Activity</h3>
+                    <p class="text-gray-400 mb-4">Connect your GitHub account to see activity</p>
+                    <a href="#" onclick="showSection('settings'); return false;" 
+                       class="inline-block px-6 py-3 bg-purple-600 hover:bg-purple-700 rounded-lg font-semibold">
+                        Configure GitHub
+                    </a>
+                </div>
+            `;
+            return;
+        }
         
         container.innerHTML = `
             <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
                 <div class="bg-gray-800 rounded-xl p-6 border border-gray-700 text-center">
                     <div class="text-3xl font-bold text-blue-400">${repos.length}</div>
-                    <div class="text-sm text-gray-400">Repositories</div>
+                    <div class="text-sm text-gray-400">Recent Repos</div>
                 </div>
                 <div class="bg-gray-800 rounded-xl p-6 border border-gray-700 text-center">
                     <div class="text-3xl font-bold text-green-400">${prs.length}</div>
@@ -1663,16 +1700,91 @@ try {
             </div>
             
             <div class="space-y-6">
+                ${prs.length > 0 ? `
+                    <div>
+                        <h3 class="text-xl font-bold mb-3 flex items-center gap-2">
+                            <span class="text-green-400">🔀</span> Pull Requests
+                        </h3>
+                        <div class="space-y-2">
+                            ${prs.map(pr => `
+                                <div class="bg-gray-800 rounded-lg p-4 border border-gray-700 hover:border-green-500 transition-colors">
+                                    <div class="flex items-start justify-between">
+                                        <div class="flex-1">
+                                            <a href="${pr.html_url || pr.github_url}" target="_blank" class="font-semibold text-blue-400 hover:underline">
+                                                ${this.escapeHtml(pr.title)}
+                                            </a>
+                                            <div class="text-sm text-gray-500 mt-1">
+                                                ${this.escapeHtml(pr.repository || pr.repo)} #${pr.number}
+                                                ${pr.user ? ` • by ${this.escapeHtml(pr.user)}` : ''}
+                                            </div>
+                                        </div>
+                                        <span class="px-2 py-1 text-xs rounded ${pr.state === 'open' ? 'bg-green-600' : 'bg-purple-600'}">
+                                            ${pr.type === 'Review Requested' ? '👀 Review' : pr.state}
+                                        </span>
+                                    </div>
+                                    ${pr.labels && pr.labels.length > 0 ? `
+                                        <div class="flex gap-1 mt-2 flex-wrap">
+                                            ${pr.labels.map(label => `<span class="px-2 py-0.5 text-xs bg-gray-700 rounded">${this.escapeHtml(label)}</span>`).join('')}
+                                        </div>
+                                    ` : ''}
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                ` : ''}
+                
+                ${issues.length > 0 ? `
+                    <div>
+                        <h3 class="text-xl font-bold mb-3 flex items-center gap-2">
+                            <span class="text-yellow-400">🐛</span> Assigned Issues
+                        </h3>
+                        <div class="space-y-2">
+                            ${issues.map(issue => `
+                                <div class="bg-gray-800 rounded-lg p-4 border border-gray-700 hover:border-yellow-500 transition-colors">
+                                    <div class="flex items-start justify-between">
+                                        <div class="flex-1">
+                                            <a href="${issue.html_url || issue.github_url}" target="_blank" class="font-semibold text-blue-400 hover:underline">
+                                                ${this.escapeHtml(issue.title)}
+                                            </a>
+                                            <div class="text-sm text-gray-500 mt-1">
+                                                ${this.escapeHtml(issue.repository || issue.repo)} #${issue.number}
+                                            </div>
+                                        </div>
+                                        <span class="px-2 py-1 text-xs rounded ${issue.state === 'open' ? 'bg-yellow-600' : 'bg-gray-600'}">
+                                            ${issue.state}
+                                        </span>
+                                    </div>
+                                    ${issue.labels && issue.labels.length > 0 ? `
+                                        <div class="flex gap-1 mt-2 flex-wrap">
+                                            ${issue.labels.map(label => `<span class="px-2 py-0.5 text-xs bg-gray-700 rounded">${this.escapeHtml(label)}</span>`).join('')}
+                                        </div>
+                                    ` : ''}
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                ` : ''}
+                
                 ${repos.length > 0 ? `
                     <div>
-                        <h3 class="text-xl font-bold mb-3">Recent Repositories</h3>
-                        <div class="space-y-2">
-                            ${repos.slice(0, 5).map(repo => `
-                                <div class="bg-gray-800 rounded-lg p-4 border border-gray-700">
-                                    <a href="${repo.url}" target="_blank" class="font-semibold text-blue-400 hover:underline">
-                                        ${this.escapeHtml(repo.name)}
-                                    </a>
-                                    ${repo.description ? `<p class="text-sm text-gray-400 mt-1">${this.escapeHtml(repo.description)}</p>` : ''}
+                        <h3 class="text-xl font-bold mb-3 flex items-center gap-2">
+                            <span class="text-blue-400">📁</span> Recent Repositories
+                        </h3>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            ${repos.map(repo => `
+                                <div class="bg-gray-800 rounded-lg p-4 border border-gray-700 hover:border-blue-500 transition-colors">
+                                    <div class="flex items-start justify-between mb-2">
+                                        <a href="${repo.html_url || repo.github_url}" target="_blank" class="font-semibold text-blue-400 hover:underline">
+                                            ${this.escapeHtml(repo.title || repo.repo)}
+                                        </a>
+                                        ${repo.private ? '<span class="px-2 py-0.5 text-xs bg-gray-700 rounded">🔒 Private</span>' : ''}
+                                    </div>
+                                    ${repo.description ? `<p class="text-sm text-gray-400 mb-2">${this.escapeHtml(repo.description)}</p>` : ''}
+                                    <div class="flex items-center gap-4 text-sm text-gray-500">
+                                        ${repo.language ? `<span>💻 ${this.escapeHtml(repo.language)}</span>` : ''}
+                                        ${repo.stars ? `<span>⭐ ${repo.stars}</span>` : ''}
+                                        ${repo.forks ? `<span>🔀 ${repo.forks}</span>` : ''}
+                                    </div>
                                 </div>
                             `).join('')}
                         </div>
@@ -1712,34 +1824,40 @@ try {
             return;
         }
         
+        // Store articles for modal access
+        this.newsArticles = {};
+        this.news.forEach(article => {
+            this.newsArticles[article.id] = article;
+        });
+        
         // Get unique categories for filtering
         const categories = [...new Set(this.news.map(item => item.category).filter(Boolean))];
         
         const categoryFilters = categories.length > 0 ? `
-            <div class="mb-4 flex gap-2 flex-wrap col-span-full">
+            <div class="mb-6 flex gap-2 flex-wrap">
                 <button onclick="dataLoader.filterNews('all')" 
-                        class="news-filter-btn px-3 py-1 bg-blue-600 rounded text-sm">All</button>
-                ${categories.map(cat => 
+                        class="news-filter-btn px-4 py-2 bg-blue-600 rounded-full text-sm font-medium">All</button>
+                ${categories.slice(0, 6).map(cat => 
                     `<button onclick="dataLoader.filterNews('${this.escapeHtml(cat)}')" 
-                             class="news-filter-btn px-3 py-1 bg-gray-700 rounded text-sm hover:bg-gray-600">${this.escapeHtml(cat)}</button>`
+                             class="news-filter-btn px-4 py-2 bg-gray-700 rounded-full text-sm hover:bg-gray-600">${this.escapeHtml(cat)}</button>`
                 ).join('')}
                 <button onclick="dataLoader.toggleShowReadArticles()" 
-                        class="ml-auto px-3 py-1 bg-gray-700 rounded text-sm hover:bg-gray-600">
+                        class="ml-auto px-4 py-2 bg-gray-700 rounded-full text-sm hover:bg-gray-600">
                     ${this.showReadArticles ? '📖 Hide Read' : '📚 Show All'}
                 </button>
             </div>
         ` : `
-            <div class="mb-4 flex justify-end col-span-full">
+            <div class="mb-6 flex justify-end">
                 <button onclick="dataLoader.toggleShowReadArticles()" 
-                        class="px-3 py-1 bg-gray-700 rounded text-sm hover:bg-gray-600">
+                        class="px-4 py-2 bg-gray-700 rounded-full text-sm hover:bg-gray-600">
                     ${this.showReadArticles ? '📖 Hide Read' : '📚 Show All'}
                 </button>
             </div>
         `;
         
-        // Generate accordion items
-        const html = this.news.map(article => {
-            // Process description to extract and render images and links properly
+        // Generate Google News-style cards
+        const html = this.news.map((article, index) => {
+            // Process description to extract and render images
             let cleanDesc = article.description || article.snippet || '';
             
             // Skip if no content at all
@@ -1754,17 +1872,11 @@ try {
             
             // Extract image URLs before removing tags
             const imgMatches = cleanDesc.match(/<img[^>]+src="([^">]+)"/g);
-            const imgUrls = imgMatches ? imgMatches.map(match => {
-                const srcMatch = match.match(/src="([^"]+)"/);
-                return srcMatch ? srcMatch[1] : null;
-            }).filter(Boolean) : [];
-            
-            // Extract and preserve links with proper styling
-            const links = [];
-            cleanDesc = cleanDesc.replace(/<a\s+(?:[^>]*?\s+)?href="([^"]*)"[^>]*>(.*?)<\/a>/gi, (match, url, text) => {
-                links.push({ url, text });
-                return `[[LINK_${links.length - 1}]]`;
-            });
+            let imgUrl = null;
+            if (imgMatches) {
+                const srcMatch = imgMatches[0].match(/src="([^"]+)"/);
+                imgUrl = srcMatch ? srcMatch[1] : null;
+            }
             
             // Remove img tags
             cleanDesc = cleanDesc.replace(/<img[^>]*>/gi, '');
@@ -1775,81 +1887,41 @@ try {
             // Clean up extra whitespace
             cleanDesc = cleanDesc.trim().replace(/\s+/g, ' ');
             
-            // Restore links with proper HTML
-            links.forEach((link, index) => {
-                const linkHtml = `<a href="${link.url}" target="_blank" class="text-blue-400 hover:text-blue-300 underline" onclick="event.stopPropagation()">${link.text}</a>`;
-                cleanDesc = cleanDesc.replace(`[[LINK_${index}]]`, linkHtml);
-            });
+            // Truncate description for preview
+            const previewText = cleanDesc.length > 150 ? cleanDesc.substring(0, 150) + '...' : cleanDesc;
             
             const feedback = this.feedbackData[`news-${article.id}`] || null;
             const isRead = article.is_read || false;
             
+            // Use placeholder image if none found
+            const displayImg = imgUrl || `https://picsum.photos/seed/${article.id}/400/200`;
+            
             return `
-            <div class="news-accordion-item bg-gray-800 border-b border-gray-700 last:border-b-0 news-item ${isRead ? 'news-read' : 'news-unread'}" 
+            <div class="news-card bg-gray-800 border border-gray-700 rounded-xl overflow-hidden hover:border-purple-500 transition-all cursor-pointer ${isRead ? 'opacity-70' : ''}"
                  data-category="${this.escapeHtml(article.category || '')}"
-                 data-article-id="${article.id}">
-                <!-- Collapsed Header - Just the title -->
-                <div class="news-accordion-header p-4 cursor-pointer hover:bg-gray-750 transition-colors flex items-center justify-between"
-                     onclick="dataLoader.toggleNewsAccordion('${article.id}')">
-                    <div class="flex items-center gap-3 flex-1">
-                        ${isRead ? '<span class="text-gray-500 text-sm">✓</span>' : '<span class="text-green-400 text-sm">●</span>'}
-                        <h3 class="font-semibold text-white">${this.escapeHtml(article.title)}</h3>
+                 data-article-id="${article.id}"
+                 onclick="dataLoader.openNewsArticle('${article.id}')">
+                <div class="flex h-32">
+                    <!-- Image Preview -->
+                    <div class="w-40 flex-shrink-0 bg-gray-700 relative overflow-hidden">
+                        <img src="${displayImg}" 
+                             alt="" 
+                             class="w-full h-full object-cover"
+                             onerror="this.src='https://picsum.photos/seed/${article.id}/400/200'">
+                        ${isRead ? '<div class="absolute top-2 left-2 px-2 py-0.5 bg-gray-900 bg-opacity-80 rounded text-xs text-gray-400">✓ Read</div>' : ''}
                     </div>
-                    <div class="flex items-center gap-4">
-                        <span class="text-purple-400 text-sm">${this.escapeHtml(article.source || 'News')}</span>
-                        <svg class="news-chevron w-5 h-5 text-gray-400 transform transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
-                        </svg>
-                    </div>
-                </div>
-                
-                <!-- Expanded Content (hidden by default) -->
-                <div class="news-accordion-content hidden border-t border-gray-700">
-                    <div class="p-6 bg-gray-850">
-                        <div class="flex gap-2 items-center mb-3">
-                            ${article.category ? `<span class="text-xs bg-purple-600 px-2 py-0.5 rounded">${this.escapeHtml(article.category)}</span>` : ''}
-                            <span class="text-gray-500 text-sm">${this.formatDate(article.published_at)}</span>
+                    
+                    <!-- Content -->
+                    <div class="flex-1 p-4 flex flex-col justify-between min-w-0">
+                        <div>
+                            <h3 class="font-semibold text-white text-sm line-clamp-2 mb-1">${this.escapeHtml(article.title)}</h3>
+                            <p class="text-gray-400 text-xs line-clamp-2">${this.escapeHtml(previewText)}</p>
                         </div>
-                        
-                        ${imgUrls.length > 0 ? `
-                            <div class="mb-4 grid ${imgUrls.length > 1 ? 'grid-cols-2' : 'grid-cols-1'} gap-2">
-                                ${imgUrls.slice(0, 4).map(imgUrl => `
-                                    <img src="${imgUrl}" alt="${this.escapeHtml(article.title)}" 
-                                         class="w-full rounded-lg ${imgUrls.length === 1 ? 'h-64' : 'h-48'} object-cover cursor-pointer"
-                                         onerror="this.style.display='none'"
-                                         onclick="event.stopPropagation(); window.open('${imgUrl}', '_blank')">
-                                `).join('')}
-                            </div>
-                        ` : ''}
-                        
-                        ${cleanDesc ? `
-                            <div class="prose prose-invert max-w-none mb-4">
-                                <p class="text-gray-300 leading-relaxed">${cleanDesc}</p>
-                            </div>
-                        ` : ''}
-                        
-                        <!-- Action Buttons -->
-                        <div class="flex gap-3 items-center pt-4 border-t border-gray-700" onclick="event.stopPropagation()">
-                            <a href="${article.url}" target="_blank" 
-                               class="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-white font-medium transition-colors flex items-center gap-2"
-                               onclick="dataLoader.markArticleRead('${article.id}')">
-                                <span>Read Full Article</span>
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path>
-                                </svg>
-                            </a>
-                            
-                            <div class="flex gap-1 ml-auto">
-                                <button onclick="dataLoader.giveFeedback('news', '${article.id}', 'up')" 
-                                        class="feedback-btn px-3 py-2 rounded-lg text-sm ${feedback === 'up' ? 'bg-green-600' : 'bg-gray-700 hover:bg-green-600'}" 
-                                        title="Interesting">👍 Interesting</button>
-                                <button onclick="dataLoader.giveFeedback('news', '${article.id}', 'neutral')" 
-                                        class="feedback-btn px-3 py-2 rounded-lg text-sm ${feedback === 'neutral' ? 'bg-blue-600' : 'bg-gray-700 hover:bg-blue-600'}" 
-                                        title="Neutral">👌 OK</button>
-                                <button onclick="dataLoader.giveFeedback('news', '${article.id}', 'down')" 
-                                        class="feedback-btn px-3 py-2 rounded-lg text-sm ${feedback === 'down' ? 'bg-red-600' : 'bg-gray-700 hover:bg-red-600'}" 
-                                        title="Not interested">👎 Not for me</button>
-                            </div>
+                        <div class="flex items-center gap-2 text-xs text-gray-500 mt-2">
+                            <span class="text-purple-400 font-medium">${this.escapeHtml(article.source || 'News')}</span>
+                            <span>•</span>
+                            <span>${this.formatRelativeDate(article.published_at)}</span>
+                            ${article.category ? `<span class="ml-auto px-2 py-0.5 bg-gray-700 rounded text-gray-400">${this.escapeHtml(article.category.split(',')[0])}</span>` : ''}
                         </div>
                     </div>
                 </div>
@@ -1857,25 +1929,104 @@ try {
         `;
         }).join('');
         
-        grid.innerHTML = categoryFilters + '<div class="col-span-full space-y-0 border border-gray-700 rounded-xl overflow-hidden">' + html + '</div>';
+        grid.innerHTML = categoryFilters + `
+            <style>
+                .line-clamp-2 {
+                    display: -webkit-box;
+                    -webkit-line-clamp: 2;
+                    -webkit-box-orient: vertical;
+                    overflow: hidden;
+                }
+            </style>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">${html}</div>
+        `;
     }
     
+    formatRelativeDate(dateStr) {
+        if (!dateStr) return '';
+        try {
+            const date = new Date(dateStr);
+            const now = new Date();
+            const diffMs = now - date;
+            const diffMins = Math.floor(diffMs / 60000);
+            const diffHours = Math.floor(diffMs / 3600000);
+            const diffDays = Math.floor(diffMs / 86400000);
+            
+            if (diffMins < 60) return `${diffMins}m ago`;
+            if (diffHours < 24) return `${diffHours}h ago`;
+            if (diffDays < 7) return `${diffDays}d ago`;
+            return date.toLocaleDateString();
+        } catch {
+            return dateStr;
+        }
+    }
+    
+    openNewsArticle(articleId) {
+        const article = this.newsArticles[articleId];
+        if (!article) return;
+        
+        // Process description
+        let cleanDesc = article.description || article.snippet || '';
+        const textarea = document.createElement('textarea');
+        textarea.innerHTML = cleanDesc;
+        cleanDesc = textarea.value;
+        
+        // Extract image URL
+        const imgMatches = cleanDesc.match(/<img[^>]+src="([^">]+)"/g);
+        let imgUrl = null;
+        if (imgMatches) {
+            const srcMatch = imgMatches[0].match(/src="([^"]+)"/);
+            imgUrl = srcMatch ? srcMatch[1] : null;
+        }
+        
+        // Clean description
+        cleanDesc = cleanDesc.replace(/<img[^>]*>/gi, '');
+        cleanDesc = cleanDesc.replace(/<a\s+(?:[^>]*?\s+)?href="([^"]*)"[^>]*>(.*?)<\/a>/gi, '<a href="$1" target="_blank" class="text-blue-400 hover:underline">$2</a>');
+        cleanDesc = cleanDesc.replace(/<(?!a\s|\/a>)[^>]*>/gi, '');
+        cleanDesc = cleanDesc.trim();
+        
+        // Populate modal
+        document.getElementById('news-modal-title').textContent = article.title;
+        document.getElementById('news-modal-source').textContent = article.source || 'News';
+        document.getElementById('news-modal-category').textContent = article.category || 'General';
+        document.getElementById('news-modal-date').textContent = this.formatDate(article.published_at);
+        document.getElementById('news-modal-content').innerHTML = cleanDesc || 'No content available. Click "Read Full Article" to view the complete story.';
+        document.getElementById('news-modal-link').href = article.url;
+        document.getElementById('news-modal-link').onclick = () => this.markArticleRead(articleId);
+        
+        // Show/hide image
+        const imgContainer = document.getElementById('news-modal-image-container');
+        const imgEl = document.getElementById('news-modal-image');
+        if (imgUrl) {
+            imgEl.src = imgUrl;
+            imgEl.alt = article.title;
+            imgContainer.classList.remove('hidden');
+        } else {
+            imgContainer.classList.add('hidden');
+        }
+        
+        // Add feedback buttons
+        const feedback = this.feedbackData[`news-${articleId}`] || null;
+        document.getElementById('news-modal-feedback').innerHTML = `
+            <button onclick="dataLoader.giveFeedback('news', '${articleId}', 'up'); event.stopPropagation();" 
+                    class="feedback-btn px-3 py-2 rounded-lg text-sm ${feedback === 'up' ? 'bg-green-600' : 'bg-gray-700 hover:bg-green-600'}" 
+                    title="Interesting">👍</button>
+            <button onclick="dataLoader.giveFeedback('news', '${articleId}', 'neutral'); event.stopPropagation();" 
+                    class="feedback-btn px-3 py-2 rounded-lg text-sm ${feedback === 'neutral' ? 'bg-blue-600' : 'bg-gray-700 hover:bg-blue-600'}" 
+                    title="Neutral">👌</button>
+            <button onclick="dataLoader.giveFeedback('news', '${articleId}', 'down'); event.stopPropagation();" 
+                    class="feedback-btn px-3 py-2 rounded-lg text-sm ${feedback === 'down' ? 'bg-red-600' : 'bg-gray-700 hover:bg-red-600'}" 
+                    title="Not interested">👎</button>
+        `;
+        
+        // Show modal
+        document.getElementById('news-article-modal').classList.remove('hidden');
+        document.body.style.overflow = 'hidden';
+    }
+
     toggleNewsAccordion(articleId) {
-        const item = document.querySelector(`[data-article-id="${articleId}"]`);
-        if (!item) return;
-        
-        const content = item.querySelector('.news-accordion-content');
-        const chevron = item.querySelector('.news-chevron');
-        
-        // Don't close other accordions - let user open multiple articles
-        // Removed the code that was closing all other accordions
-        
-        // Toggle this accordion
-        content.classList.toggle('hidden');
-        chevron.classList.toggle('rotate-180');
-        
-        // Don't auto-mark as read when opening - only when clicking "Read Full Article"
-        // This way users can preview without marking as read
+        // Legacy function - now opens modal instead
+        this.openNewsArticle(articleId);
     }
     
     async markArticleRead(articleId) {

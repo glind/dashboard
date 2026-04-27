@@ -767,11 +767,23 @@ RULES:
             }
     
     def delete_task(self, task_id: str) -> Dict[str, Any]:
-        """Delete a task."""
+        """Delete a task and mark its source as dismissed to prevent recreation."""
         try:
+            # Get task info before deleting to mark source as dismissed
+            all_tasks = self.db.get_todos(include_completed=True, include_deleted=True)
+            task_to_delete = next((t for t in all_tasks if t.get('id') == task_id), None)
+            
             success = self.db.delete_todo(task_id)
             
             if success:
+                # Mark the source as dismissed to prevent recreation
+                if task_to_delete:
+                    source = task_to_delete.get('source', '')
+                    source_id = task_to_delete.get('source_id', '')
+                    if source and source_id:
+                        self.db.mark_source_dismissed(source, source_id)
+                        logger.info(f"Marked source as dismissed: {source}/{source_id}")
+                
                 logger.info(f"AI deleted task: {task_id}")
                 return {
                     'success': True,

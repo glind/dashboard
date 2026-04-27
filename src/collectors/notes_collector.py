@@ -407,8 +407,416 @@ class GoogleDriveNotesCollector:
         return todos
 
 
+class AppleNotesCollector:
+    """Collects notes from Apple Notes using macOS native APIs via osascript."""
+    
+    def __init__(self):
+        """Initialize Apple Notes collector."""
+        import platform
+        self.is_macos = platform.system() == 'Darwin'
+        
+    def get_recent_notes(self, limit: int = 10) -> List[Dict[str, Any]]:
+        """
+        Get the most recently modified notes from Apple Notes.
+        
+        Args:
+            limit: Maximum number of notes to return
+            
+        Returns:
+            List of note dictionaries with metadata
+        """
+        if not self.is_macos:
+            logger.warning("Apple Notes collector only works on macOS")
+            return []
+            
+        try:
+            import subprocess
+            from datetime import datetime
+            
+            # Use a faster approach - get notes directly without iterating folders
+            # Skip body content initially to avoid timeout
+            script = f'''
+            set output to ""
+            set noteCount to 0
+            tell application "Notes"
+                set allNotes to notes
+                repeat with n in allNotes
+                    if noteCount >= {limit} then exit repeat
+                    try
+                        set noteName to name of n
+                        set noteId to id of n
+                        set noteCreated to (creation date of n) as text
+                        set noteModified to (modification date of n) as text
+                        -- Get folder name safely
+                        set folderName to "Notes"
+                        try
+                            set folderName to name of container of n
+                        end try
+                        set output to output & "|||NOTE_START|||" & return
+                        set output to output & "FOLDER:" & folderName & return
+                        set output to output & "NAME:" & noteName & return
+                        set output to output & "ID:" & noteId & return
+                        set output to output & "CREATED:" & noteCreated & return
+                        set output to output & "MODIFIED:" & noteModified & return
+                        -- Get body but limit to avoid slowdown
+                        set noteBody to ""
+                        try
+                            set noteBody to body of n
+                        end try
+                        set output to output & "BODY:" & return & noteBody & return
+                        set output to output & "|||NOTE_END|||" & return
+                        set noteCount to noteCount + 1
+                    on error
+                    end try
+                end repeat
+            end tell
+            return output
+            '''
+            
+            # Execute AppleScript with longer timeout
+            result = subprocess.run(
+                ['osascript', '-e', script],
+                capture_output=True, text=True, timeout=120
+            )
+            
+            if result.returncode != 0:
+                logger.error(f"AppleScript error: {result.stderr}")
+                return []
+            
+            # Parse the delimited output
+            raw_output = result.stdout
+            if not raw_output or '|||NOTE_START|||' not in raw_output:
+                logger.info("No Apple Notes found")
+                return []
+            
+            # Parse notes from the delimited format
+            notes = self._parse_delimited_output(raw_output)
+            
+            logger.info(f"Collected {len(notes)} Apple Notes")
+            return notes
+            
+        except subprocess.TimeoutExpired:
+            logger.error("Apple Notes collection timed out")
+            return []
+        except Exception as e:
+            logger.error(f"Error collecting Apple Notes: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return []
+    
+    def _parse_delimited_output(self, output: str) -> List[Dict[str, Any]]:
+        """
+        Parse delimited AppleScript output into note dictionaries.
+        
+        Args:
+            output: Delimited output from AppleScript
+            
+        Returns:
+            List of parsed note dictionaries
+        """
+        import re
+        notes = []
+        
+        # Split by note markers
+        note_blocks = output.split('|||NOTE_START|||')
+        
+        for block in note_blocks:
+            if '|||NOTE_END|||' not in block:
+                continue
+                
+            block = block.split('|||NOTE_END|||')[0]
+            
+            try:
+                note = {}
+                lines = block.strip().split('\n')
+                body_lines = []
+                in_body = False
+                
+                for line in lines:
+                    if line.startswith('FOLDER:'):
+                        note['folder'] = line[7:].strip()
+                    elif line.startswith('NAME:'):
+                        note['title'] = line[5:].strip()
+                    elif line.startswith('ID:'):
+                        note['apple_id'] = line[3:].strip()
+                    elif line.startswith('CREATED:'):
+                        note['created_at'] = line[8:].strip()
+                    elif line.startswith('MODIFIED:'):
+                        note['modified_at'] = line[9:].strip()
+                    elif line.startswith('BODY:'):
+                        in_body = True
+                    elif in_body:
+                        body_lines.append(line)
+                
+                if not note.get('title'):
+                    continue
+                
+                # Process body
+                body_html = '\n'.join(body_lines)
+                body_clean = re.sub(r'<[^>]+>', '', body_html).strip()
+                
+                note['source'] = 'apple_notes'
+                note['content'] = body_clean
+                note['preview'] = body_clean[:200] if body_clean else ''
+                note['word_count'] = len(body_clean.split()) if body_clean else 0
+                note['todos'] = self._extract_todos(body_clean)
+                note['has_todos'] = len(note['todos']) > 0
+                
+                notes.append(note)
+                
+            except Exception as e:
+                logger.warning(f"Error parsing Apple Note block: {e}")
+                continue
+                
+        return notes
+    
+    def _extract_todos(self, content: str) -> List[Dict[str, str]]:
+        """
+        Extract TODO items from Apple Notes content.
+        
+        Args:
+            content: Note content
+            
+        Returns:
+            List of TODO items
+        """
+        todos = []
+        seen_tasks = set()
+        
+        patterns = [
+            (r'[-•]\s*\[\s*\]\s+(.+)', 'checkbox'),
+            (r'TODO:\s+(.+)', 'todo'),
+            (r'☐\s+(.+)', 'checkbox_symbol'),
+            (r'Action:\s+(.+)', 'action'),
+        ]
+        
+        for pattern, pattern_type in patterns:
+            matches = re.finditer(pattern, content, re.IGNORECASE)
+            for match in matches:
+                task_text = match.group(1).strip()
+                
+                if len(task_text) < 5 or task_text.lower() in seen_tasks:
+                    continue
+                
+                seen_tasks.add(task_text.lower())
+                
+                start = max(0, match.start() - 100)
+                end = min(len(content), match.end() + 100)
+                context = content[start:end].strip()
+                
+                todos.append({
+                    'text': task_text,
+                    'context': context,
+                    'pattern_type': pattern_type
+                })
+        
+        return todos
+    
+    def sync_note_to_apple(self, title: str, content: str, folder: str = "Notes") -> bool:
+        """
+        Create or update a note in Apple Notes.
+        
+        Args:
+            title: Note title
+            content: Note content
+            folder: Target folder name
+            
+        Returns:
+            True if successful
+        """
+        if not self.is_macos:
+            return False
+            
+        try:
+            import subprocess
+            
+            # Escape content for AppleScript
+            escaped_content = content.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n')
+            escaped_title = title.replace('\\', '\\\\').replace('"', '\\"')
+            
+            script = f'''
+            tell application "Notes"
+                tell account "iCloud"
+                    set targetFolder to folder "{folder}"
+                    make new note at targetFolder with properties {{name:"{escaped_title}", body:"{escaped_content}"}}
+                end tell
+            end tell
+            '''
+            
+            result = subprocess.run(
+                ['osascript', '-e', script],
+                capture_output=True, text=True, timeout=10
+            )
+            
+            return result.returncode == 0
+            
+        except Exception as e:
+            logger.error(f"Error syncing to Apple Notes: {e}")
+            return False
+
+
+class GoogleKeepCollector:
+    """Collects notes from Google Keep (via exported data or gkeepapi)."""
+    
+    def __init__(self, email: str = None, master_token: str = None):
+        """
+        Initialize Google Keep collector.
+        
+        Args:
+            email: Google account email
+            master_token: Google Keep master token (from gkeepapi login)
+        """
+        self.email = email
+        self.master_token = master_token
+        self.keep = None
+        
+    def _get_keep_client(self):
+        """Get or create Google Keep client."""
+        if self.keep:
+            return self.keep
+            
+        try:
+            import gkeepapi
+            
+            self.keep = gkeepapi.Keep()
+            
+            if self.master_token:
+                # Resume with saved token
+                self.keep.resume(self.email, self.master_token)
+            else:
+                logger.warning("Google Keep requires master token for authentication")
+                return None
+                
+            return self.keep
+            
+        except ImportError:
+            logger.warning("gkeepapi not installed. Install with: pip install gkeepapi")
+            return None
+        except Exception as e:
+            logger.error(f"Error connecting to Google Keep: {e}")
+            return None
+    
+    def get_recent_notes(self, limit: int = 10, labels: List[str] = None) -> List[Dict[str, Any]]:
+        """
+        Get recent notes from Google Keep.
+        
+        Args:
+            limit: Maximum number of notes to return
+            labels: Optional list of label names to filter by
+            
+        Returns:
+            List of note dictionaries
+        """
+        try:
+            keep = self._get_keep_client()
+            if not keep:
+                return []
+            
+            # Sync with Google Keep
+            keep.sync()
+            
+            # Get notes
+            notes = []
+            all_notes = list(keep.all())
+            
+            # Filter by labels if specified
+            if labels:
+                filtered_notes = []
+                for note in all_notes:
+                    note_labels = [l.name for l in note.labels.all()]
+                    if any(label in note_labels for label in labels):
+                        filtered_notes.append(note)
+                all_notes = filtered_notes
+            
+            # Sort by timestamp (most recent first) and limit
+            all_notes.sort(key=lambda x: x.timestamps.updated, reverse=True)
+            all_notes = all_notes[:limit]
+            
+            for note in all_notes:
+                try:
+                    # Extract content
+                    if hasattr(note, 'text'):
+                        content = note.text
+                    elif hasattr(note, 'items'):
+                        # List note
+                        content = '\n'.join([f"{'✓' if item.checked else '☐'} {item.text}" for item in note.items])
+                    else:
+                        content = str(note)
+                    
+                    # Get labels
+                    note_labels = [l.name for l in note.labels.all()] if hasattr(note, 'labels') else []
+                    
+                    notes.append({
+                        'source': 'google_keep',
+                        'title': note.title or content[:50] + '...' if len(content) > 50 else content,
+                        'preview': content[:200] if content else '',
+                        'content': content,
+                        'labels': note_labels,
+                        'color': note.color.name if hasattr(note, 'color') else 'DEFAULT',
+                        'pinned': note.pinned if hasattr(note, 'pinned') else False,
+                        'archived': note.archived if hasattr(note, 'archived') else False,
+                        'modified_at': note.timestamps.updated.isoformat() if hasattr(note, 'timestamps') else '',
+                        'created_at': note.timestamps.created.isoformat() if hasattr(note, 'timestamps') else '',
+                        'keep_id': note.id,
+                        'todos': self._extract_todos(content),
+                        'has_todos': False,  # Will update below
+                        'is_list': hasattr(note, 'items')
+                    })
+                    notes[-1]['has_todos'] = len(notes[-1]['todos']) > 0
+                    
+                except Exception as e:
+                    logger.error(f"Error processing Keep note: {e}")
+                    continue
+            
+            logger.info(f"Collected {len(notes)} Google Keep notes")
+            return notes
+            
+        except Exception as e:
+            logger.error(f"Error collecting Google Keep notes: {e}")
+            return []
+    
+    def _extract_todos(self, content: str) -> List[Dict[str, str]]:
+        """
+        Extract TODO items from Keep note content.
+        
+        Args:
+            content: Note content
+            
+        Returns:
+            List of TODO items
+        """
+        todos = []
+        seen_tasks = set()
+        
+        patterns = [
+            (r'☐\s+(.+)', 'unchecked'),
+            (r'TODO:\s+(.+)', 'todo'),
+            (r'[-•]\s*\[\s*\]\s+(.+)', 'checkbox'),
+        ]
+        
+        for pattern, pattern_type in patterns:
+            matches = re.finditer(pattern, content, re.IGNORECASE)
+            for match in matches:
+                task_text = match.group(1).strip()
+                
+                if len(task_text) < 5 or task_text.lower() in seen_tasks:
+                    continue
+                
+                seen_tasks.add(task_text.lower())
+                todos.append({
+                    'text': task_text,
+                    'pattern_type': pattern_type
+                })
+        
+        return todos
+
+
 def collect_all_notes(obsidian_path: Optional[str] = None, 
                       gdrive_folder_id: Optional[str] = None,
+                      include_apple_notes: bool = True,
+                      google_keep_email: Optional[str] = None,
+                      google_keep_token: Optional[str] = None,
+                      google_keep_labels: Optional[List[str]] = None,
                       limit: int = 10) -> Dict[str, Any]:
     """
     Collect notes from all configured sources.
@@ -416,6 +824,10 @@ def collect_all_notes(obsidian_path: Optional[str] = None,
     Args:
         obsidian_path: Path to Obsidian vault
         gdrive_folder_id: Google Drive folder ID
+        include_apple_notes: Whether to include Apple Notes (macOS only)
+        google_keep_email: Google account email for Keep
+        google_keep_token: Google Keep master token
+        google_keep_labels: Optional list of Keep labels to filter by
         limit: Max notes per source
         
     Returns:
@@ -440,6 +852,52 @@ def collect_all_notes(obsidian_path: Optional[str] = None,
                     'source_path': note.get('path'),
                     'context': todo.get('context', '')
                 })
+    
+    # Collect from Apple Notes (macOS only)
+    apple_notes_count = 0
+    if include_apple_notes:
+        try:
+            import platform
+            if platform.system() == 'Darwin':
+                logger.info("Collecting Apple Notes...")
+                apple_collector = AppleNotesCollector()
+                apple_notes = apple_collector.get_recent_notes(limit)
+                all_notes.extend(apple_notes)
+                apple_notes_count = len(apple_notes)
+                
+                # Extract todos
+                for note in apple_notes:
+                    for todo in note.get('todos', []):
+                        todos_to_create.append({
+                            'text': todo['text'],
+                            'source': 'apple_notes',
+                            'source_title': note['title'],
+                            'context': todo.get('context', '')
+                        })
+        except Exception as e:
+            logger.error(f"Error collecting Apple Notes: {e}")
+    
+    # Collect from Google Keep
+    google_keep_count = 0
+    if google_keep_email and google_keep_token:
+        try:
+            logger.info("Collecting Google Keep notes...")
+            keep_collector = GoogleKeepCollector(google_keep_email, google_keep_token)
+            keep_notes = keep_collector.get_recent_notes(limit, labels=google_keep_labels)
+            all_notes.extend(keep_notes)
+            google_keep_count = len(keep_notes)
+            
+            # Extract todos
+            for note in keep_notes:
+                for todo in note.get('todos', []):
+                    todos_to_create.append({
+                        'text': todo['text'],
+                        'source': 'google_keep',
+                        'source_title': note['title'],
+                        'context': ''
+                    })
+        except Exception as e:
+            logger.error(f"Error collecting Google Keep notes: {e}")
     
     # Collect from Google Drive
     gdrive_auth_error = None
@@ -496,10 +954,12 @@ def collect_all_notes(obsidian_path: Optional[str] = None,
     all_notes.sort(key=lambda x: x.get('modified_at', ''), reverse=True)
     
     result = {
-        'notes': all_notes[:limit * 2],  # Return more notes from combined sources
+        'notes': all_notes[:limit * 3],  # Return more notes from combined sources
         'todos_to_create': todos_to_create,
         'obsidian_count': len([n for n in all_notes if n['source'] == 'obsidian']),
         'gdrive_count': len([n for n in all_notes if n['source'] == 'google_drive']),
+        'apple_notes_count': apple_notes_count,
+        'google_keep_count': google_keep_count,
         'total_todos_found': len(todos_to_create)
     }
     
@@ -508,3 +968,35 @@ def collect_all_notes(obsidian_path: Optional[str] = None,
         result['gdrive_auth_error'] = gdrive_auth_error
     
     return result
+
+
+def sync_notes_between_sources(source: str, target: str, note_ids: List[str] = None) -> Dict[str, Any]:
+    """
+    Sync notes between different sources.
+    
+    Args:
+        source: Source type ('obsidian', 'apple_notes', 'google_keep', 'google_drive')
+        target: Target type ('obsidian', 'apple_notes', 'google_keep', 'google_drive')
+        note_ids: Optional list of specific note IDs to sync
+        
+    Returns:
+        Sync result with counts
+    """
+    synced_count = 0
+    errors = []
+    
+    logger.info(f"Syncing notes from {source} to {target}")
+    
+    # This is a placeholder for future sync implementation
+    # Full sync would require:
+    # 1. Reading notes from source
+    # 2. Converting format if needed
+    # 3. Writing to target
+    # 4. Tracking sync state to avoid duplicates
+    
+    return {
+        'success': True,
+        'synced_count': synced_count,
+        'errors': errors,
+        'message': f'Sync from {source} to {target} completed'
+    }

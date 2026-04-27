@@ -546,6 +546,17 @@
                     </svg>
                     <span id="google-auth-text">Connect Google</span>
                 </button>
+                
+                <!-- Universal Mute Button -->
+                <button id="global-mute-btn" onclick="window.dataLoader && window.dataLoader.toggleGlobalMute()" class="
+                    mt-2 w-full flex items-center justify-center gap-2 
+                    px-4 py-2 bg-purple-600 hover:bg-purple-700 
+                    text-white text-sm font-medium rounded-lg 
+                    transition-colors shadow-lg
+                ">
+                    <span id="mute-icon">🔊</span>
+                    <span id="mute-text">Voice Alerts On</span>
+                </button>
             </div>
             
             <!-- Navigation - Scrollable -->
@@ -882,7 +893,31 @@
                         <button onclick="scanForNotes()" id="scan-notes-btn"
                                 class="bg-purple-600 hover:bg-purple-700 px-6 py-3 rounded-lg font-semibold flex items-center gap-2 transition-all">
                             <span id="scan-notes-icon">📥</span>
-                            <span id="scan-notes-text">Scan for New Notes</span>
+                            <span id="scan-notes-text">Scan All Sources</span>
+                        </button>
+                    </div>
+                    
+                    <!-- Source Filter Tabs -->
+                    <div class="flex gap-2 mb-4 flex-wrap">
+                        <button onclick="filterNotesBySource('all')" 
+                                class="notes-source-btn px-4 py-2 bg-purple-600 rounded-full text-sm font-medium" data-source="all">
+                            📚 All Sources
+                        </button>
+                        <button onclick="filterNotesBySource('obsidian')" 
+                                class="notes-source-btn px-4 py-2 bg-gray-700 rounded-full text-sm hover:bg-gray-600" data-source="obsidian">
+                            📓 Obsidian <span id="obsidian-count-badge" class="ml-1 text-xs opacity-75">0</span>
+                        </button>
+                        <button onclick="filterNotesBySource('apple_notes')" 
+                                class="notes-source-btn px-4 py-2 bg-gray-700 rounded-full text-sm hover:bg-gray-600" data-source="apple_notes">
+                            🍎 Apple Notes <span id="apple-notes-count-badge" class="ml-1 text-xs opacity-75">0</span>
+                        </button>
+                        <button onclick="filterNotesBySource('google_keep')" 
+                                class="notes-source-btn px-4 py-2 bg-gray-700 rounded-full text-sm hover:bg-gray-600" data-source="google_keep">
+                            📌 Google Keep <span id="google-keep-count-badge" class="ml-1 text-xs opacity-75">0</span>
+                        </button>
+                        <button onclick="filterNotesBySource('google_drive')" 
+                                class="notes-source-btn px-4 py-2 bg-gray-700 rounded-full text-sm hover:bg-gray-600" data-source="google_drive">
+                            ☁️ Google Drive <span id="gdrive-count-badge" class="ml-1 text-xs opacity-75">0</span>
                         </button>
                     </div>
                     
@@ -894,7 +929,26 @@
                         </div>
                     </div>
                     
-                    <div id="notes-stats" class="grid grid-cols-4 gap-4 mb-6"></div>
+                    <!-- Stats Cards -->
+                    <div id="notes-stats" class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                        <div class="bg-gray-800 rounded-xl p-4 border border-gray-700 text-center">
+                            <div class="text-2xl font-bold text-purple-400" id="total-notes-count">0</div>
+                            <div class="text-sm text-gray-400">Total Notes</div>
+                        </div>
+                        <div class="bg-gray-800 rounded-xl p-4 border border-gray-700 text-center">
+                            <div class="text-2xl font-bold text-yellow-400" id="total-todos-count">0</div>
+                            <div class="text-sm text-gray-400">TODOs Found</div>
+                        </div>
+                        <div class="bg-gray-800 rounded-xl p-4 border border-gray-700 text-center">
+                            <div class="text-2xl font-bold text-green-400" id="sources-active-count">0</div>
+                            <div class="text-sm text-gray-400">Active Sources</div>
+                        </div>
+                        <div class="bg-gray-800 rounded-xl p-4 border border-gray-700 text-center">
+                            <div class="text-2xl font-bold text-blue-400" id="tasks-created-count">0</div>
+                            <div class="text-sm text-gray-400">Tasks Created</div>
+                        </div>
+                    </div>
+                    
                     <div id="notes-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
                 </div>
             </section>
@@ -1313,31 +1367,96 @@
                     <!-- Notes Settings -->
                     <div class="bg-gray-800 rounded-xl border border-gray-700 p-6 mb-6">
                         <h3 class="text-xl font-semibold mb-4">📝 Notes Configuration</h3>
-                        <p class="text-gray-400 text-sm mb-6">Configure Obsidian vault and Google Drive integration</p>
+                        <p class="text-gray-400 text-sm mb-6">Configure note sources: Obsidian, Apple Notes, Google Keep, and Google Drive</p>
                         
-                        <div class="space-y-4">
-                            <div>
-                                <label class="block text-sm font-medium mb-2">Obsidian Vault Path</label>
+                        <div class="space-y-6">
+                            <!-- Obsidian Settings -->
+                            <div class="p-4 bg-gray-750 rounded-lg border border-gray-600">
+                                <div class="flex items-center gap-3 mb-3">
+                                    <span class="text-2xl">📓</span>
+                                    <h4 class="font-semibold">Obsidian</h4>
+                                    <span id="obsidian-status" class="ml-auto px-2 py-1 text-xs rounded bg-gray-600">Not configured</span>
+                                </div>
                                 <input type="text" id="setting-obsidian-path" 
                                        placeholder="/Users/yourname/Documents/Obsidian/MyVault"
                                        class="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent">
                                 <p class="text-xs text-gray-500 mt-1">Full path to your Obsidian vault directory</p>
                             </div>
                             
-                            <div>
-                                <label class="block text-sm font-medium mb-2">Google Drive Folder ID</label>
+                            <!-- Apple Notes Settings (macOS only) -->
+                            <div class="p-4 bg-gray-750 rounded-lg border border-gray-600">
+                                <div class="flex items-center gap-3 mb-3">
+                                    <span class="text-2xl">🍎</span>
+                                    <h4 class="font-semibold">Apple Notes</h4>
+                                    <span class="text-xs text-gray-400">(macOS only)</span>
+                                    <div class="ml-auto flex items-center gap-2">
+                                        <input type="checkbox" id="setting-apple-notes-enabled" checked
+                                               class="w-4 h-4 bg-gray-700 border-gray-600 rounded">
+                                        <label for="setting-apple-notes-enabled" class="text-sm">Enable</label>
+                                    </div>
+                                </div>
+                                <p class="text-xs text-gray-500">Apple Notes will be automatically collected on macOS when enabled. Notes app must be open or have been opened at least once.</p>
+                            </div>
+                            
+                            <!-- Google Keep Settings -->
+                            <div class="p-4 bg-gray-750 rounded-lg border border-gray-600">
+                                <div class="flex items-center gap-3 mb-3">
+                                    <span class="text-2xl">📌</span>
+                                    <h4 class="font-semibold">Google Keep</h4>
+                                    <span id="google-keep-status" class="ml-auto px-2 py-1 text-xs rounded bg-gray-600">Not configured</span>
+                                </div>
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div>
+                                        <label class="block text-sm font-medium mb-2">Google Email</label>
+                                        <input type="email" id="setting-google-keep-email" 
+                                               placeholder="your.email@gmail.com"
+                                               class="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent">
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-medium mb-2">Master Token</label>
+                                        <input type="password" id="setting-google-keep-token" 
+                                               placeholder="Your gkeepapi master token"
+                                               class="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent">
+                                    </div>
+                                </div>
+                                <div class="mt-3">
+                                    <label class="block text-sm font-medium mb-2">Filter by Labels (optional)</label>
+                                    <input type="text" id="setting-google-keep-labels" 
+                                           placeholder="work, projects, ideas"
+                                           class="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent">
+                                    <p class="text-xs text-gray-500 mt-1">Comma-separated list of Keep labels to include. Leave empty for all notes.</p>
+                                </div>
+                                <p class="text-xs text-gray-500 mt-2">To get a master token, run: <code class="bg-gray-700 px-1 rounded">pip install gkeepapi</code> then authenticate once with your credentials.</p>
+                            </div>
+                            
+                            <!-- Google Drive Settings -->
+                            <div class="p-4 bg-gray-750 rounded-lg border border-gray-600">
+                                <div class="flex items-center gap-3 mb-3">
+                                    <span class="text-2xl">☁️</span>
+                                    <h4 class="font-semibold">Google Drive</h4>
+                                    <span id="gdrive-status" class="ml-auto px-2 py-1 text-xs rounded bg-gray-600">Not configured</span>
+                                </div>
                                 <input type="text" id="setting-gdrive-folder" 
                                        placeholder="13tTVGHSMLlavbbLIGtk86Ynv-iCWlbAe"
                                        class="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent">
                                 <p class="text-xs text-gray-500 mt-1">Folder ID from Google Drive URL (after /folders/)</p>
+                                
+                                <!-- Drive Access Button -->
+                                <div class="mt-3 p-3 bg-gray-800 rounded-lg border border-yellow-500/30">
+                                    <p class="text-xs text-yellow-400 mb-2">⚠️ If Drive notes aren't loading, you may need to re-authorize:</p>
+                                    <button onclick="refreshGoogleDriveAccess()" 
+                                            class="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition-all duration-200">
+                                        🔑 Refresh Google Drive Access
+                                    </button>
+                                </div>
                             </div>
                             
+                            <!-- General Settings -->
                             <div class="grid grid-cols-2 gap-4">
                                 <div>
-                                    <label class="block text-sm font-medium mb-2">Notes Limit</label>
+                                    <label class="block text-sm font-medium mb-2">Notes Limit per Source</label>
                                     <input type="number" id="setting-notes-limit" min="1" max="50" value="10"
                                            class="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent">
-                                    <p class="text-xs text-gray-500 mt-1">Number of recent notes to display</p>
                                 </div>
                                 
                                 <div>
@@ -1345,24 +1464,60 @@
                                     <div class="flex items-center gap-2 h-10">
                                         <input type="checkbox" id="setting-auto-create" checked
                                                class="w-4 h-4 bg-gray-700 border-gray-600 rounded">
-                                        <label for="setting-auto-create" class="text-sm">Automatically create tasks from TODOs</label>
+                                        <label for="setting-auto-create" class="text-sm">Auto-create tasks from TODOs</label>
                                     </div>
                                 </div>
                             </div>
                             
-                            <div class="flex gap-3 pt-4">
+                            <div class="flex gap-3 pt-4 border-t border-gray-700">
                                 <button onclick="saveNotesSettings()" 
                                         class="px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-all duration-200 font-medium">
-                                    Save Settings
+                                    💾 Save Settings
                                 </button>
                                 <button onclick="loadNotesSettings()" 
                                         class="px-6 py-3 bg-gray-700 text-white rounded-lg hover:bg-gray-600 transition-all duration-200">
-                                    Reset to Current
+                                    🔄 Reset
                                 </button>
                             </div>
                             
                             <div id="settings-message" class="hidden mt-4 p-3 rounded-lg"></div>
                         </div>
+                    </div>
+                    
+                    <!-- Notes Sync Settings -->
+                    <div class="bg-gray-800 rounded-xl border border-gray-700 p-6 mb-6">
+                        <h3 class="text-xl font-semibold mb-4">🔄 Notes Sync</h3>
+                        <p class="text-gray-400 text-sm mb-6">Sync notes between different platforms</p>
+                        
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                            <div class="p-4 bg-gray-750 rounded-lg border border-gray-600">
+                                <h4 class="font-medium mb-3">Obsidian ↔ Apple Notes</h4>
+                                <p class="text-xs text-gray-500 mb-3">Two-way sync between your Obsidian vault and Apple Notes</p>
+                                <div class="flex gap-2">
+                                    <button onclick="syncNotes('obsidian', 'apple_notes')" 
+                                            class="flex-1 px-3 py-2 bg-gray-700 rounded-lg text-sm hover:bg-gray-600">
+                                        📓→🍎 Push to Apple
+                                    </button>
+                                    <button onclick="syncNotes('apple_notes', 'obsidian')" 
+                                            class="flex-1 px-3 py-2 bg-gray-700 rounded-lg text-sm hover:bg-gray-600">
+                                        🍎→📓 Pull to Obsidian
+                                    </button>
+                                </div>
+                            </div>
+                            
+                            <div class="p-4 bg-gray-750 rounded-lg border border-gray-600">
+                                <h4 class="font-medium mb-3">Google Keep Selective Sync</h4>
+                                <p class="text-xs text-gray-500 mb-3">Choose which Keep notes to sync to Obsidian</p>
+                                <div class="flex gap-2">
+                                    <button onclick="openKeepSyncModal()" 
+                                            class="flex-1 px-3 py-2 bg-gray-700 rounded-lg text-sm hover:bg-gray-600">
+                                        📌 Select Notes to Sync
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div id="sync-message" class="hidden mt-4 p-3 rounded-lg"></div>
                     </div>
                     
                     <!-- Environment Variables Info -->
@@ -1372,8 +1527,11 @@
                         <ul class="text-sm text-gray-400 space-y-1 font-mono">
                             <li>• OBSIDIAN_VAULT_PATH</li>
                             <li>• GOOGLE_DRIVE_NOTES_FOLDER_ID</li>
+                            <li>• INCLUDE_APPLE_NOTES (true/false)</li>
+                            <li>• GOOGLE_KEEP_EMAIL</li>
+                            <li>• GOOGLE_KEEP_TOKEN</li>
+                            <li>• GOOGLE_KEEP_LABELS (comma-separated)</li>
                             <li>• NOTES_LIMIT</li>
-                            <li>• AUTO_CREATE_TASKS</li>
                         </ul>
                         <p class="text-xs text-gray-500 mt-3">Priority: Environment Variables > Database Settings > credentials.yaml</p>
                     </div>
@@ -2212,7 +2370,10 @@ Return ONLY a JSON array. No markdown, no explanation, no code blocks.
 Format: [{"artist": "Artist Name", "title": "Song Title"}, {"artist": "Artist2", "title": "Song2"}]
 Use simple ASCII characters only - no special quotes or unicode.`;
 
-                    // Call the dedicated playlist generation endpoint
+                    // Call the dedicated playlist generation endpoint with timeout
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), 90000); // 90 second timeout
+                    
                     const response = await fetch('/api/ai/generate-playlist', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -2221,8 +2382,11 @@ Use simple ASCII characters only - no special quotes or unicode.`;
                             liked_artists: seedArtists.slice(0, 3),
                             seed_songs: seedSongs.slice(0, 3),
                             max_tracks: maxTracks
-                        })
+                        }),
+                        signal: controller.signal
                     });
+                    
+                    clearTimeout(timeoutId);
                     
                     if (!response.ok) {
                         const errorData = await response.json().catch(() => ({}));
@@ -2278,8 +2442,16 @@ Use simple ASCII characters only - no special quotes or unicode.`;
                     console.log(`✅ Created ${mood} playlist with ${tracks.length} tracks using AI!`);
                     
                 } catch (error) {
-                    console.error('Error creating playlist:', error);
-                    alert(`Failed to create playlist: ${error.message}. Make sure Ollama is running.`);
+                    console.error('Error creating mood playlist:', error);
+                    let errorMsg = error.message || 'Unknown error';
+                    if (error.name === 'AbortError') {
+                        errorMsg = 'Request timed out - AI is taking too long';
+                    } else if (errorMsg.includes('Failed to fetch')) {
+                        errorMsg = 'Network error - check your connection';
+                    } else if (errorMsg.includes('timeout')) {
+                        errorMsg = 'Request timed out - try fewer tracks';
+                    }
+                    alert(`Failed to create playlist: ${errorMsg}`);
                 } finally {
                     if (btn) {
                         btn.textContent = originalText || 'Create & Play';
@@ -2306,7 +2478,10 @@ Use simple ASCII characters only - no special quotes or unicode.`;
                 }
                 
                 try {
-                    // Use the dedicated playlist generation endpoint
+                    // Use the dedicated playlist generation endpoint with timeout
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), 90000); // 90 second timeout
+                    
                     const response = await fetch('/api/ai/generate-playlist', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -2315,8 +2490,11 @@ Use simple ASCII characters only - no special quotes or unicode.`;
                             genres: genres,
                             liked_artists: artists,
                             max_tracks: 20
-                        })
+                        }),
+                        signal: controller.signal
                     });
+                    
+                    clearTimeout(timeoutId);
                     
                     if (!response.ok) {
                         const errorData = await response.json().catch(() => ({}));
@@ -2367,8 +2545,16 @@ Use simple ASCII characters only - no special quotes or unicode.`;
                     console.log(`✅ Created custom playlist with ${tracks.length} tracks!`);
                     
                 } catch (error) {
-                    console.error('Error creating playlist:', error);
-                    alert(`Failed to create playlist: ${error.message}. Make sure Ollama is running.`);
+                    console.error('Error creating custom playlist:', error);
+                    let errorMsg = error.message || 'Unknown error';
+                    if (error.name === 'AbortError') {
+                        errorMsg = 'Request timed out - AI is taking too long';
+                    } else if (errorMsg.includes('Failed to fetch')) {
+                        errorMsg = 'Network error - check your connection';
+                    } else if (errorMsg.includes('timeout')) {
+                        errorMsg = 'Request timed out - try fewer tracks';
+                    }
+                    alert(`Failed to create playlist: ${errorMsg}`);
                 } finally {
                     if (btn) {
                         btn.textContent = originalText || 'Create & Play';
@@ -2941,20 +3127,42 @@ Use simple ASCII characters only - no special quotes or unicode.`;
                     const notesLimit = settings.notes_limit?.value || settings.notes_limit || 10;
                     const autoCreate = settings.auto_create_tasks?.value !== undefined ? settings.auto_create_tasks.value : (settings.auto_create_tasks || false);
                     
+                    // Apple Notes settings
+                    const appleNotesEnabled = settings.apple_notes_enabled?.value !== undefined ? settings.apple_notes_enabled.value : (settings.apple_notes_enabled || false);
+                    
+                    // Google Keep settings
+                    const googleKeepEmail = settings.google_keep_email?.value || settings.google_keep_email || '';
+                    const googleKeepToken = settings.google_keep_token?.value || settings.google_keep_token || '';
+                    const googleKeepLabels = settings.google_keep_labels?.value || settings.google_keep_labels || '';
+                    
                     document.getElementById('setting-obsidian-path').value = obsidianPath;
                     document.getElementById('setting-gdrive-folder').value = gdriveFolderId;
                     document.getElementById('setting-notes-limit').value = notesLimit;
                     document.getElementById('setting-auto-create').checked = autoCreate;
                     
+                    // Set Apple Notes toggle
+                    const appleNotesEl = document.getElementById('setting-apple-notes-enabled');
+                    if (appleNotesEl) appleNotesEl.checked = appleNotesEnabled;
+                    
+                    // Set Google Keep fields
+                    const keepEmailEl = document.getElementById('setting-google-keep-email');
+                    const keepTokenEl = document.getElementById('setting-google-keep-token');
+                    const keepLabelsEl = document.getElementById('setting-google-keep-labels');
+                    if (keepEmailEl) keepEmailEl.value = googleKeepEmail;
+                    if (keepTokenEl) keepTokenEl.value = googleKeepToken;
+                    if (keepLabelsEl) keepLabelsEl.value = googleKeepLabels;
+                    
                     console.log('✓ Loaded notes settings:', {
                         obsidian: obsidianPath,
                         gdrive: gdriveFolderId,
                         limit: notesLimit,
-                        autoCreate: autoCreate
+                        autoCreate: autoCreate,
+                        appleNotes: appleNotesEnabled,
+                        googleKeep: !!googleKeepEmail
                     });
                     
                     // Show notification if paths are configured
-                    if (obsidianPath || gdriveFolderId) {
+                    if (obsidianPath || gdriveFolderId || appleNotesEnabled || googleKeepEmail) {
                         showNotification('✓ Notes settings loaded', 'success');
                     }
                 }
@@ -2964,15 +3172,45 @@ Use simple ASCII characters only - no special quotes or unicode.`;
             }
         }
         
+        async function refreshGoogleDriveAccess() {
+            // Show confirmation
+            if (!confirm('This will redirect you to Google to re-authorize access including Google Drive.\n\nYou may need to grant access to Google Drive in addition to existing permissions.\n\nContinue?')) {
+                return;
+            }
+            
+            try {
+                showNotification('🔄 Redirecting to Google authorization...', 'info');
+                
+                // Delete existing token to force full re-auth
+                await fetch('/api/auth/google/disconnect', { method: 'POST' });
+                
+                // Redirect to Google OAuth with all scopes
+                window.location.href = '/auth/google/connect';
+            } catch (error) {
+                console.error('Error refreshing Google Drive access:', error);
+                showNotification('✗ Failed to start authorization', 'error');
+            }
+        }
+        
         async function saveNotesSettings() {
             const messageEl = document.getElementById('settings-message');
             
             try {
+                // Get Apple Notes and Google Keep settings
+                const appleNotesEl = document.getElementById('setting-apple-notes-enabled');
+                const keepEmailEl = document.getElementById('setting-google-keep-email');
+                const keepTokenEl = document.getElementById('setting-google-keep-token');
+                const keepLabelsEl = document.getElementById('setting-google-keep-labels');
+                
                 const settings = {
                     obsidian_vault_path: document.getElementById('setting-obsidian-path').value.trim(),
                     google_drive_notes_folder_id: document.getElementById('setting-gdrive-folder').value.trim(),
                     notes_limit: parseInt(document.getElementById('setting-notes-limit').value) || 10,
-                    auto_create_tasks: document.getElementById('setting-auto-create').checked
+                    auto_create_tasks: document.getElementById('setting-auto-create').checked,
+                    apple_notes_enabled: appleNotesEl ? appleNotesEl.checked : false,
+                    google_keep_email: keepEmailEl ? keepEmailEl.value.trim() : '',
+                    google_keep_token: keepTokenEl ? keepTokenEl.value.trim() : '',
+                    google_keep_labels: keepLabelsEl ? keepLabelsEl.value.trim() : ''
                 };
                 
                 const response = await fetch('/api/settings/notes', {
@@ -3581,6 +3819,10 @@ ${stackTrace}
     </script>
 
     <script>
+    // Store notes data for filtering
+    let allNotesData = [];
+    let currentNotesFilter = 'all';
+    
     // Notes Scanning Function with UI Feedback
     async function scanForNotes() {
         try {
@@ -3597,7 +3839,7 @@ ${stackTrace}
             if (text) text.textContent = 'Scanning...';
             
             // Show starting notification
-            showNotification('info', '🔍 Scanning Obsidian and Google Drive for notes...', 'notes-notification');
+            showNotification('info', '🔍 Scanning all note sources...', 'notes-notification');
             
             const response = await fetch('/api/notes/scan', {
                 method: 'POST'
@@ -3606,42 +3848,42 @@ ${stackTrace}
             if (response.ok) {
                 const data = await response.json();
                 
-                // Check for authentication error first
+                // Store notes for filtering
+                allNotesData = data.notes || [];
+                
+                // Update count badges
+                const obsidianCount = data.obsidian_count || 0;
+                const gdriveCount = data.gdrive_count || 0;
+                const appleNotesCount = data.apple_notes_count || 0;
+                const googleKeepCount = data.google_keep_count || 0;
+                const todosFound = data.total_todos_found || 0;
+                const suggestionsCreated = data.suggestions_created || 0;
+                
+                // Update badges
+                updateElement('obsidian-count-badge', obsidianCount);
+                updateElement('apple-notes-count-badge', appleNotesCount);
+                updateElement('google-keep-count-badge', googleKeepCount);
+                updateElement('gdrive-count-badge', gdriveCount);
+                
+                // Update stats cards
+                const totalNotes = obsidianCount + gdriveCount + appleNotesCount + googleKeepCount;
+                updateElement('total-notes-count', totalNotes);
+                updateElement('total-todos-count', todosFound);
+                updateElement('tasks-created-count', suggestionsCreated);
+                
+                // Count active sources
+                let activeSources = 0;
+                if (obsidianCount > 0) activeSources++;
+                if (gdriveCount > 0) activeSources++;
+                if (appleNotesCount > 0) activeSources++;
+                if (googleKeepCount > 0) activeSources++;
+                updateElement('sources-active-count', activeSources);
+                
+                // Check for authentication error
                 if (data.gdrive_auth_error) {
                     const authError = data.gdrive_auth_error;
                     const reAuthLink = `<a href="${authError.reauth_url}" class="underline font-bold" target="_blank">Click here to re-authenticate</a>`;
-                    const errorMsg = `🔐 ${authError.message}. ${reAuthLink} to grant Google Drive permissions.`;
-                    
-                    // Show error notification that doesn't auto-hide
-                    const notification = document.getElementById('notes-notification');
-                    const notificationText = document.getElementById('notes-notification-text');
-                    const notificationIcon = document.getElementById('notes-notification-icon');
-                    
-                    if (notification && notificationText) {
-                        notification.className = 'mb-4 p-4 rounded-lg bg-yellow-900 border border-yellow-700';
-                        if (notificationIcon) notificationIcon.innerHTML = '<div class="w-6 h-6 text-yellow-400">⚠️</div>';
-                        notificationText.innerHTML = errorMsg;
-                        notification.classList.remove('hidden');
-                        // Don't auto-hide auth errors
-                    }
-                    
-                    // Continue with partial results if Obsidian worked
-                    if (data.obsidian_count > 0) {
-                        const obsMsg = `ℹ️ Found ${data.obsidian_count} notes from Obsidian.`;
-                        notificationText.innerHTML = errorMsg + '<br>' + obsMsg;
-                    }
-                    
-                    // Restore button and return early
-                    const btn = document.getElementById('scan-notes-btn');
-                    const icon = document.getElementById('scan-notes-icon');
-                    const text = document.getElementById('scan-notes-text');
-                    if (btn) {
-                        btn.disabled = false;
-                        btn.classList.remove('opacity-75', 'cursor-not-allowed');
-                    }
-                    if (icon) icon.innerHTML = '📥';
-                    if (text) text.textContent = 'Scan for New Notes';
-                    return;
+                    showNotification('warning', `🔐 ${authError.message}. ${reAuthLink}`, 'notes-notification', false);
                 }
                 
                 // Update last scan time
@@ -3650,39 +3892,29 @@ ${stackTrace}
                 updateLastNotesScanTime();
                 
                 // Build result message
-                let message = '';
-                const obsidianCount = data.obsidian_count || 0;
-                const gdriveCount = data.gdrive_count || 0;
-                const todosFound = data.total_todos_found || 0;
-                const suggestionsCreated = data.suggestions_created || 0;
-                
                 const sources = [];
-                if (obsidianCount > 0) sources.push(`${obsidianCount} from Obsidian`);
-                if (gdriveCount > 0) sources.push(`${gdriveCount} from Google Drive`);
+                if (obsidianCount > 0) sources.push(`📓 ${obsidianCount} Obsidian`);
+                if (appleNotesCount > 0) sources.push(`🍎 ${appleNotesCount} Apple Notes`);
+                if (googleKeepCount > 0) sources.push(`📌 ${googleKeepCount} Google Keep`);
+                if (gdriveCount > 0) sources.push(`☁️ ${gdriveCount} Google Drive`);
                 
+                let message = '';
                 if (sources.length > 0) {
-                    message = `✅ Found ${obsidianCount + gdriveCount} notes! (${sources.join(', ')})`;
+                    message = `✅ Found ${totalNotes} notes! (${sources.join(', ')})`;
                     if (suggestionsCreated > 0) {
-                        message += ` • Created ${suggestionsCreated} task suggestions from TODOs`;
+                        message += ` • Created ${suggestionsCreated} task suggestions`;
                     }
                 } else {
-                    message = '✓ Scan complete. No new notes found.';
+                    message = '✓ Scan complete. Configure note sources in Settings.';
                 }
                 
-                // Show config warnings
-                if (!data.config_status?.obsidian_configured) {
-                    message += ' ⚠️ Obsidian not configured.';
-                }
-                if (!data.config_status?.gdrive_configured) {
-                    message += ' ⚠️ Google Drive not configured.';
+                if (!data.gdrive_auth_error) {
+                    showNotification('success', message, 'notes-notification');
                 }
                 
-                showNotification('success', message, 'notes-notification');
+                // Render notes
+                renderNotesGrid(allNotesData);
                 
-                // Reload notes section if dataLoader is available
-                if (typeof dataLoader !== 'undefined' && dataLoader.refreshNotes) {
-                    await dataLoader.refreshNotes();
-                }
             } else {
                 const error = await response.json();
                 showNotification('error', '❌ Failed to scan notes: ' + (error.detail || error.error || 'Unknown error'), 'notes-notification');
@@ -3692,7 +3924,7 @@ ${stackTrace}
             btn.disabled = false;
             btn.classList.remove('opacity-75', 'cursor-not-allowed');
             if (icon) icon.innerHTML = '📥';
-            if (text) text.textContent = 'Scan for New Notes';
+            if (text) text.textContent = 'Scan All Sources';
             
         } catch (error) {
             console.error('Error scanning notes:', error);
@@ -3708,8 +3940,147 @@ ${stackTrace}
                 btn.classList.remove('opacity-75', 'cursor-not-allowed');
             }
             if (icon) icon.innerHTML = '📥';
-            if (text) text.textContent = 'Scan for New Notes';
+            if (text) text.textContent = 'Scan All Sources';
         }
+    }
+    
+    function updateElement(id, value) {
+        const el = document.getElementById(id);
+        if (el) el.textContent = value;
+    }
+    
+    // Filter notes by source
+    function filterNotesBySource(source) {
+        currentNotesFilter = source;
+        
+        // Update button states
+        document.querySelectorAll('.notes-source-btn').forEach(btn => {
+            if (btn.dataset.source === source) {
+                btn.classList.remove('bg-gray-700');
+                btn.classList.add('bg-purple-600');
+            } else {
+                btn.classList.remove('bg-purple-600');
+                btn.classList.add('bg-gray-700');
+            }
+        });
+        
+        // Filter and render
+        let filteredNotes = allNotesData;
+        if (source !== 'all') {
+            filteredNotes = allNotesData.filter(note => note.source === source);
+        }
+        
+        renderNotesGrid(filteredNotes);
+    }
+    
+    // Render notes grid
+    function renderNotesGrid(notes) {
+        const grid = document.getElementById('notes-grid');
+        if (!grid) return;
+        
+        if (!notes || notes.length === 0) {
+            grid.innerHTML = `
+                <div class="col-span-full text-center py-12 bg-gray-800 rounded-xl border border-gray-700">
+                    <div class="text-6xl mb-4">📝</div>
+                    <h3 class="text-xl font-semibold mb-2">No Notes Found</h3>
+                    <p class="text-gray-400 mb-4">Click "Scan All Sources" to collect notes from your configured sources.</p>
+                    <a href="#" onclick="showSection('settings'); return false;" 
+                       class="text-purple-400 hover:underline">Configure note sources →</a>
+                </div>
+            `;
+            return;
+        }
+        
+        const sourceIcons = {
+            'obsidian': '📓',
+            'apple_notes': '🍎',
+            'google_keep': '📌',
+            'google_drive': '☁️'
+        };
+        
+        const sourceColors = {
+            'obsidian': 'border-purple-500',
+            'apple_notes': 'border-blue-500',
+            'google_keep': 'border-yellow-500',
+            'google_drive': 'border-green-500'
+        };
+        
+        grid.innerHTML = notes.map(note => {
+            const icon = sourceIcons[note.source] || '📝';
+            const borderColor = sourceColors[note.source] || 'border-gray-600';
+            const preview = note.preview || note.content?.substring(0, 150) || '';
+            const hasTodos = note.has_todos ? `<span class="text-yellow-400 text-xs">✓ ${note.todos?.length || 0} TODOs</span>` : '';
+            
+            return `
+                <div class="bg-gray-800 rounded-xl border-l-4 ${borderColor} border border-gray-700 p-4 hover:bg-gray-750 transition-colors cursor-pointer"
+                     onclick="openNoteModal(${JSON.stringify(note).replace(/"/g, '&quot;')})">
+                    <div class="flex items-start gap-3 mb-2">
+                        <span class="text-2xl">${icon}</span>
+                        <div class="flex-1 min-w-0">
+                            <h4 class="font-semibold text-white truncate">${escapeHtml(note.title)}</h4>
+                            <div class="flex items-center gap-2 text-xs text-gray-500 mt-1">
+                                <span>${note.source.replace('_', ' ')}</span>
+                                ${note.folder ? `<span>• ${escapeHtml(note.folder)}</span>` : ''}
+                                ${hasTodos}
+                            </div>
+                        </div>
+                    </div>
+                    <p class="text-sm text-gray-400 line-clamp-3">${escapeHtml(preview)}</p>
+                    ${note.tags && note.tags.length > 0 ? `
+                        <div class="flex gap-1 mt-2 flex-wrap">
+                            ${note.tags.slice(0, 4).map(tag => `<span class="px-2 py-0.5 text-xs bg-gray-700 rounded">#${escapeHtml(tag)}</span>`).join('')}
+                        </div>
+                    ` : ''}
+                </div>
+            `;
+        }).join('');
+    }
+    
+    // Open note in modal
+    function openNoteModal(note) {
+        // For now, open external link if available
+        if (note.url) {
+            window.open(note.url, '_blank');
+        } else if (note.path) {
+            // Could open in Obsidian via obsidian:// protocol
+            alert(`Note: ${note.title}\n\nPath: ${note.path}\n\nContent preview:\n${note.preview || note.content?.substring(0, 500) || 'No preview available'}`);
+        } else {
+            alert(`Note: ${note.title}\n\nContent preview:\n${note.preview || note.content?.substring(0, 500) || 'No preview available'}`);
+        }
+    }
+    
+    // Sync notes between sources
+    async function syncNotes(source, target) {
+        showNotification('info', `🔄 Syncing notes from ${source} to ${target}...`, 'sync-message');
+        
+        try {
+            const response = await fetch('/api/notes/sync', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ source, target })
+            });
+            
+            if (response.ok) {
+                const data = await response.json();
+                showNotification('success', `✅ ${data.message || 'Sync completed'}`, 'sync-message');
+            } else {
+                showNotification('error', '❌ Sync failed', 'sync-message');
+            }
+        } catch (error) {
+            showNotification('error', `❌ Sync error: ${error.message}`, 'sync-message');
+        }
+    }
+    
+    // Open Google Keep selective sync modal
+    function openKeepSyncModal() {
+        alert('Google Keep Selective Sync\n\nThis feature will allow you to select specific notes to sync from Google Keep to Obsidian.\n\nComing soon!');
+    }
+    
+    function escapeHtml(text) {
+        if (!text) return '';
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
     }
     
     // Update last notes scan time display
@@ -5015,6 +5386,56 @@ ${stackTrace}
                 console.log('Notifications enabled');
             }
         });
+    }
+    </script>
+    
+    <!-- News Article Modal -->
+    <div id="news-article-modal" class="fixed inset-0 bg-black bg-opacity-80 hidden z-50 overflow-y-auto" onclick="closeNewsArticleModal(event)">
+        <div class="min-h-screen flex items-start justify-center p-4 py-8">
+            <div class="bg-gray-800 border border-gray-700 rounded-xl max-w-4xl w-full modal-content" onclick="event.stopPropagation()">
+                <!-- Modal Header -->
+                <div class="sticky top-0 bg-gray-800 border-b border-gray-700 p-4 flex items-center justify-between rounded-t-xl z-10">
+                    <div class="flex items-center gap-3">
+                        <span id="news-modal-category" class="px-2 py-1 text-xs bg-purple-600 rounded"></span>
+                        <span id="news-modal-source" class="text-sm text-gray-400"></span>
+                    </div>
+                    <button onclick="closeNewsArticleModal()" class="text-gray-400 hover:text-white text-2xl font-bold">&times;</button>
+                </div>
+                
+                <!-- Modal Image -->
+                <div id="news-modal-image-container" class="hidden">
+                    <img id="news-modal-image" src="" alt="" class="w-full h-64 object-cover">
+                </div>
+                
+                <!-- Modal Content -->
+                <div class="p-6">
+                    <h2 id="news-modal-title" class="text-2xl font-bold text-white mb-3"></h2>
+                    <p id="news-modal-date" class="text-sm text-gray-500 mb-4"></p>
+                    
+                    <div id="news-modal-content" class="prose prose-invert max-w-none text-gray-300 leading-relaxed mb-6"></div>
+                    
+                    <!-- Action Buttons -->
+                    <div class="flex gap-3 items-center pt-4 border-t border-gray-700">
+                        <a id="news-modal-link" href="#" target="_blank" 
+                           class="px-6 py-3 bg-blue-600 hover:bg-blue-700 rounded-lg text-white font-medium transition-colors flex items-center gap-2">
+                            <span>Read Full Article</span>
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path>
+                            </svg>
+                        </a>
+                        
+                        <div class="flex gap-1 ml-auto" id="news-modal-feedback"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+    function closeNewsArticleModal(event) {
+        if (event && event.target !== event.currentTarget) return;
+        document.getElementById('news-article-modal').classList.add('hidden');
+        document.body.style.overflow = '';
     }
     </script>
 </body>

@@ -353,6 +353,24 @@ class DatabaseManager:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_user_feedback_item ON user_feedback(item_type, item_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_user_feedback_timestamp ON user_feedback(feedback_timestamp)")
             
+            # Scanned sources tracking table - prevents rescanning same items
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS scanned_sources (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    source_type TEXT NOT NULL,
+                    source_id TEXT NOT NULL,
+                    item_hash TEXT,
+                    scanned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    tasks_found INTEGER DEFAULT 0,
+                    tasks_created INTEGER DEFAULT 0,
+                    dismissed INTEGER DEFAULT 0,
+                    UNIQUE(source_type, source_id)
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_scanned_sources_type ON scanned_sources(source_type)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_scanned_sources_id ON scanned_sources(source_type, source_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_scanned_sources_dismissed ON scanned_sources(dismissed)")
+            
             # AI Assistant tables
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS ai_providers (
@@ -1289,6 +1307,143 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Error updating todo source_id: {e}")
             return False
+
+    # Scanned sources tracking methods
+    
+    def mark_source_scanned(self, source_type: str, source_id: str, 
+                           tasks_found: int = 0, tasks_created: int = 0,
+                           item_hash: str = None, dismissed: bool = False) -> bool:
+        """Mark a source item (email, calendar event, note) as scanned.
+        
+        This prevents re-scanning the same item and re-creating deleted tasks.
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT INTO scanned_sources 
+                    (source_type, source_id, item_hash, tasks_found, tasks_created, dismissed)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(source_type, source_id) DO UPDATE SET
+                        scanned_at = CURRENT_TIMESTAMP,
+                        tasks_found = excluded.tasks_found,
+                        tasks_created = excluded.tasks_created,
+                        item_hash = COALESCE(excluded.item_hash, scanned_sources.item_hash),
+                        dismissed = CASE 
+                            WHEN excluded.dismissed = 1 THEN 1 
+                            ELSE scanned_sources.dismissed 
+                        END
+                """, (source_type, source_id, item_hash, tasks_found, tasks_created, 1 if dismissed else 0))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error marking source as scanned: {e}")
+            return False
+    
+    def is_source_scanned(self, source_type: str, source_id: str, check_dismissed: bool = True) -> bool:
+        """Check if a source has already been scanned.
+        
+        Args:
+            source_type: Type of source (email, calendar, obsidian, etc.)
+            source_id: Unique ID of the source item
+            check_dismissed: If True, also returns True for dismissed items
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                if check_dismissed:
+                    cursor.execute(
+                        "SELECT 1 FROM scanned_sources WHERE source_type = ? AND source_id = ?",
+                        (source_type, source_id)
+                    )
+                else:
+                    cursor.execute(
+                        "SELECT 1 FROM scanned_sources WHERE source_type = ? AND source_id = ? AND dismissed = 0",
+                        (source_type, source_id)
+                    )
+                
+                return cursor.fetchone() is not None
+        except Exception as e:
+            logger.error(f"Error checking if source is scanned: {e}")
+            return False
+    
+    def mark_source_dismissed(self, source_type: str, source_id: str) -> bool:
+        """Mark a source as dismissed (user deleted the task from it).
+        
+        This ensures the source won't generate new tasks unless force re-scanned.
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT INTO scanned_sources (source_type, source_id, dismissed, tasks_created)
+                    VALUES (?, ?, 1, 0)
+                    ON CONFLICT(source_type, source_id) DO UPDATE SET
+                        dismissed = 1,
+                        scanned_at = CURRENT_TIMESTAMP
+                """, (source_type, source_id))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error marking source as dismissed: {e}")
+            return False
+    
+    def get_scanned_sources(self, source_type: str = None, include_dismissed: bool = True) -> List[Dict[str, Any]]:
+        """Get list of scanned sources."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                query = "SELECT * FROM scanned_sources WHERE 1=1"
+                params = []
+                
+                if source_type:
+                    query += " AND source_type = ?"
+                    params.append(source_type)
+                
+                if not include_dismissed:
+                    query += " AND dismissed = 0"
+                
+                query += " ORDER BY scanned_at DESC"
+                cursor.execute(query, params)
+                
+                rows = cursor.fetchall()
+                return [dict(row) for row in rows]
+        except Exception as e:
+            logger.error(f"Error getting scanned sources: {e}")
+            return []
+    
+    def clear_scanned_sources(self, source_type: str = None, clear_dismissed: bool = False) -> int:
+        """Clear scanned sources to allow re-scanning.
+        
+        Args:
+            source_type: If provided, only clear this type
+            clear_dismissed: If True, also clear dismissed items (allows re-creating deleted tasks)
+        
+        Returns:
+            Number of records cleared
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                query = "DELETE FROM scanned_sources WHERE 1=1"
+                params = []
+                
+                if source_type:
+                    query += " AND source_type = ?"
+                    params.append(source_type)
+                
+                if not clear_dismissed:
+                    query += " AND dismissed = 0"
+                
+                cursor.execute(query, params)
+                conn.commit()
+                return cursor.rowcount
+        except Exception as e:
+            logger.error(f"Error clearing scanned sources: {e}")
+            return 0
 
     # Suggested todos methods
     

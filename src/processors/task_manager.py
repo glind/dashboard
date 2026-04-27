@@ -135,6 +135,32 @@ class TaskManager:
                 'error': str(e)
             }
     
+    def get_tasks_by_source(self, source: str, source_id: str, include_deleted: bool = True) -> List[Dict[str, Any]]:
+        """Get tasks by source type and source ID.
+        
+        By default includes deleted tasks to prevent re-creation of dismissed tasks.
+        """
+        try:
+            all_tasks = self.db.get_todos_by_source(source=source)
+            # Filter by source_id
+            matching = [t for t in all_tasks if t.get('source_id') == source_id]
+            
+            if not include_deleted:
+                matching = [t for t in matching if t.get('status') != 'deleted']
+            
+            return matching
+        except Exception as e:
+            logger.error(f"Error getting tasks by source: {e}")
+            return []
+    
+    def is_source_already_processed(self, source: str, source_id: str) -> bool:
+        """Check if a source has already been scanned and had a task created/dismissed.
+        
+        Returns True if we should skip this source (task already exists or was deleted).
+        """
+        existing = self.get_tasks_by_source(source, source_id, include_deleted=True)
+        return len(existing) > 0
+    
     def delete_task(self, task_id: str) -> Dict[str, Any]:
         """Delete a task from the database."""
         try:

@@ -627,7 +627,7 @@ async def get_calendar():
 
 @app.post("/api/notes/scan")
 async def scan_notes():
-    """Scan for new notes from Obsidian and Google Drive with detailed feedback."""
+    """Scan for new notes from all configured sources with detailed feedback."""
     try:
         from collectors.notes_collector import collect_all_notes
         from database import get_credentials, DatabaseManager
@@ -652,20 +652,44 @@ async def scan_notes():
             notes_config.get('google_drive_folder_id')
         )
         
+        # Apple Notes setting (macOS only)
+        include_apple_notes = (
+            os.getenv('INCLUDE_APPLE_NOTES', 'true').lower() == 'true' and
+            db.get_setting('include_apple_notes', 'true').lower() != 'false'
+        )
+        
+        # Google Keep settings
+        google_keep_email = (
+            os.getenv('GOOGLE_KEEP_EMAIL') or
+            db.get_setting('google_keep_email') or
+            notes_config.get('google_keep_email')
+        )
+        google_keep_token = (
+            os.getenv('GOOGLE_KEEP_TOKEN') or
+            db.get_setting('google_keep_token') or
+            notes_config.get('google_keep_token')
+        )
+        google_keep_labels_str = (
+            os.getenv('GOOGLE_KEEP_LABELS') or
+            db.get_setting('google_keep_labels') or
+            notes_config.get('google_keep_labels', '')
+        )
+        google_keep_labels = [l.strip() for l in google_keep_labels_str.split(',') if l.strip()] if google_keep_labels_str else None
+        
         # Other settings
         limit = int(os.getenv('NOTES_LIMIT', db.get_setting('notes_limit', notes_config.get('notes_limit', 10))))
         
-        logger.info(f"Scanning notes - Obsidian: {obsidian_path}, GDrive: {gdrive_folder_id}")
-        
-        # DEBUG: Log what we're working with
-        logger.info(f"DEBUG - obsidian_path: {repr(obsidian_path)}")
-        logger.info(f"DEBUG - gdrive_folder_id: {repr(gdrive_folder_id)}")
+        logger.info(f"Scanning notes - Obsidian: {obsidian_path}, GDrive: {gdrive_folder_id}, Apple Notes: {include_apple_notes}, Google Keep: {bool(google_keep_email)}")
         
         # Collect notes from all sources
         try:
             result = collect_all_notes(
                 obsidian_path=obsidian_path,
                 gdrive_folder_id=gdrive_folder_id,
+                include_apple_notes=include_apple_notes,
+                google_keep_email=google_keep_email,
+                google_keep_token=google_keep_token,
+                google_keep_labels=google_keep_labels,
                 limit=limit
             )
         except Exception as collect_err:
@@ -717,6 +741,8 @@ async def scan_notes():
             "notes": result['notes'],
             "obsidian_count": result['obsidian_count'],
             "gdrive_count": result['gdrive_count'],
+            "apple_notes_count": result.get('apple_notes_count', 0),
+            "google_keep_count": result.get('google_keep_count', 0),
             "total_todos_found": result['total_todos_found'],
             "suggestions_created": suggestions_created,
             "config_status": {
@@ -724,9 +750,13 @@ async def scan_notes():
                 'obsidian_path': obsidian_path or 'Not configured',
                 'gdrive_configured': bool(gdrive_folder_id and gdrive_folder_id.strip()),
                 'gdrive_folder_id': gdrive_folder_id or 'Not configured',
+                'apple_notes_enabled': include_apple_notes,
+                'google_keep_configured': bool(google_keep_email and google_keep_token),
                 'notes_by_source': {
                     'obsidian': result['obsidian_count'],
-                    'google_drive': result['gdrive_count']
+                    'google_drive': result['gdrive_count'],
+                    'apple_notes': result.get('apple_notes_count', 0),
+                    'google_keep': result.get('google_keep_count', 0)
                 }
             }
         }
@@ -745,8 +775,123 @@ async def scan_notes():
             "notes": [],
             "obsidian_count": 0,
             "gdrive_count": 0,
+            "apple_notes_count": 0,
+            "google_keep_count": 0,
             "total_todos_found": 0,
             "suggestions_created": 0
+        }
+
+
+@app.post("/api/notes/sync")
+async def sync_notes(request: Request):
+    """Sync notes between Apple Notes and Obsidian."""
+    try:
+        from collectors.notes_collector import AppleNotesCollector, ObsidianNotesCollector, sync_notes_between_sources
+        from database import DatabaseManager
+        
+        body = await request.json()
+        source = body.get('source', 'apple_notes')  # Source to sync from
+        target = body.get('target', 'obsidian')  # Target to sync to
+        note_ids = body.get('note_ids', [])  # Specific notes to sync (empty = all recent)
+        
+        db = DatabaseManager()
+        
+        # Get Obsidian path
+        obsidian_path = db.get_setting('obsidian_vault_path')
+        if not obsidian_path:
+            return {
+                "success": False,
+                "error": "Obsidian vault path not configured. Please configure it in Settings."
+            }
+        
+        synced_notes = []
+        errors = []
+        
+        if source == 'apple_notes' and target == 'obsidian':
+            # Sync from Apple Notes to Obsidian
+            apple_collector = AppleNotesCollector()
+            obsidian_collector = ObsidianNotesCollector(obsidian_path)
+            
+            # Get Apple Notes
+            apple_notes = apple_collector.collect()
+            
+            if note_ids:
+                # Filter to specific notes
+                apple_notes = [n for n in apple_notes if n.get('id') in note_ids]
+            
+            # Create sync folder in Obsidian
+            sync_folder = os.path.join(obsidian_path, "Apple Notes Sync")
+            os.makedirs(sync_folder, exist_ok=True)
+            
+            for note in apple_notes:
+                try:
+                    # Create markdown file
+                    safe_title = "".join(c for c in note['title'] if c.isalnum() or c in (' ', '-', '_')).strip()
+                    if not safe_title:
+                        safe_title = f"Note_{note.get('id', 'unknown')}"
+                    
+                    file_path = os.path.join(sync_folder, f"{safe_title}.md")
+                    
+                    # Build markdown content
+                    content_lines = [
+                        f"# {note['title']}",
+                        "",
+                        f"**Source:** Apple Notes",
+                        f"**Synced:** {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+                        f"**Original Folder:** {note.get('folder', 'Notes')}",
+                        "",
+                        "---",
+                        "",
+                        note.get('content', note.get('preview', ''))
+                    ]
+                    
+                    # Add TODOs if present
+                    if note.get('todos'):
+                        content_lines.extend([
+                            "",
+                            "## Tasks Found",
+                            ""
+                        ])
+                        for todo in note['todos']:
+                            content_lines.append(f"- [ ] {todo}")
+                    
+                    content = "\n".join(content_lines)
+                    
+                    with open(file_path, 'w', encoding='utf-8') as f:
+                        f.write(content)
+                    
+                    synced_notes.append({
+                        'title': note['title'],
+                        'source': 'apple_notes',
+                        'target_path': file_path
+                    })
+                    
+                except Exception as e:
+                    errors.append({
+                        'note': note.get('title', 'Unknown'),
+                        'error': str(e)
+                    })
+        
+        elif source == 'obsidian' and target == 'apple_notes':
+            # Sync from Obsidian to Apple Notes
+            return {
+                "success": False,
+                "error": "Syncing from Obsidian to Apple Notes is not yet supported. Apple Notes doesn't have a public API for creating notes programmatically."
+            }
+        
+        return {
+            "success": True,
+            "synced": len(synced_notes),
+            "notes": synced_notes,
+            "errors": errors if errors else None,
+            "message": f"Synced {len(synced_notes)} notes from {source} to {target}"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error syncing notes: {e}")
+        return {
+            "success": False,
+            "error": str(e)
         }
 
 
@@ -923,6 +1068,47 @@ async def get_notes_settings():
                 'source': 'env' if os.getenv('AUTO_CREATE_TASKS') else
                          'database' if db.get_setting('auto_create_tasks') is not None else
                          'config' if notes_config.get('auto_create_tasks') is not None else 'default'
+            },
+            # Apple Notes settings
+            'apple_notes_enabled': {
+                'value': os.getenv('APPLE_NOTES_ENABLED', str(db.get_setting('apple_notes_enabled', notes_config.get('apple_notes_enabled', False)))).lower() in ('true', '1', 'yes'),
+                'source': 'env' if os.getenv('APPLE_NOTES_ENABLED') else
+                         'database' if db.get_setting('apple_notes_enabled') is not None else
+                         'config' if notes_config.get('apple_notes_enabled') is not None else 'default'
+            },
+            # Google Keep settings
+            'google_keep_email': {
+                'value': (
+                    os.getenv('GOOGLE_KEEP_EMAIL') or
+                    db.get_setting('google_keep_email') or
+                    notes_config.get('google_keep_email') or
+                    ''
+                ),
+                'source': 'env' if os.getenv('GOOGLE_KEEP_EMAIL') else
+                         'database' if db.get_setting('google_keep_email') else
+                         'config' if notes_config.get('google_keep_email') else 'default'
+            },
+            'google_keep_token': {
+                'value': (
+                    os.getenv('GOOGLE_KEEP_TOKEN') or
+                    db.get_setting('google_keep_token') or
+                    notes_config.get('google_keep_token') or
+                    ''
+                ),
+                'source': 'env' if os.getenv('GOOGLE_KEEP_TOKEN') else
+                         'database' if db.get_setting('google_keep_token') else
+                         'config' if notes_config.get('google_keep_token') else 'default'
+            },
+            'google_keep_labels': {
+                'value': (
+                    os.getenv('GOOGLE_KEEP_LABELS') or
+                    db.get_setting('google_keep_labels') or
+                    notes_config.get('google_keep_labels') or
+                    ''
+                ),
+                'source': 'env' if os.getenv('GOOGLE_KEEP_LABELS') else
+                         'database' if db.get_setting('google_keep_labels') else
+                         'config' if notes_config.get('google_keep_labels') else 'default'
             }
         }
         
@@ -958,6 +1144,24 @@ async def update_notes_settings(settings: Dict[str, Any]):
         if 'auto_create_tasks' in settings:
             db.save_setting('auto_create_tasks', bool(settings['auto_create_tasks']))
             updated.append('auto_create_tasks')
+        
+        # Apple Notes settings
+        if 'apple_notes_enabled' in settings:
+            db.save_setting('apple_notes_enabled', bool(settings['apple_notes_enabled']))
+            updated.append('apple_notes_enabled')
+        
+        # Google Keep settings
+        if 'google_keep_email' in settings:
+            db.save_setting('google_keep_email', settings['google_keep_email'])
+            updated.append('google_keep_email')
+        
+        if 'google_keep_token' in settings:
+            db.save_setting('google_keep_token', settings['google_keep_token'])
+            updated.append('google_keep_token')
+        
+        if 'google_keep_labels' in settings:
+            db.save_setting('google_keep_labels', settings['google_keep_labels'])
+            updated.append('google_keep_labels')
         
         logger.info(f"Updated notes settings: {updated}")
         
@@ -1601,6 +1805,62 @@ async def health_check():
     return {"status": "healthy", "timestamp": datetime.now().isoformat()}
 
 
+# Scanned sources management APIs
+
+@app.get("/api/scanned-sources")
+async def get_scanned_sources(source_type: str = None, include_dismissed: bool = True):
+    """Get list of scanned sources to see what has been processed."""
+    try:
+        sources = db.get_scanned_sources(source_type=source_type, include_dismissed=include_dismissed)
+        
+        # Group by source type for summary
+        summary = {}
+        for src in sources:
+            stype = src.get('source_type', 'unknown')
+            if stype not in summary:
+                summary[stype] = {'total': 0, 'dismissed': 0, 'tasks_created': 0}
+            summary[stype]['total'] += 1
+            if src.get('dismissed'):
+                summary[stype]['dismissed'] += 1
+            summary[stype]['tasks_created'] += src.get('tasks_created', 0)
+        
+        return {
+            "success": True,
+            "sources": sources,
+            "summary": summary,
+            "total_count": len(sources)
+        }
+    except Exception as e:
+        logger.error(f"Error getting scanned sources: {e}")
+        return {"error": str(e), "success": False}
+
+
+@app.post("/api/scanned-sources/clear")
+async def clear_scanned_sources(request: Request):
+    """Clear scanned sources to allow re-scanning.
+    
+    Options:
+    - source_type: Only clear specific type (email, calendar, obsidian, etc.)
+    - clear_dismissed: If true, also clear dismissed items (allows recreating deleted tasks)
+    """
+    try:
+        data = await request.json()
+        source_type = data.get('source_type')
+        clear_dismissed = data.get('clear_dismissed', False)
+        
+        count = db.clear_scanned_sources(source_type=source_type, clear_dismissed=clear_dismissed)
+        
+        return {
+            "success": True,
+            "cleared_count": count,
+            "source_type": source_type or "all",
+            "cleared_dismissed": clear_dismissed
+        }
+    except Exception as e:
+        logger.error(f"Error clearing scanned sources: {e}")
+        return {"error": str(e), "success": False}
+
+
 @app.get("/api/ticktick")
 async def get_ticktick():
     """Get TickTick tasks"""
@@ -1698,7 +1958,10 @@ async def sync_email_todos_to_ticktick():
 
 @app.post("/api/email/scan-for-tasks")
 async def scan_emails_for_tasks(request: Request):
-    """Scan historical emails for tasks using strict AI filtering."""
+    """Scan historical emails for tasks using strict AI filtering.
+    
+    Tracks scanned sources to avoid re-processing emails and respects deleted tasks.
+    """
     try:
         if not COLLECTORS_AVAILABLE:
             raise HTTPException(status_code=503, detail="Email collectors not available")
@@ -1708,6 +1971,7 @@ async def scan_emails_for_tasks(request: Request):
         start_date_str = body.get('start_date')
         end_date_str = body.get('end_date')
         max_emails = body.get('max_emails', 100)
+        force_rescan = body.get('force_rescan', False)  # Force rescan previously scanned emails
         
         # Parse dates
         start_date = datetime.fromisoformat(start_date_str) if start_date_str else datetime.now() - timedelta(days=30)
@@ -1734,6 +1998,7 @@ async def scan_emails_for_tasks(request: Request):
         tasks_created = 0
         tasks_skipped = 0
         emails_skipped = 0
+        already_scanned = 0
         
         # Analyze each email for tasks
         for email in emails:
@@ -1745,22 +2010,32 @@ async def scan_emails_for_tasks(request: Request):
                 received_date = email.get('received_date', '')
                 risk_score = email.get('risk_score', 0)  # Get risk score from email data
                 
+                # Check if email was already scanned (unless force_rescan is True)
+                if not force_rescan and db.is_source_scanned('email', email_id):
+                    already_scanned += 1
+                    continue
+                
+                # Check if task already exists or was deleted (avoid duplicates and re-creation)
+                existing_tasks = task_manager.get_tasks_by_source('email', email_id, include_deleted=True)
+                if existing_tasks:
+                    logger.info(f"Task already exists/deleted for email: {subject[:50]}")
+                    tasks_skipped += 1
+                    # Mark as scanned to prevent future checks
+                    db.mark_source_scanned('email', email_id, tasks_found=0, tasks_created=0)
+                    continue
+                
                 # Use AI analyzer with strict filtering and risk scoring
                 todos = await email_analyzer.analyze_email_for_todos(subject, body, sender, risk_score)
                 
                 if not todos:
                     emails_skipped += 1
+                    # Mark as scanned with no tasks found
+                    db.mark_source_scanned('email', email_id, tasks_found=0, tasks_created=0)
                     continue
                 
                 # Create tasks for each todo found
+                email_tasks_created = 0
                 for todo in todos:
-                    # Check if task already exists (avoid duplicates)
-                    existing_tasks = task_manager.get_tasks_by_source('email', email_id)
-                    if existing_tasks:
-                        logger.info(f"Task already exists for email: {subject[:50]}")
-                        tasks_skipped += 1
-                        continue
-                    
                     # Create task
                     task_data = {
                         'title': todo.get('task'),
@@ -1776,7 +2051,11 @@ async def scan_emails_for_tasks(request: Request):
                     
                     task_manager.create_task(task_data)
                     tasks_created += 1
+                    email_tasks_created += 1
                     logger.info(f"Created task from email: {subject[:50]}")
+                
+                # Mark source as scanned with tasks created count
+                db.mark_source_scanned('email', email_id, tasks_found=len(todos), tasks_created=email_tasks_created)
                     
             except Exception as e:
                 logger.error(f"Error processing email {email.get('id', 'unknown')}: {e}")
@@ -1785,6 +2064,7 @@ async def scan_emails_for_tasks(request: Request):
         return {
             "success": True,
             "emails_scanned": len(emails),
+            "already_scanned": already_scanned,
             "tasks_created": tasks_created,
             "tasks_skipped": tasks_skipped,
             "emails_skipped": emails_skipped,
@@ -2605,7 +2885,7 @@ async def clear_all_tasks():
 
 @app.delete("/api/tasks/{task_id}")
 async def delete_task(task_id: str):
-    """Delete a task."""
+    """Delete a task and mark its source as dismissed to prevent recreation."""
     try:
         if not TASK_MANAGER_AVAILABLE:
             return {"error": "Task Manager not available", "success": False}
@@ -2615,8 +2895,20 @@ async def delete_task(task_id: str):
         else:
             settings = Settings()
             task_manager = TaskManager(settings)
-            
+        
+        # Get task info before deleting to mark source as dismissed
+        all_tasks = task_manager.get_all_tasks(include_completed=True, include_deleted=True)
+        task_to_delete = next((t for t in all_tasks if t.get('id') == task_id), None)
+        
         result = task_manager.delete_task(task_id)
+        
+        # If deletion succeeded, mark the source as dismissed
+        if result.get('success') and task_to_delete:
+            source = task_to_delete.get('source', '')
+            source_id = task_to_delete.get('source_id', '')
+            if source and source_id:
+                db.mark_source_dismissed(source, source_id)
+                logger.info(f"Marked source as dismissed: {source}/{source_id}")
         
         return result
         

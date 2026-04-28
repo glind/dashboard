@@ -137,6 +137,9 @@ class NotesSettings(BaseSettings):
     
     class Config:
         env_prefix = "NOTES_"
+
+
+class MicrosoftSettings(BaseSettings):
     """Microsoft Office 365 configuration."""
     client_id: Optional[str] = Field(default=None, description="Microsoft OAuth client ID")
     client_secret: Optional[str] = Field(default=None, description="Microsoft OAuth client secret")
@@ -156,23 +159,6 @@ class ProtonSettings(BaseSettings):
     
     class Config:
         env_prefix = "PROTON_"
-
-
-class GoogleDriveNotesSettings(BaseSettings):
-    """Google Drive notes configuration."""
-    enabled: bool = Field(default=False, description="Enable Google Drive notes integration")
-    meeting_notes_folder_id: Optional[str] = Field(default=None, description="Google Drive folder ID for meeting notes")
-    credentials_file: Optional[str] = Field(default=None, description="Path to Google credentials JSON")
-
-
-class NotesSettings(BaseSettings):
-    """Notes and knowledge management configuration."""
-    obsidian: ObsidianSettings = Field(default_factory=ObsidianSettings)
-    google_drive: GoogleDriveNotesSettings = Field(default_factory=GoogleDriveNotesSettings)
-    auto_create_tasks: bool = Field(default=True, description="Automatically create tasks from notes TODOs")
-    
-    class Config:
-        env_prefix = "NOTES_"
 
 
 class DashboardSettings(BaseSettings):

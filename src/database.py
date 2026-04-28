@@ -176,6 +176,7 @@ class DatabaseManager:
                     title TEXT NOT NULL,
                     url TEXT NOT NULL,
                     snippet TEXT,
+                    image_url TEXT,
                     source TEXT,
                     published_date TIMESTAMP,
                     topics TEXT,
@@ -383,6 +384,13 @@ class DatabaseManager:
             except sqlite3.OperationalError:
                 logger.info("Adding is_read column to news_articles table")
                 cursor.execute("ALTER TABLE news_articles ADD COLUMN is_read INTEGER DEFAULT 0")
+
+            # Migration: Add image_url column to news_articles if it doesn't exist
+            try:
+                cursor.execute("SELECT image_url FROM news_articles LIMIT 1")
+            except sqlite3.OperationalError:
+                logger.info("Adding image_url column to news_articles table")
+                cursor.execute("ALTER TABLE news_articles ADD COLUMN image_url TEXT")
             
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_news_articles_read ON news_articles(is_read)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_music_content_liked ON music_content(is_liked)")
@@ -2017,13 +2025,14 @@ class DatabaseManager:
                 cursor = conn.cursor()
                 cursor.execute("""
                     INSERT OR REPLACE INTO news_articles 
-                    (id, title, url, snippet, source, published_date, topics, relevance_score, user_feedback, is_read)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT is_read FROM news_articles WHERE id = ?), 0))
+                    (id, title, url, snippet, image_url, source, published_date, topics, relevance_score, user_feedback, is_read)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT is_read FROM news_articles WHERE id = ?), 0))
                 """, (
                     article_data.get('id'),
                     article_data.get('title'),
                     article_data.get('url'),
                     article_data.get('snippet'),
+                    article_data.get('image_url'),
                     article_data.get('source'),
                     article_data.get('published_date'),
                     json.dumps(article_data.get('topics', [])),
@@ -2057,7 +2066,7 @@ class DatabaseManager:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
-                    SELECT id, title, url, snippet, source, published_date, topics, relevance_score, is_liked, is_read
+                    SELECT id, title, url, snippet, image_url, source, published_date, topics, relevance_score, is_liked, is_read
                     FROM news_articles
                     WHERE is_read = 0
                     ORDER BY published_date DESC, relevance_score DESC

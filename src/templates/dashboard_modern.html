@@ -114,7 +114,7 @@
         
         /* Music Player Styles */
         .service-card {
-            transition: all 0.2s ease;
+            transition: transform 0.2s ease, border-color 0.2s ease;
         }
         
         .service-card:hover {
@@ -270,7 +270,7 @@
             background: rgb(31 41 55);
             border-radius: 20px;
             cursor: pointer;
-            transition: all 0.2s;
+            transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
             font-size: 0.9em;
             color: rgb(209 213 219);
         }
@@ -295,7 +295,7 @@
             border-radius: 8px;
             margin-bottom: 10px;
             background: rgb(31 41 55);
-            transition: all 0.2s;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
         }
         .message-item:hover {
             box-shadow: 0 4px 8px rgba(0,0,0,0.1);
@@ -518,7 +518,43 @@
         .ai-message-content .prose p:last-child {
             margin-bottom: 0;
         }
+
+        .dashboard-card,
+        .service-card,
+        .message-item,
+        .news-accordion-content {
+            contain: layout paint;
+        }
     </style>
+
+    <script>
+    (() => {
+        const resizeObserverPattern = /ResizeObserver loop completed with undelivered notifications|ResizeObserver loop limit exceeded/i;
+
+        window.addEventListener('error', (event) => {
+            if (resizeObserverPattern.test(String(event.message || ''))) {
+                event.stopImmediatePropagation();
+            }
+        }, true);
+
+        window.addEventListener('unhandledrejection', (event) => {
+            const reason = event.reason;
+            const msg = typeof reason === 'string' ? reason : String((reason && reason.message) || reason || '');
+            if (resizeObserverPattern.test(msg)) {
+                event.preventDefault();
+            }
+        });
+
+        const originalConsoleError = console.error;
+        console.error = (...args) => {
+            const hasResizeObserverLoopWarning = args.some((arg) => resizeObserverPattern.test(String(arg || '')));
+            if (hasResizeObserverLoopWarning) {
+                return;
+            }
+            originalConsoleError.apply(console, args);
+        };
+    })();
+    </script>
 </head>
 <body class="h-full bg-gray-900 text-gray-100 overflow-hidden">
     
@@ -1196,7 +1232,7 @@
                                     <div class="flex gap-2">
                                         <input type="text" id="setting-ollama-pull-model" placeholder="e.g., llama3.2:3b, mistral, codellama" 
                                                class="flex-1 px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
-                                        <button onclick="pullOllamaModel()" class="px-4 py-2 bg-green-600 hover:bg-green-500 rounded-lg transition-colors">
+                                        <button onclick="pullOllamaModel(event)" class="px-4 py-2 bg-green-600 hover:bg-green-500 rounded-lg transition-colors">
                                             Pull Model
                                         </button>
                                     </div>
@@ -2075,12 +2111,8 @@
     <div id="modal-container"></div>
     
     <!-- Scripts -->
-<<<<<<< HEAD
-    <script src="/static/dashboard.js?v=17"></script>
-=======
-    <script src="/static/dashboard.js?v=6"></script>
->>>>>>> 451f96d (stage changes)
-    <script src="/static/leads_modern.js?v=5"></script>
+    <script src="/static/dashboard.js?v=22"></script>
+    <script src="/static/leads_modern.js?v=6"></script>
     <script src="/static/trust_layer_ui.js?v=1"></script>
     
     <script>
@@ -2963,6 +2995,24 @@ Use simple ASCII characters only - no special quotes or unicode.`;
         let dashboardInitialized = false;
         let initRetries = 0;
         const MAX_INIT_RETRIES = 20; // Max retries over ~10 seconds
+
+        function showInitWarningBanner(message) {
+            let banner = document.getElementById('dashboard-init-warning');
+            if (!banner) {
+                banner = document.createElement('div');
+                banner.id = 'dashboard-init-warning';
+                banner.className = 'fixed top-3 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-lg bg-yellow-900 border border-yellow-700 text-yellow-100 text-sm shadow-lg';
+                document.body.appendChild(banner);
+            }
+            banner.textContent = message;
+        }
+
+        function clearInitWarningBanner() {
+            const banner = document.getElementById('dashboard-init-warning');
+            if (banner) {
+                banner.remove();
+            }
+        }
         
         function initializeDashboard() {
             // Prevent multiple initialization attempts
@@ -2980,8 +3030,11 @@ Use simple ASCII characters only - no special quotes or unicode.`;
                 if (initRetries >= MAX_INIT_RETRIES) {
                     console.error('❌ Failed to initialize dashboard: dataLoader not available after multiple retries');
                     console.error('dataLoader should be created by dashboard.js');
-                    // Show user-friendly error
-                    alert('Dashboard failed to load. Please refresh the page.');
+
+                    // Non-blocking fallback: keep retrying in background instead of showing modal alerts
+                    showInitWarningBanner('Dashboard is still loading... retrying automatically.');
+                    initRetries = 0;
+                    setTimeout(initializeDashboard, 2000);
                     return;
                 }
                 
@@ -2992,6 +3045,7 @@ Use simple ASCII characters only - no special quotes or unicode.`;
             
             console.log('✅ dataLoader is ready');
             dashboardInitialized = true;
+            clearInitWarningBanner();
             
             // Call init if it exists, but don't wait for it
             if (typeof window.dataLoader.init === 'function') {
@@ -3044,11 +3098,13 @@ Use simple ASCII characters only - no special quotes or unicode.`;
                     break;
                 case 'emails':
                     console.log('  → Loading emails...');
-                    if (dataLoader.loadEmails) dataLoader.loadEmails();
+                    if (dataLoader.refreshSectionData) dataLoader.refreshSectionData('emails');
+                    else if (dataLoader.loadEmails) dataLoader.loadEmails();
                     break;
                 case 'todos':
                     console.log('  → Loading todos...');
-                    if (dataLoader.loadTodos) dataLoader.loadTodos();
+                    if (dataLoader.refreshSectionData) dataLoader.refreshSectionData('todos');
+                    else if (dataLoader.loadTodos) dataLoader.loadTodos();
                     // Also load suggested todos
                     if (typeof loadSuggestedTodos === 'function') {
                         loadSuggestedTodos();
@@ -3056,16 +3112,20 @@ Use simple ASCII characters only - no special quotes or unicode.`;
                     break;
                 case 'calendar':
                     console.log('  → Loading calendar...');
-                    if (dataLoader.loadCalendar) dataLoader.loadCalendar();
+                    if (dataLoader.refreshSectionData) dataLoader.refreshSectionData('calendar');
+                    else if (dataLoader.loadCalendar) dataLoader.loadCalendar();
                     break;
                 case 'github':
-                    if (dataLoader.loadGithub) dataLoader.loadGithub();
+                    if (dataLoader.refreshSectionData) dataLoader.refreshSectionData('github');
+                    else if (dataLoader.loadGithub) dataLoader.loadGithub();
                     break;
                 case 'news':
-                    if (dataLoader.loadNews) dataLoader.loadNews();
+                    if (dataLoader.refreshSectionData) dataLoader.refreshSectionData('news');
+                    else if (dataLoader.loadNews) dataLoader.loadNews();
                     break;
                 case 'weather':
-                    if (dataLoader.loadWeather) dataLoader.loadWeather();
+                    if (dataLoader.refreshSectionData) dataLoader.refreshSectionData('weather');
+                    else if (dataLoader.loadWeather) dataLoader.loadWeather();
                     break;
                 case 'notes':
                     if (dataLoader.loadNotes) dataLoader.loadNotes();
@@ -3154,13 +3214,12 @@ Use simple ASCII characters only - no special quotes or unicode.`;
                     }
                     break;
                 case 'overview':
-                    // Load all dashboard data for overview
-                    if (dataLoader.loadAllData) dataLoader.loadAllData();
-                    if (dataLoader.loadTodos) dataLoader.loadTodos();
-                    if (dataLoader.loadCalendar) dataLoader.loadCalendar();
-                    if (dataLoader.loadEmails) dataLoader.loadEmails();
-                    if (dataLoader.loadGithub) dataLoader.loadGithub();
-                    if (dataLoader.loadNews) dataLoader.loadNews();
+                    // Refresh overview sources in background when cached data exists.
+                    if (dataLoader.refreshSectionData) {
+                        ['todos', 'calendar', 'emails', 'github', 'news', 'weather'].forEach(name => dataLoader.refreshSectionData(name));
+                    } else {
+                        if (dataLoader.loadAllData) dataLoader.loadAllData();
+                    }
                     break;
                 case 'vanity':
                 case 'ai':
@@ -3284,23 +3343,24 @@ Use simple ASCII characters only - no special quotes or unicode.`;
         async function testOllamaConnection() {
             const host = normalizeOllamaHost(document.getElementById('setting-ollama-host').value);
             const port = document.getElementById('setting-ollama-port').value.trim();
+            const portNumber = parseInt(port || '11434', 10);
             
             try {
                 const response = await fetch(`/api/settings/ai/test`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ provider: 'ollama', host, port: parseInt(port || '11434', 10) })
+                    body: JSON.stringify({ provider: 'ollama', host, port: portNumber })
                 });
                 const data = await response.json();
 
                 if (data.success) {
-                    showNotification(`✓ Ollama connected at ${host}:${port}`, 'success');
+                    showNotification('success', `✓ Ollama connected at ${host}:${portNumber}`, 'ai-settings-message');
                     await refreshOllamaModels();
                 } else {
-                    showNotification(`✗ ${data.error || 'Ollama connection failed'}`, 'error');
+                    showNotification('error', `✗ ${data.error || 'Ollama connection failed'}`, 'ai-settings-message');
                 }
             } catch (error) {
-                showNotification(`✗ Cannot connect to Ollama at ${host}:${port}`, 'error');
+                showNotification('error', `✗ Cannot connect to Ollama at ${host}:${portNumber}`, 'ai-settings-message');
             }
         }
         
@@ -3338,50 +3398,56 @@ Use simple ASCII characters only - no special quotes or unicode.`;
                         select.value = currentValue;
                     }
                     
-                    showNotification(`✓ Found ${data.models.length} models on ${data.server}`, 'success');
+                    showNotification('success', `✓ Found ${data.models.length} models on ${data.server}`, 'ai-settings-message');
                 } else {
-                    showNotification(data.error || 'No models found. Try pulling a model first.', 'warning');
+                    showNotification('warning', data.error || 'No models found. Try pulling a model first.', 'ai-settings-message');
                 }
             } catch (error) {
                 console.error('Error refreshing Ollama models:', error);
-                showNotification('✗ Failed to fetch models: ' + error.message, 'error');
+                showNotification('error', '✗ Failed to fetch models: ' + error.message, 'ai-settings-message');
             }
         }
         
-        async function pullOllamaModel() {
+        async function pullOllamaModel(evt) {
             const modelName = document.getElementById('setting-ollama-pull-model').value.trim();
+            const host = normalizeOllamaHost(document.getElementById('setting-ollama-host')?.value);
+            const port = parseInt(document.getElementById('setting-ollama-port')?.value || '11434', 10);
             
             if (!modelName) {
-                showNotification('Please enter a model name', 'warning');
+                showNotification('warning', 'Please enter a model name', 'ai-settings-message');
                 return;
             }
             
-            const button = event.target;
+            const button = evt?.target;
+            if (!button) {
+                showNotification('error', 'Unable to start pull. Please click the Pull Model button again.', 'ai-settings-message');
+                return;
+            }
             button.disabled = true;
             button.textContent = 'Pulling...';
             
             try {
-                showNotification(`⏳ Pulling model ${modelName}... This may take several minutes.`, 'info');
+                showNotification('info', `⏳ Pulling model ${modelName}... This may take several minutes.`, 'ai-settings-message');
                 
                 const response = await fetch('/api/ollama/pull', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ model: modelName })
+                    body: JSON.stringify({ model: modelName, host, port })
                 });
                 
                 const data = await response.json();
                 
                 if (data.success) {
-                    showNotification(data.message, 'success');
+                    showNotification('success', data.message, 'ai-settings-message');
                     // Clear input and refresh model list
                     document.getElementById('setting-ollama-pull-model').value = '';
                     await refreshOllamaModels();
                 } else {
-                    showNotification('✗ ' + data.error, 'error');
+                    showNotification('error', '✗ ' + data.error, 'ai-settings-message');
                 }
             } catch (error) {
                 console.error('Error pulling Ollama model:', error);
-                showNotification('✗ Failed to pull model: ' + error.message, 'error');
+                showNotification('error', '✗ Failed to pull model: ' + error.message, 'ai-settings-message');
             } finally {
                 button.disabled = false;
                 button.textContent = 'Pull Model';
@@ -3391,8 +3457,7 @@ Use simple ASCII characters only - no special quotes or unicode.`;
         async function testOpenaiConnection() {
             const apiKey = document.getElementById('setting-openai-api-key').value.trim();
             if (!apiKey || apiKey.startsWith('••••')) {
-                showNotification('Please enter your OpenAI API key', 'error');
-                return;
+                // Allow backend to use saved key if input is masked/empty
             }
             
             try {
@@ -3405,20 +3470,19 @@ Use simple ASCII characters only - no special quotes or unicode.`;
                 const data = await response.json();
 
                 if (data.success) {
-                    showNotification('✓ OpenAI API connection successful!', 'success');
+                    showNotification('success', '✓ OpenAI API connection successful!', 'ai-settings-message');
                 } else {
-                    showNotification(`✗ ${data.error || 'Invalid OpenAI API key'}`, 'error');
+                    showNotification('error', `✗ ${data.error || 'Invalid OpenAI API key'}`, 'ai-settings-message');
                 }
             } catch (error) {
-                showNotification(`✗ Error connecting to OpenAI: ${error.message}`, 'error');
+                showNotification('error', `✗ Error connecting to OpenAI: ${error.message}`, 'ai-settings-message');
             }
         }
         
         async function testGeminiConnection() {
             const apiKey = document.getElementById('setting-gemini-api-key').value.trim();
             if (!apiKey || apiKey.startsWith('••••')) {
-                showNotification('Please enter your Gemini API key', 'error');
-                return;
+                // Allow backend to use saved key if input is masked/empty
             }
             
             try {
@@ -3431,12 +3495,12 @@ Use simple ASCII characters only - no special quotes or unicode.`;
                 const data = await response.json();
 
                 if (data.success) {
-                    showNotification('✓ Google Gemini API connection successful!', 'success');
+                    showNotification('success', '✓ Google Gemini API connection successful!', 'ai-settings-message');
                 } else {
-                    showNotification(`✗ ${data.error || 'Invalid Gemini API key'}`, 'error');
+                    showNotification('error', `✗ ${data.error || 'Invalid Gemini API key'}`, 'ai-settings-message');
                 }
             } catch (error) {
-                showNotification(`✗ Error connecting to Gemini: ${error.message}`, 'error');
+                showNotification('error', `✗ Error connecting to Gemini: ${error.message}`, 'ai-settings-message');
             }
         }
         
@@ -3897,8 +3961,14 @@ ${stackTrace}
             }
         }
         
+        const resizeObserverPattern = /ResizeObserver loop completed with undelivered notifications|ResizeObserver loop limit exceeded/i;
+
         // Global error handlers
         window.addEventListener('error', (event) => {
+            if (resizeObserverPattern.test(String(event.message || event.error?.message || ''))) {
+                event.stopImmediatePropagation();
+                return;
+            }
             console.error('Global error caught:', event.error);
             showDetailedError({
                 type: 'JavaScript Error',
@@ -3909,6 +3979,11 @@ ${stackTrace}
         });
         
         window.addEventListener('unhandledrejection', (event) => {
+            const reasonMsg = String(event.reason?.message || event.reason || '');
+            if (resizeObserverPattern.test(reasonMsg)) {
+                event.preventDefault();
+                return;
+            }
             console.error('Unhandled promise rejection:', event.reason);
             showDetailedError({
                 type: 'Unhandled Promise Rejection',
@@ -3921,6 +3996,10 @@ ${stackTrace}
         // Override console.error to catch API errors
         const originalConsoleError = console.error;
         console.error = function(...args) {
+            const hasResizeObserverLoopWarning = args.some((arg) => resizeObserverPattern.test(String(arg || '')));
+            if (hasResizeObserverLoopWarning) {
+                return;
+            }
             originalConsoleError.apply(console, args);
             
             // Check if this is an API error (contains error object with detail)

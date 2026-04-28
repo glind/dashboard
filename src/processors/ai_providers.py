@@ -83,9 +83,8 @@ class OllamaProvider(AIProvider):
             if not messages or messages[0].get('role') != 'system':
                 messages.insert(0, {'role': 'system', 'content': self.system_prompt})
             
-            # Set timeout for LLM requests (these can take a while, especially for model loading)
-            # 600 seconds = 10 minutes to allow for cold start model loading
-            timeout = aiohttp.ClientTimeout(total=600, connect=30)
+            # Keep AI chat responsive: allow model load, but avoid multi-minute UI stalls.
+            timeout = aiohttp.ClientTimeout(total=75, connect=15, sock_read=60)
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 # Try /api/chat first (newer Ollama versions)
                 payload = {
@@ -95,10 +94,60 @@ class OllamaProvider(AIProvider):
                 }
                 
                 async with session.post(f"{self.base_url}/api/chat", json=payload) as response:
-                    # If we get a 404, fall back to /api/generate (older Ollama versions)
-                    if response.status == 404:
-                        logger.info("Ollama /api/chat not found, falling back to /api/generate")
-                        pass  # Will fall through to generate fallback below
+                    # Some Ollama setups reject /api/chat (400/404). Fall back to /api/generate.
+                    if response.status in (400, 404):
+                        error_text = (await response.text()).strip()
+                        fallback_model = None
+
+                        # Model load failures are common on larger models; retry with a lighter available model.
+                        if response.status == 400:
+                            lowered_error = error_text.lower()
+                            if any(marker in lowered_error for marker in [
+                                'model failed to load',
+                                'model not found',
+                                'not found',
+                                'unknown model',
+                                'invalid model'
+                            ]):
+                                fallback_model = await self._select_fallback_model(session)
+                                if fallback_model and fallback_model != self.model_name:
+                                    logger.warning(
+                                        "Retrying Ollama chat with fallback model %s (original %s)",
+                                        fallback_model,
+                                        self.model_name
+                                    )
+                                    retry_payload = {
+                                        'model': fallback_model,
+                                        'messages': messages,
+                                        'stream': stream
+                                    }
+                                    async with session.post(f"{self.base_url}/api/chat", json=retry_payload) as retry_response:
+                                        if retry_response.status == 200:
+                                            self.model_name = fallback_model
+                                            if stream:
+                                                content = ""
+                                                async for line in retry_response.content:
+                                                    if line:
+                                                        try:
+                                                            line_text = line.decode().strip()
+                                                            if line_text:
+                                                                data = json.loads(line_text)
+                                                                if 'message' in data and 'content' in data['message']:
+                                                                    content += data['message']['content']
+                                                        except json.JSONDecodeError:
+                                                            continue
+                                                return content
+                                            retry_text = await retry_response.text()
+                                            retry_data = json.loads(retry_text)
+                                            if 'message' in retry_data and 'content' in retry_data['message']:
+                                                return retry_data['message']['content']
+
+                        logger.info(
+                            "Ollama /api/chat returned %s, falling back to /api/generate. body=%s",
+                            response.status,
+                            (error_text[:240] if error_text else '')
+                        )
+                        return await self._chat_with_generate(session, messages, stream, model_name=fallback_model)
                     elif response.status == 200:
                         if stream:
                             # Handle streaming response
@@ -126,10 +175,6 @@ class OllamaProvider(AIProvider):
                         error_msg = f"Ollama API error: {response.status}"
                         logger.error(error_msg)
                         return f"Error: {error_msg}"
-                
-                # Fallback to /api/generate if /api/chat returned 404
-                if response.status == 404:
-                    return await self._chat_with_generate(session, messages, stream)
                         
         except asyncio.TimeoutError:
             logger.error(f"Timeout communicating with Ollama at {self.base_url}")
@@ -141,7 +186,7 @@ class OllamaProvider(AIProvider):
             logger.error(f"Error communicating with Ollama: {type(e).__name__}: {e}")
             return f"Error: Could not connect to Ollama server"
     
-    async def _chat_with_generate(self, session: aiohttp.ClientSession, messages: List[Dict[str, str]], stream: bool = False) -> str:
+    async def _chat_with_generate(self, session: aiohttp.ClientSession, messages: List[Dict[str, str]], stream: bool = False, model_name: Optional[str] = None) -> str:
         """Fallback method using /api/generate for older Ollama versions."""
         try:
             # Convert chat messages to a single prompt for /api/generate
@@ -163,7 +208,7 @@ class OllamaProvider(AIProvider):
                 prompt = "\n\n".join(prompt_parts) + "\n\nAssistant:"
             
             payload = {
-                'model': self.model_name,
+                'model': model_name or self.model_name,
                 'prompt': prompt,
                 'stream': stream
             }
@@ -197,6 +242,27 @@ class OllamaProvider(AIProvider):
         except Exception as e:
             logger.error(f"Error using Ollama generate API: {e}")
             return f"Error: {str(e)}"
+
+    async def _select_fallback_model(self, session: aiohttp.ClientSession) -> Optional[str]:
+        """Pick a fallback model from /api/tags when current model is invalid/unavailable."""
+        try:
+            async with session.get(f"{self.base_url}/api/tags") as response:
+                if response.status != 200:
+                    return None
+                data = await response.json()
+                names = [m.get('name') for m in data.get('models', []) if m.get('name')]
+                if not names:
+                    return None
+
+                preferred_order = ['qwen2.5:7b', 'gemma3:latest', 'gemma4:latest']
+                for preferred in preferred_order:
+                    if preferred in names:
+                        return preferred
+
+                return names[0]
+        except Exception as e:
+            logger.warning(f"Could not select fallback Ollama model: {e}")
+            return None
     
     async def train(self, training_data: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Train Ollama model with new data."""

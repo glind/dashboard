@@ -1001,11 +1001,21 @@ async def get_notes():
             notes_config.get('google_drive_folder_id')  # credentials.yaml
         )
         
+        # Apple Notes setting (macOS only)
+        include_apple_notes = (
+            os.getenv('INCLUDE_APPLE_NOTES', 'true').lower() == 'true' and
+            db.get_setting('include_apple_notes', 'true').lower() != 'false'
+        )
+        apple_notes_timeout = int(os.getenv('APPLE_NOTES_TIMEOUT', db.get_setting('apple_notes_timeout', 10)))
+
         # Other settings
         limit = int(os.getenv('NOTES_LIMIT', db.get_setting('notes_limit', notes_config.get('notes_limit', 10))))
         auto_create = os.getenv('AUTO_CREATE_TASKS', str(db.get_setting('auto_create_tasks', notes_config.get('auto_create_tasks', True)))).lower() in ('true', '1', 'yes')
         
-        logger.info(f"Collecting notes - Obsidian: {obsidian_path}, GDrive: {gdrive_folder_id}")
+        logger.info(
+            f"Collecting notes - Obsidian: {obsidian_path}, GDrive: {gdrive_folder_id}, "
+            f"Apple Notes: {include_apple_notes}"
+        )
         
         # TEMPORARY DEBUG
         logger.info(f"DEBUG - obsidian_path type: {type(obsidian_path)}, value: {repr(obsidian_path)}")
@@ -1018,21 +1028,38 @@ async def get_notes():
                     collect_all_notes,
                     obsidian_path=obsidian_path,
                     gdrive_folder_id=gdrive_folder_id,
+                    include_apple_notes=include_apple_notes,
+                    apple_notes_timeout=apple_notes_timeout,
                     limit=limit
                 ),
-                timeout=20.0
+                timeout=12.0
             )
         except asyncio.TimeoutError:
-            logger.error("Notes collection timed out after 20 seconds")
-            return {
-                "success": False,
-                "error": "Notes loading timed out. Please verify Google/Obsidian connectivity and try again.",
-                "notes": [],
-                "obsidian_count": 0,
-                "gdrive_count": 0,
-                "total_todos_found": 0,
-                "tasks_created": 0
-            }
+            logger.error("Notes collection timed out after 12 seconds")
+
+            # Fallback: return local notes quickly when remote providers are slow.
+            try:
+                logger.warning("Retrying notes collection with remote providers disabled")
+                result = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        collect_all_notes,
+                        obsidian_path=obsidian_path,
+                        gdrive_folder_id=None,
+                        include_apple_notes=False,
+                        limit=limit
+                    ),
+                    timeout=6.0
+                )
+            except Exception:
+                return {
+                    "success": False,
+                    "error": "Notes loading timed out. Please verify Google/Obsidian connectivity and try again.",
+                    "notes": [],
+                    "obsidian_count": 0,
+                    "gdrive_count": 0,
+                    "total_todos_found": 0,
+                    "tasks_created": 0
+                }
         except Exception as collect_err:
             logger.error(f"Error in collect_all_notes: {collect_err}")
             logger.error(f"Traceback: {traceback.format_exc()}")
@@ -1573,11 +1600,13 @@ async def get_ollama_models(host: Optional[str] = None, port: Optional[int] = No
 async def test_ai_provider_connection(payload: Dict[str, Any]):
     """Test AI provider connectivity without saving settings."""
     try:
+        from database import DatabaseManager
+        dbm = DatabaseManager()
         provider = (payload.get('provider') or '').strip().lower()
 
         if provider == 'ollama':
-            host = normalize_ollama_host(payload.get('host') or 'localhost')
-            port = int(payload.get('port') or 11434)
+            host = normalize_ollama_host(payload.get('host') or dbm.get_setting('ollama_host', 'localhost'))
+            port = int(payload.get('port') or dbm.get_setting('ollama_port', 11434))
             url = f"http://{host}:{port}/api/tags"
             async with httpx.AsyncClient(timeout=6.0) as client:
                 response = await client.get(url)
@@ -1591,6 +1620,8 @@ async def test_ai_provider_connection(payload: Dict[str, Any]):
 
         if provider == 'openai':
             api_key = (payload.get('api_key') or '').strip()
+            if not api_key or api_key.startswith('••••'):
+                api_key = str(dbm.get_setting('openai_api_key', '') or '').strip()
             model = (payload.get('model') or 'gpt-4o-mini').strip()
             if not api_key:
                 return {"success": False, "provider": "openai", "error": "API key is required"}
@@ -1604,6 +1635,8 @@ async def test_ai_provider_connection(payload: Dict[str, Any]):
 
         if provider == 'gemini':
             api_key = (payload.get('api_key') or '').strip()
+            if not api_key or api_key.startswith('••••'):
+                api_key = str(dbm.get_setting('gemini_api_key', '') or '').strip()
             model = (payload.get('model') or 'gemini-2.0-flash').strip()
             if not api_key:
                 return {"success": False, "provider": "gemini", "error": "API key is required"}
@@ -1626,14 +1659,14 @@ async def pull_ollama_model(request: Dict[str, Any]):
     """Pull a new Ollama model."""
     try:
         from database import DatabaseManager
-        db = DatabaseManager()
+        dbm = DatabaseManager()
         
         model_name = request.get('model')
         if not model_name:
             return {"success": False, "error": "Model name is required"}
         
-        host = normalize_ollama_host(db.get_setting('ollama_host', 'localhost'))
-        port = db.get_setting('ollama_port', 11434)
+        host = normalize_ollama_host(request.get('host') or dbm.get_setting('ollama_host', 'localhost'))
+        port = int(request.get('port') or dbm.get_setting('ollama_port', 11434))
         url = f"http://{host}:{port}/api/pull"
         
         async with httpx.AsyncClient(timeout=300.0) as client:
@@ -1642,12 +1675,12 @@ async def pull_ollama_model(request: Dict[str, Any]):
             if response.status_code == 200:
                 return {
                     "success": True,
-                    "message": f"Successfully pulled model: {model_name}"
+                    "message": f"Successfully pulled model: {model_name} on {host}:{port}"
                 }
             else:
                 return {
                     "success": False,
-                    "error": f"Failed to pull model: {response.text}"
+                    "error": f"Failed to pull model on {host}:{port}: {response.text}"
                 }
                 
     except Exception as e:
@@ -3831,14 +3864,14 @@ async def get_news(filter: str = "all", include_read: bool = False):
             # Build query based on whether we want to include read articles
             if include_read:
                 cursor.execute('''
-                    SELECT id, title, url, snippet, source, published_date, topics, relevance_score, is_read
+                    SELECT id, title, url, snippet, image_url, source, published_date, topics, relevance_score, is_read
                     FROM news_articles 
                     ORDER BY is_read ASC, published_date DESC 
                     LIMIT 50
                 ''')
             else:
                 cursor.execute('''
-                    SELECT id, title, url, snippet, source, published_date, topics, relevance_score, is_read
+                    SELECT id, title, url, snippet, image_url, source, published_date, topics, relevance_score, is_read
                     FROM news_articles 
                     WHERE is_read = 0
                     ORDER BY published_date DESC 
@@ -3875,6 +3908,7 @@ async def get_news(filter: str = "all", include_read: bool = False):
                 "source": article['source'],
                 "url": article['url'],
                 "description": article['snippet'] or "No description available",
+                "image_url": article['image_url'] if 'image_url' in article.keys() else None,
                 "published_at": article['published_date'],
                 "category": ', '.join(topics),
                 "relevance_score": article['relevance_score'] or 0.0,
@@ -6212,6 +6246,12 @@ async def chat_with_ai(request: Request):
         stream = data.get('stream', False)
         speak_response = data.get('speak', False)  # New: option to speak response
         assistant_id = data.get('assistant_id')
+        include_context = data.get('include_context', True)
+
+        # Accept truthy/falsey string values from UI callers.
+        if isinstance(include_context, str):
+            include_context = include_context.strip().lower() not in ('0', 'false', 'no', 'off', '')
+        include_context = bool(include_context)
         
         if not message:
             return {"error": "Message is required"}
@@ -6230,7 +6270,7 @@ async def chat_with_ai(request: Request):
         result = await ai_service.chat(
             message=message,
             conversation_id=conversation_id,
-            include_context=True,
+            include_context=include_context,
             assistant_id=assistant_id
         )
         

@@ -60,9 +60,14 @@ class AIService:
             # Try to get from ai_manager first
             provider = ai_manager.get_provider()
             if provider:
-                self._provider = provider
-                logger.info(f"Using existing AI provider: {provider.name}")
-                return
+                provider_type = getattr(provider, 'provider_type', '')
+                provider_model = str(getattr(provider, 'model_name', '') or '').strip()
+                if provider_type == 'ollama' and not provider_model:
+                    logger.warning("Ignoring stale Ollama provider with empty model_name; reinitializing from settings")
+                else:
+                    self._provider = provider
+                    logger.info(f"Using existing AI provider: {provider.name}")
+                    return
             
             # Otherwise create from settings
             ai_provider_type = self.db.get_setting('ai_provider', 'ollama')
@@ -71,6 +76,8 @@ class AIService:
                 ollama_host = self.db.get_setting('ollama_host', 'localhost')
                 ollama_port = self.db.get_setting('ollama_port', 11434)
                 ollama_model = self.db.get_setting('ollama_model', 'deepseek-r1:latest')
+                if not str(ollama_model or '').strip():
+                    ollama_model = 'qwen2.5:7b'
 
                 base_urls = [
                     f'http://{ollama_host}:{ollama_port}',
@@ -103,6 +110,8 @@ class AIService:
                 }
 
                 self._provider = create_provider('ollama', 'configured-ollama', config)
+                ai_manager.providers.clear()
+                ai_manager.default_provider = None
                 ai_manager.register_provider(self._provider, is_default=True)
                 logger.info(f"Initialized Ollama provider: {resolved_base_url} with {ollama_model}")
                 
@@ -994,6 +1003,88 @@ class AIService:
         """Generate hash of context for change detection."""
         return hashlib.sha256(context.encode('utf-8')).hexdigest()
 
+    def _compact_context_for_ollama(self, context: str, user_message: str = "", max_chars: int = 4500) -> str:
+        """Trim full context into a compact, high-signal payload for local Ollama models."""
+        if not context:
+            return ""
+
+        section_limits = {
+            '=== USER PROFILE ===': 6,
+            '=== CURRENT CONTEXT ===': 4,
+            '=== ACTIVE TASKS ===': 12,
+            "=== TODAY'S SCHEDULE ===": 10,
+            '=== RECENT EMAILS ===': 8,
+            '=== GITHUB ACTIVITY ===': 6,
+            '=== RECENT NEWS ===': 5,
+            '=== WEATHER ===': 3,
+            '=== RECENT NOTES & MEETINGS ===': 6,
+            '=== USER PREFERENCES (Learned from Likes) ===': 6,
+            '=== COMMUNICATION PREFERENCES ===': 3,
+        }
+
+        drop_sections = {
+            '=== LONG-TERM MEMORY ===',
+            '=== SHORT-TERM MEMORY ===',
+            '=== YOUR CAPABILITIES ===',
+            '=== DATABASE PROFILE PROMPTS ===',
+        }
+
+        section_order = [
+            '=== USER PROFILE ===',
+            '=== CURRENT CONTEXT ===',
+            '=== ACTIVE TASKS ===',
+            "=== TODAY'S SCHEDULE ===",
+            '=== RECENT EMAILS ===',
+            '=== GITHUB ACTIVITY ===',
+            '=== RECENT NOTES & MEETINGS ===',
+            '=== WEATHER ===',
+            '=== USER PREFERENCES (Learned from Likes) ===',
+            '=== COMMUNICATION PREFERENCES ===',
+            '=== RECENT NEWS ===',
+        ]
+
+        parsed: Dict[str, List[str]] = {}
+        current_header = None
+        for raw_line in (context or '').splitlines():
+            line = raw_line.rstrip()
+            if line.startswith('=== ') and line.endswith(' ==='):
+                current_header = line
+                parsed.setdefault(current_header, [])
+                continue
+            if current_header:
+                if line.strip():
+                    parsed[current_header].append(line.strip())
+
+        compact_parts: List[str] = []
+        for header in section_order:
+            if header in drop_sections:
+                continue
+            lines = parsed.get(header, [])
+            if not lines:
+                continue
+
+            # Notes previews are expensive and low-value for first-pass chat responses.
+            if header == '=== RECENT NOTES & MEETINGS ===':
+                lines = [line for line in lines if not line.startswith('Preview:') and 'Preview:' not in line]
+
+            limit = section_limits.get(header, 5)
+            selected = lines[:limit]
+            if selected:
+                compact_parts.append(header)
+                compact_parts.extend(selected)
+                compact_parts.append('')
+
+        if user_message:
+            compact_parts.append('=== CURRENT USER REQUEST ===')
+            compact_parts.append(self._truncate_for_memory(user_message, 220))
+            compact_parts.append('')
+
+        compact = "\n".join(compact_parts).strip()
+        if len(compact) > max_chars:
+            compact = compact[:max_chars].rstrip()
+
+        return compact
+
     def _looks_like_privacy_refusal(self, response_text: str) -> bool:
         """Detect model replies that incorrectly deny access to user-authorized app data."""
         if not response_text:
@@ -1249,16 +1340,38 @@ class AIService:
                     'error': 'No AI provider configured',
                     'success': False
                 }
+
+            is_ollama = getattr(provider, 'provider_type', '') == 'ollama'
             
             # Build context
             context = await self.build_context(message) if include_context else ""
             assistant_profile = self._get_active_assistant_profile(assistant_id)
+
+            prompt_context = context
+            if context and is_ollama:
+                configured_limit = self.db.get_setting('ollama_context_chars', 4500)
+                try:
+                    max_context_chars = int(configured_limit)
+                except Exception:
+                    max_context_chars = 4500
+                max_context_chars = max(1800, min(max_context_chars, 9000))
+
+                prompt_context = self._compact_context_for_ollama(
+                    context,
+                    user_message=message,
+                    max_chars=max_context_chars
+                )
+                logger.info(
+                    "Compacted Ollama context from %s to %s chars",
+                    len(context),
+                    len(prompt_context)
+                )
             
             # Build messages for chat
             messages = []
             
             # System message with context
-            if context:
+            if prompt_context:
                 # Put strong directive BEFORE the context data - KEEP IT SHORT
                 assistant_name = assistant_profile.get('name', 'AI Assistant')
                 personality = assistant_profile.get('personality', 'Clear, concise, and proactive')
@@ -1274,7 +1387,7 @@ TAGLINE: {tagline if tagline else 'None'}
 KEY PHRASES: {', '.join(key_phrases[:6]) if key_phrases else 'None'}
 
 """
-                system_message += context
+                system_message += prompt_context
                 # Keep additional instructions minimal
                 system_message += """
 
@@ -1293,7 +1406,8 @@ RULES:
             
             # Add conversation history if available
             if conversation_id:
-                history = self.db.get_ai_conversation_history(conversation_id, limit=5)
+                history_limit = 2 if is_ollama else 5
+                history = self.db.get_ai_conversation_history(conversation_id, limit=history_limit)
                 for msg in history:
                     if msg['role'] != 'system':  # Avoid duplicate system messages
                         messages.append({
@@ -1310,13 +1424,25 @@ RULES:
             # Get AI response
             response = await provider.chat(messages, stream=False)
 
+            # If Ollama rejects payload (400), retry with minimal prompt context.
+            if isinstance(response, str) and response.startswith('Error: Ollama API error: 400'):
+                logger.warning("Ollama returned 400; retrying with minimal context")
+                minimal_messages = [
+                    {
+                        'role': 'system',
+                        'content': 'You are a helpful assistant. Answer clearly and concisely using available dashboard information from the user message.'
+                    },
+                    {'role': 'user', 'content': message}
+                ]
+                response = await provider.chat(minimal_messages, stream=False)
+
             # Some models may still emit generic privacy refusals despite app context.
             # Retry once with a strict corrective system directive.
             if self._looks_like_privacy_refusal(response):
                 logger.warning("AI response contained privacy-refusal language; retrying with corrective prompt")
                 retry_messages = []
 
-                if context:
+                if prompt_context:
                     corrective_system_message = """You are the user's in-app personal assistant.
 The user has explicitly granted permission for you to access and summarize their app data context (calendar, email, notes, tasks, GitHub, news).
 Do NOT claim you cannot access data due to privacy policy.
@@ -1327,7 +1453,7 @@ When asked to summarize/prioritize, return: Today Snapshot, Top Priorities, Foll
 Use the context below to provide concrete prioritization and summaries.
 
 """
-                    corrective_system_message += context
+                    corrective_system_message += prompt_context
                     retry_messages.append({'role': 'system', 'content': corrective_system_message})
 
                 retry_messages.append({'role': 'user', 'content': message})
@@ -1343,13 +1469,13 @@ Use the context below to provide concrete prioritization and summaries.
                 needs_reformat = (
                     not self._matches_daily_brief_format(response)
                     or self._looks_generic_priority_response(response)
-                    or not self._response_references_context(response, context)
+                    or not self._response_references_context(response, prompt_context)
                 )
 
                 if needs_reformat:
                     logger.info("Daily-priority request detected; enforcing structured context-specific response")
                 brief_messages = []
-                if context:
+                if prompt_context:
                     brief_messages.append({
                         'role': 'system',
                         'content': (
@@ -1364,7 +1490,7 @@ Use the context below to provide concrete prioritization and summaries.
                             "Follow-ups\n"
                             "- action | owner | when\n"
                             "If calendar/email/notes data is unavailable, say that explicitly and continue with available sections.\n\n"
-                            f"{context}"
+                            f"{prompt_context}"
                         )
                     })
                 brief_messages.append({'role': 'user', 'content': message})
@@ -1375,12 +1501,12 @@ Use the context below to provide concrete prioritization and summaries.
                 still_not_specific = (
                     not self._matches_daily_brief_format(response)
                     or self._looks_generic_priority_response(response)
-                    or not self._response_references_context(response, context)
+                    or not self._response_references_context(response, prompt_context)
                 )
 
                 if still_not_specific:
                     logger.warning("Model response still generic/unstructured; using deterministic fallback brief")
-                    response = self._build_fallback_daily_brief(context)
+                    response = self._build_fallback_daily_brief(prompt_context)
 
             self._update_conversation_memory(message, response)
             

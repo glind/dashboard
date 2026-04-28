@@ -274,6 +274,14 @@ try {
         this.overviewSummary = null; // 5-minute overview summary for AI Assistant
         this.personalizedSuggestion = null; // Random personalized suggestion
         this.showReadArticles = false; // Show read articles in news section
+        this.sectionLoadState = {
+            todos: { lastLoadedAt: 0, inFlight: false, ttlMs: 60000 },
+            calendar: { lastLoadedAt: 0, inFlight: false, ttlMs: 120000 },
+            emails: { lastLoadedAt: 0, inFlight: false, ttlMs: 60000 },
+            github: { lastLoadedAt: 0, inFlight: false, ttlMs: 120000 },
+            news: { lastLoadedAt: 0, inFlight: false, ttlMs: 120000 },
+            weather: { lastLoadedAt: 0, inFlight: false, ttlMs: 300000 }
+        };
         this.dashboardConfig = {
             overview: true,
             leads: true,
@@ -402,6 +410,86 @@ try {
         return defaultMessage;
     }
 
+    isTimeoutAbort(error) {
+        return !!(error && error.name === 'AbortError');
+    }
+
+    beginSectionFetch(sectionName) {
+        const state = this.sectionLoadState[sectionName];
+        if (!state) return true;
+        if (state.inFlight) return false;
+        state.inFlight = true;
+        return true;
+    }
+
+    endSectionFetch(sectionName) {
+        const state = this.sectionLoadState[sectionName];
+        if (state) state.inFlight = false;
+    }
+
+    markSectionLoaded(sectionName) {
+        const state = this.sectionLoadState[sectionName];
+        if (state) state.lastLoadedAt = Date.now();
+    }
+
+    isSectionStale(sectionName) {
+        const state = this.sectionLoadState[sectionName];
+        if (!state) return true;
+        if (!state.lastLoadedAt) return true;
+        return (Date.now() - state.lastLoadedAt) > state.ttlMs;
+    }
+
+    hasSectionData(sectionName) {
+        switch (sectionName) {
+            case 'todos':
+                return Array.isArray(this.todos) && this.todos.length > 0;
+            case 'calendar':
+                return Array.isArray(this.calendar) && this.calendar.length > 0;
+            case 'emails':
+                return Array.isArray(this.emails) && this.emails.length > 0;
+            case 'news':
+                return Array.isArray(this.news) && this.news.length > 0;
+            case 'github':
+                return !!(this.github && (Array.isArray(this.github.items) || Array.isArray(this.github.repos) || Array.isArray(this.github.prs) || Array.isArray(this.github.issues)));
+            case 'weather':
+                return !!(this.weather && this.weather.temperature);
+            default:
+                return false;
+        }
+    }
+
+    refreshSectionData(sectionName, { force = false } = {}) {
+        if (!this.sectionLoadState[sectionName]) return;
+
+        const hasData = this.hasSectionData(sectionName);
+        if (!force && hasData && !this.isSectionStale(sectionName)) {
+            return;
+        }
+
+        const options = { background: hasData, reason: 'section-switch' };
+
+        switch (sectionName) {
+            case 'todos':
+                this.loadTodos(0, options);
+                break;
+            case 'calendar':
+                this.loadCalendar(0, options);
+                break;
+            case 'emails':
+                this.loadEmails(false, 0, options);
+                break;
+            case 'github':
+                this.loadGithub(0, options);
+                break;
+            case 'news':
+                this.loadNews(0, options);
+                break;
+            case 'weather':
+                this.loadWeather(0, options);
+                break;
+        }
+    }
+
     setSectionLoading(containerId, message = 'Loading...') {
         const container = document.getElementById(containerId);
         if (!container) return;
@@ -491,23 +579,53 @@ try {
     }
     
     // TODOS
-    async loadTodos() {
-        this.setSectionLoading('todos-grid', 'Loading tasks...');
+    async loadTodos(retryCount = 0, options = {}) {
+        const hasExistingData = this.todos.length > 0;
+        const backgroundRefresh = (options.background === true || (options.preserveExisting !== false && hasExistingData)) && hasExistingData;
+        if (!backgroundRefresh) {
+            this.setSectionLoading('todos-grid', 'Loading tasks...');
+        }
+
+        if (!this.beginSectionFetch('todos')) {
+            return;
+        }
+
         try {
             // By default, don't include completed tasks
-            const response = await this.fetchJsonWithTimeout('/api/tasks?include_completed=false', {}, 12000);
+            const response = await this.fetchJsonWithTimeout('/api/tasks?include_completed=false', {}, 20000);
             if (response.ok) {
                 const data = await response.json();
                 this.todos = data.tasks || [];
                 this.renderTodos();
                 this.renderOverviewTasks();
                 this.updateAllCounts();
+                this.markSectionLoaded('todos');
             } else {
-                this.setSectionError('todos-grid', 'Unable to load tasks right now.');
+                if (!backgroundRefresh) {
+                    this.setSectionError('todos-grid', 'Unable to load tasks right now.');
+                }
             }
         } catch (error) {
+            if (this.isTimeoutAbort(error) && retryCount < 2) {
+                console.warn(`Task load timed out, retrying (${retryCount + 1}/2)...`);
+                setTimeout(() => this.loadTodos(retryCount + 1, options), 1200);
+                return;
+            }
+
+            // Keep current tasks visible when a refresh request times out.
+            if (this.isTimeoutAbort(error) && this.todos && this.todos.length > 0) {
+                console.warn('Task refresh timed out, keeping existing task list visible.');
+                this.renderTodos();
+                this.renderOverviewTasks();
+                return;
+            }
+
             console.error('Error loading todos:', error);
-            this.setSectionError('todos-grid', this.getLoadErrorMessage('Unable to load tasks right now.', error));
+            if (!backgroundRefresh) {
+                this.setSectionError('todos-grid', this.getLoadErrorMessage('Unable to load tasks right now.', error));
+            }
+        } finally {
+            this.endSectionFetch('todos');
         }
     }
     
@@ -744,8 +862,17 @@ try {
     }
     
     // CALENDAR
-    async loadCalendar() {
-        this.setSectionLoading('calendar-content', 'Loading calendar...');
+    async loadCalendar(retryCount = 0, options = {}) {
+        const hasExistingData = this.calendar.length > 0;
+        const backgroundRefresh = (options.background === true || (options.preserveExisting !== false && hasExistingData)) && hasExistingData;
+        if (!backgroundRefresh) {
+            this.setSectionLoading('calendar-content', 'Loading calendar...');
+        }
+
+        if (!this.beginSectionFetch('calendar')) {
+            return;
+        }
+
         try {
             const response = await this.fetchJsonWithTimeout('/api/calendar', {}, 12000);
             if (response.ok) {
@@ -755,12 +882,24 @@ try {
                 this.renderOverviewCalendar();
                 this.startUpcomingEventMonitor();
                 this.updateAllCounts();
+                this.markSectionLoaded('calendar');
             } else {
-                this.setSectionError('calendar-content', 'Unable to load calendar right now.');
+                if (!backgroundRefresh) {
+                    this.setSectionError('calendar-content', 'Unable to load calendar right now.');
+                }
             }
         } catch (error) {
+            if (this.isTimeoutAbort(error) && retryCount < 2) {
+                console.warn(`Calendar load timed out, retrying (${retryCount + 1}/2)...`);
+                setTimeout(() => this.loadCalendar(retryCount + 1, options), 1200);
+                return;
+            }
             console.error('Error loading calendar:', error);
-            this.setSectionError('calendar-content', this.getLoadErrorMessage('Unable to load calendar right now.', error));
+            if (!backgroundRefresh) {
+                this.setSectionError('calendar-content', this.getLoadErrorMessage('Unable to load calendar right now.', error));
+            }
+        } finally {
+            this.endSectionFetch('calendar');
         }
     }
     
@@ -897,8 +1036,17 @@ try {
     }
     
     // EMAILS
-    async loadEmails(forceRefresh = false) {
-        this.setSectionLoading('emails-grid', 'Loading emails...');
+    async loadEmails(forceRefresh = false, retryCount = 0, options = {}) {
+        const hasExistingData = this.emails.length > 0;
+        const backgroundRefresh = (options.background === true || (options.preserveExisting !== false && hasExistingData)) && hasExistingData;
+        if (!backgroundRefresh) {
+            this.setSectionLoading('emails-grid', 'Loading emails...');
+        }
+
+        if (!this.beginSectionFetch('emails')) {
+            return;
+        }
+
         try {
             // Add cache-busting parameter if force refresh
             const url = forceRefresh 
@@ -918,12 +1066,24 @@ try {
                 console.log(`Loaded ${this.emails.length} emails (${unreadCount} unread, ${readCount} read)`);
                 this.renderEmails();
                 this.updateAllCounts();
+                this.markSectionLoaded('emails');
             } else {
-                this.setSectionError('emails-grid', 'Unable to load emails right now.');
+                if (!backgroundRefresh) {
+                    this.setSectionError('emails-grid', 'Unable to load emails right now.');
+                }
             }
         } catch (error) {
+            if (this.isTimeoutAbort(error) && retryCount < 2) {
+                console.warn(`Email load timed out, retrying (${retryCount + 1}/2)...`);
+                setTimeout(() => this.loadEmails(forceRefresh, retryCount + 1, options), 1200);
+                return;
+            }
             console.error('Error loading emails:', error);
-            this.setSectionError('emails-grid', this.getLoadErrorMessage('Unable to load emails right now.', error));
+            if (!backgroundRefresh) {
+                this.setSectionError('emails-grid', this.getLoadErrorMessage('Unable to load emails right now.', error));
+            }
+        } finally {
+            this.endSectionFetch('emails');
         }
     }
     
@@ -1720,13 +1880,24 @@ try {
     }
     
     // GITHUB
-    async loadGithub() {
-        this.setSectionLoading('github-content', 'Loading GitHub activity...');
+    async loadGithub(retryCount = 0, options = {}) {
+        const hasGithubData = this.hasSectionData('github');
+        const backgroundRefresh = (options.background === true || (options.preserveExisting !== false && hasGithubData)) && hasGithubData;
+        if (!backgroundRefresh) {
+            this.setSectionLoading('github-content', 'Loading GitHub activity...');
+        }
+
+        if (!this.beginSectionFetch('github')) {
+            return;
+        }
+
         try {
             const response = await this.fetchJsonWithTimeout('/api/github', {}, 12000);
             if (!response.ok) {
-                this.github = {};
-                this.renderGithub();
+                if (!backgroundRefresh) {
+                    this.github = {};
+                    this.renderGithub();
+                }
                 return;
             }
 
@@ -1750,10 +1921,20 @@ try {
             }
             this.renderGithub();
             this.updateAllCounts();
+            this.markSectionLoaded('github');
         } catch (error) {
+            if (this.isTimeoutAbort(error) && retryCount < 2) {
+                console.warn(`GitHub load timed out, retrying (${retryCount + 1}/2)...`);
+                setTimeout(() => this.loadGithub(retryCount + 1, options), 1200);
+                return;
+            }
             console.error('Error loading GitHub:', error);
-            this.github = {};
-            this.setSectionError('github-content', this.getLoadErrorMessage('Unable to load GitHub activity right now.', error));
+            if (!backgroundRefresh) {
+                this.github = {};
+                this.setSectionError('github-content', this.getLoadErrorMessage('Unable to load GitHub activity right now.', error));
+            }
+        } finally {
+            this.endSectionFetch('github');
         }
     }
     
@@ -1899,8 +2080,17 @@ try {
     }
     
     // NEWS
-    async loadNews() {
-        this.setSectionLoading('news-grid', 'Loading news...');
+    async loadNews(retryCount = 0, options = {}) {
+        const hasExistingData = this.news.length > 0;
+        const backgroundRefresh = (options.background === true || (options.preserveExisting !== false && hasExistingData)) && hasExistingData;
+        if (!backgroundRefresh) {
+            this.setSectionLoading('news-grid', 'Loading news...');
+        }
+
+        if (!this.beginSectionFetch('news')) {
+            return;
+        }
+
         try {
             const includeRead = this.showReadArticles ? 'true' : 'false';
             const response = await this.fetchJsonWithTimeout(`/api/news?include_read=${includeRead}`, {}, 12000);
@@ -1908,12 +2098,24 @@ try {
                 const data = await response.json();
                 this.news = data.articles || [];
                 this.renderNews();
+                this.markSectionLoaded('news');
             } else {
-                this.setSectionError('news-grid', 'Unable to load news right now.');
+                if (!backgroundRefresh) {
+                    this.setSectionError('news-grid', 'Unable to load news right now.');
+                }
             }
         } catch (error) {
+            if (this.isTimeoutAbort(error) && retryCount < 2) {
+                console.warn(`News load timed out, retrying (${retryCount + 1}/2)...`);
+                setTimeout(() => this.loadNews(retryCount + 1, options), 1200);
+                return;
+            }
             console.error('Error loading news:', error);
-            this.setSectionError('news-grid', this.getLoadErrorMessage('Unable to load news right now.', error));
+            if (!backgroundRefresh) {
+                this.setSectionError('news-grid', this.getLoadErrorMessage('Unable to load news right now.', error));
+            }
+        } finally {
+            this.endSectionFetch('news');
         }
     }
     
@@ -2000,9 +2202,8 @@ try {
             
             const feedback = this.feedbackData[`news-${article.id}`] || null;
             const isRead = article.is_read || false;
-            
-            // Use placeholder image if none found
-            const displayImg = imgUrl || `https://picsum.photos/seed/${article.id}/400/200`;
+            const displayImg = this.getNewsImageUrl(article, imgUrl);
+            const fallbackImg = this.getNewsFallbackImage(article);
             
             return `
             <div class="news-card bg-gray-800 border border-gray-700 rounded-xl overflow-hidden hover:border-purple-500 transition-all cursor-pointer ${isRead ? 'opacity-70' : ''}"
@@ -2015,7 +2216,7 @@ try {
                         <img src="${displayImg}" 
                              alt="" 
                              class="w-full h-full object-cover"
-                             onerror="this.src='https://picsum.photos/seed/${article.id}/400/200'">
+                                onerror="this.onerror=null;this.src='${fallbackImg}'">
                         ${isRead ? '<div class="absolute top-2 left-2 px-2 py-0.5 bg-gray-900 bg-opacity-80 rounded text-xs text-gray-400">✓ Read</div>' : ''}
                     </div>
                     
@@ -2048,6 +2249,61 @@ try {
             </style>
             <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">${html}</div>
         `;
+    }
+
+    getNewsImageUrl(article, extractedImageUrl = null) {
+        const preferred = article?.image_url || extractedImageUrl;
+        if (preferred && /^https?:\/\//i.test(preferred)) {
+            return preferred;
+        }
+        return this.getNewsFallbackImage(article);
+    }
+
+    getNewsFallbackImage(article) {
+        const categoryText = String(article?.category || '').toLowerCase();
+        const titleText = String(article?.title || '').toLowerCase();
+        const sourceUrl = String(article?.url || '').toLowerCase();
+        const haystack = `${categoryText} ${titleText} ${sourceUrl}`;
+
+        // Prefer source logo when available for a "relevant" visual instead of random art.
+        try {
+            const hostname = article?.url ? new URL(article.url).hostname.replace(/^www\./i, '') : '';
+            if (hostname) {
+                return `https://logo.clearbit.com/${hostname}`;
+            }
+        } catch (e) {
+            // Ignore URL parse errors and use topical fallback below.
+        }
+
+        const topicalImages = {
+            star_wars: 'https://images.unsplash.com/photo-1446776653964-20c1d3a81b06?w=800&h=450&fit=crop&auto=format',
+            star_trek: 'https://images.unsplash.com/photo-1419242902214-272b3f66ee7a?w=800&h=450&fit=crop&auto=format',
+            soccer: 'https://images.unsplash.com/photo-1431324155629-1a6deb1dec8d?w=800&h=450&fit=crop&auto=format',
+            oregon_state: 'https://images.unsplash.com/photo-1541339907198-e08756dedf3f?w=800&h=450&fit=crop&auto=format',
+            tech: 'https://images.unsplash.com/photo-1518770660439-4636190af475?w=800&h=450&fit=crop&auto=format',
+            business: 'https://images.unsplash.com/photo-1460925895917-afdab827c52f?w=800&h=450&fit=crop&auto=format',
+            general: 'https://images.unsplash.com/photo-1504711434969-e33886168f5c?w=800&h=450&fit=crop&auto=format'
+        };
+
+        if (haystack.includes('star wars') || haystack.includes('lucasfilm') || haystack.includes('jedi')) {
+            return topicalImages.star_wars;
+        }
+        if (haystack.includes('star trek') || haystack.includes('enterprise') || haystack.includes('federation')) {
+            return topicalImages.star_trek;
+        }
+        if (haystack.includes('timbers') || haystack.includes('soccer') || haystack.includes('mls')) {
+            return topicalImages.soccer;
+        }
+        if (haystack.includes('oregon state') || haystack.includes('beavers') || haystack.includes('corvallis')) {
+            return topicalImages.oregon_state;
+        }
+        if (haystack.includes('tech') || haystack.includes('ai') || haystack.includes('software') || haystack.includes('hacker')) {
+            return topicalImages.tech;
+        }
+        if (haystack.includes('market') || haystack.includes('finance') || haystack.includes('business')) {
+            return topicalImages.business;
+        }
+        return topicalImages.general;
     }
     
     formatRelativeDate(dateStr) {
@@ -2086,6 +2342,9 @@ try {
             const srcMatch = imgMatches[0].match(/src="([^"]+)"/);
             imgUrl = srcMatch ? srcMatch[1] : null;
         }
+
+        const displayImg = this.getNewsImageUrl(article, imgUrl);
+        const fallbackImg = this.getNewsFallbackImage(article);
         
         // Clean description
         cleanDesc = cleanDesc.replace(/<img[^>]*>/gi, '');
@@ -2105,13 +2364,13 @@ try {
         // Show/hide image
         const imgContainer = document.getElementById('news-modal-image-container');
         const imgEl = document.getElementById('news-modal-image');
-        if (imgUrl) {
-            imgEl.src = imgUrl;
-            imgEl.alt = article.title;
-            imgContainer.classList.remove('hidden');
-        } else {
-            imgContainer.classList.add('hidden');
-        }
+        imgEl.src = displayImg;
+        imgEl.alt = article.title;
+        imgEl.onerror = () => {
+            imgEl.onerror = null;
+            imgEl.src = fallbackImg;
+        };
+        imgContainer.classList.remove('hidden');
         
         // Add feedback buttons
         const feedback = this.feedbackData[`news-${articleId}`] || null;
@@ -2353,20 +2612,41 @@ try {
     }
     
     // WEATHER
-    async loadWeather() {
-        this.setSectionLoading('weather-content', 'Loading weather...');
+    async loadWeather(retryCount = 0, options = {}) {
+        const hasExistingData = this.hasSectionData('weather');
+        const backgroundRefresh = (options.background === true || (options.preserveExisting !== false && hasExistingData)) && hasExistingData;
+        if (!backgroundRefresh) {
+            this.setSectionLoading('weather-content', 'Loading weather...');
+        }
+
+        if (!this.beginSectionFetch('weather')) {
+            return;
+        }
+
         try {
             const response = await this.fetchJsonWithTimeout('/api/weather', {}, 12000);
             if (response.ok) {
                 const data = await response.json();
                 this.weather = data;
                 this.renderWeather();
+                this.markSectionLoaded('weather');
             } else {
-                this.setSectionError('weather-content', 'Unable to load weather right now.');
+                if (!backgroundRefresh) {
+                    this.setSectionError('weather-content', 'Unable to load weather right now.');
+                }
             }
         } catch (error) {
+            if (this.isTimeoutAbort(error) && retryCount < 2) {
+                console.warn(`Weather load timed out, retrying (${retryCount + 1}/2)...`);
+                setTimeout(() => this.loadWeather(retryCount + 1, options), 1200);
+                return;
+            }
             console.error('Error loading weather:', error);
-            this.setSectionError('weather-content', this.getLoadErrorMessage('Unable to load weather right now.', error));
+            if (!backgroundRefresh) {
+                this.setSectionError('weather-content', this.getLoadErrorMessage('Unable to load weather right now.', error));
+            }
+        } finally {
+            this.endSectionFetch('weather');
         }
     }
     
@@ -7862,7 +8142,6 @@ function renderSuggestedTodos(suggestions) {
     section.style.display = 'block';
 }
 
-<<<<<<< HEAD
 async function bulkProcessSuggestedTodos(action) {
     try {
         const response = await fetch('/api/suggested-todos/bulk', {
@@ -7896,10 +8175,7 @@ async function rejectAllSuggestedTodos() {
     await bulkProcessSuggestedTodos('reject');
 }
 
-async function approveSuggestedTodo(suggestionId) {
-=======
 window.approveSuggestedTodo = async function approveSuggestedTodo(suggestionId) {
->>>>>>> 451f96d (stage changes)
     try {
         const response = await fetch(`/api/suggested-todos/${suggestionId}/approve`, {
             method: 'POST'

@@ -689,6 +689,18 @@
                     <span>🔌</span>
                     <span>Email Providers</span>
                 </a>
+
+                <a href="#" onclick="showSection('servers'); return false;" 
+                   class="nav-link flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-gray-700 text-gray-300 hover:text-white">
+                    <span>🖥️</span>
+                    <span>Servers</span>
+                </a>
+
+                <a href="#" onclick="showSection('diagnostics'); return false;" 
+                   class="nav-link flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-gray-700 text-gray-300 hover:text-white">
+                    <span>🩺</span>
+                    <span>Self-Diagnostics</span>
+                </a>
                 
                 <a href="#" onclick="showSection('liked'); return false;" 
                    class="nav-link flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-gray-700 text-gray-300 hover:text-white">
@@ -988,6 +1000,184 @@
                     </div>
                     
                     <div id="notes-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+                </div>
+            </section>
+
+            <section id="section-servers" class="section-content hidden p-8">
+                <div class="max-w-7xl mx-auto">
+                    <div class="flex items-center justify-between mb-6">
+                        <div>
+                            <h2 class="text-3xl font-bold">🖥️ Web Servers</h2>
+                            <p class="text-sm text-gray-400 mt-1">Monitors app servers on ports 8000-9000 only.</p>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <label class="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">
+                                <input type="checkbox" id="include-remote-servers"
+                                       onchange="window.dataLoader && dataLoader.toggleRemoteServers(this.checked)"
+                                       class="rounded border-gray-600 bg-gray-700 text-purple-600 focus:ring-purple-500">
+                                <span>Include LAN servers (best effort)</span>
+                            </label>
+                            <button onclick="window.dataLoader && dataLoader.loadServers(0, { force: true })"
+                                    class="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2">
+                                <span>🔄</span>
+                                <span>Refresh</span>
+                            </button>
+                        </div>
+                    </div>
+                    <div id="servers-content"></div>
+                </div>
+            </section>
+
+            <section id="section-diagnostics" class="section-content hidden p-8">
+                <div class="max-w-7xl mx-auto">
+                    <div class="flex items-start justify-between gap-4 mb-6">
+                        <div>
+                            <h2 class="text-3xl font-bold">🩺 Self-Diagnostics & Repair</h2>
+                            <p class="text-sm text-gray-400 mt-1">AI diagnoses runtime issues using live error logs, proposes code fixes, and only applies changes with your explicit approval.</p>
+                        </div>
+                        <button onclick="window.dataLoader && dataLoader.loadDiagnostics(true)"
+                                class="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2">
+                            <span>🔄</span><span>Refresh</span>
+                        </button>
+                    </div>
+
+                    <!-- ── Tab bar ── -->
+                    <div class="flex gap-1 mb-5 bg-gray-900 p-1 rounded-xl w-fit">
+                        <button id="diag-tab-events" onclick="dataLoader.switchDiagTab('events')"
+                                class="diag-tab-btn px-4 py-2 rounded-lg text-sm font-semibold bg-gray-700 text-white">
+                            📋 Events
+                        </button>
+                        <button id="diag-tab-review" onclick="dataLoader.switchDiagTab('review')"
+                                class="diag-tab-btn px-4 py-2 rounded-lg text-sm font-semibold text-gray-400 hover:text-white">
+                            🔍 Review
+                        </button>
+                        <button id="diag-tab-suggest" onclick="dataLoader.switchDiagTab('suggest')"
+                                class="diag-tab-btn px-4 py-2 rounded-lg text-sm font-semibold text-gray-400 hover:text-white">
+                            ✏️ Suggest Fix
+                        </button>
+                        <button id="diag-tab-logs" onclick="dataLoader.switchDiagTab('logs')"
+                                class="diag-tab-btn px-4 py-2 rounded-lg text-sm font-semibold text-gray-400 hover:text-white">
+                            📄 Logs
+                        </button>
+                    </div>
+
+                    <!-- ── Events panel ── -->
+                    <div id="diag-panel-events">
+                        <div id="diagnostics-content"></div>
+                    </div>
+
+                    <!-- ── Review panel ── -->
+                    <div id="diag-panel-review" class="hidden">
+                        <div class="bg-gray-800 p-5 rounded-xl border border-gray-700 mb-6">
+                            <h3 class="text-lg font-semibold mb-1">AI Review Request</h3>
+                            <p class="text-xs text-gray-400 mb-4">Ask the AI to inspect a module using live logs. Results appear in the Events tab.</p>
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
+                                <div>
+                                    <label class="block text-xs text-gray-400 mb-1">Module</label>
+                                    <select id="diagnostics-module" class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm">
+                                        <option value="general">General</option>
+                                        <option value="todos">Tasks</option>
+                                        <option value="emails">Email</option>
+                                        <option value="calendar">Calendar</option>
+                                        <option value="github">GitHub</option>
+                                        <option value="news">News</option>
+                                        <option value="weather">Weather</option>
+                                        <option value="servers">Servers</option>
+                                        <option value="ai">AI Assistant</option>
+                                    </select>
+                                </div>
+                                <div class="md:col-span-2">
+                                    <label class="block text-xs text-gray-400 mb-1">What should AI review? <span class="text-gray-600">(optional)</span></label>
+                                    <input id="diagnostics-notes" type="text" placeholder="e.g. emails not loading after OAuth change"
+                                           class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm">
+                                </div>
+                            </div>
+                            <button id="diag-review-btn" onclick="window.dataLoader && dataLoader.runManualDiagnosticReview()"
+                                    class="bg-purple-600 hover:bg-purple-700 disabled:opacity-60 disabled:cursor-not-allowed px-4 py-2 rounded-lg text-sm font-semibold transition-opacity">
+                                Run AI Diagnostic Review
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- ── Suggest-fix panel ── -->
+                    <div id="diag-panel-suggest" class="hidden">
+                        <div class="bg-gray-800 p-5 rounded-xl border border-gray-700 mb-6">
+                            <h3 class="text-lg font-semibold mb-1">Suggest a Fix</h3>
+                            <p class="text-xs text-gray-400 mb-4">Describe how you think the problem should be fixed. The AI will translate your description into code patches, show you a diff, and wait for approval before creating a PR.</p>
+                            <div class="grid grid-cols-1 md:grid-cols-4 gap-3 mb-3">
+                                <div>
+                                    <label class="block text-xs text-gray-400 mb-1">Module</label>
+                                    <select id="suggest-module" class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm">
+                                        <option value="general">General</option>
+                                        <option value="todos">Tasks</option>
+                                        <option value="emails">Email</option>
+                                        <option value="calendar">Calendar</option>
+                                        <option value="github">GitHub</option>
+                                        <option value="news">News</option>
+                                        <option value="weather">Weather</option>
+                                        <option value="servers">Servers</option>
+                                        <option value="ai">AI Assistant</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="block text-xs text-gray-400 mb-1">Event ID <span class="text-gray-600">(optional)</span></label>
+                                    <input id="suggest-event-id" type="text" placeholder="diag_20260429_…"
+                                           class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm font-mono">
+                                </div>
+                                <div class="md:col-span-2">
+                                    <label class="block text-xs text-gray-400 mb-1">Your fix description <span class="text-red-400">*</span></label>
+                                    <input id="suggest-text" type="text" placeholder="e.g. Add a null check before calling .get() on the email response dict"
+                                           class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm">
+                                </div>
+                            </div>
+                            <div class="flex gap-2 items-center">
+                                <button id="suggest-fix-btn" onclick="window.dataLoader && dataLoader.runSuggestFix()"
+                                        class="bg-amber-600 hover:bg-amber-700 disabled:opacity-60 disabled:cursor-not-allowed px-4 py-2 rounded-lg text-sm font-semibold transition-opacity">
+                                    🤖 Generate Fix Plan
+                                </button>
+                                <button onclick="window.dataLoader && dataLoader.runDiagnosticRollback()"
+                                        class="bg-red-900 hover:bg-red-800 border border-red-700 px-3 py-2 rounded-lg text-xs font-semibold"
+                                        title="Restore from the last diagnostic stash checkpoint">
+                                    ↩ Rollback Last Patch
+                                </button>
+                            </div>
+                            <div id="suggest-fix-result" class="mt-4"></div>
+                        </div>
+                    </div>
+
+                    <!-- ── Logs panel ── -->
+                    <div id="diag-panel-logs" class="hidden">
+                        <div class="bg-gray-800 p-5 rounded-xl border border-gray-700">
+                            <div class="flex flex-wrap items-center gap-3 mb-4">
+                                <h3 class="text-lg font-semibold mr-2">Log Viewer</h3>
+                                <select id="log-level-filter" class="bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs">
+                                    <option value="">All levels</option>
+                                    <option value="ERROR">ERROR only</option>
+                                    <option value="WARNING">WARNING only</option>
+                                    <option value="INFO">INFO only</option>
+                                </select>
+                                <input id="log-module-filter" type="text" placeholder="Filter by module…"
+                                       class="bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs w-36">
+                                <select id="log-lines-count" class="bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs">
+                                    <option value="100">Last 100</option>
+                                    <option value="200" selected>Last 200</option>
+                                    <option value="500">Last 500</option>
+                                    <option value="1000">Last 1000</option>
+                                </select>
+                                <button onclick="window.dataLoader && dataLoader.loadDiagLogs()"
+                                        class="bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded text-xs font-semibold">🔄 Refresh</button>
+                                <button onclick="window.dataLoader && dataLoader.clearDiagLogs()"
+                                        class="bg-red-800 hover:bg-red-700 border border-red-600 px-3 py-1 rounded text-xs font-semibold ml-auto">
+                                    🗑 Clear Log
+                                </button>
+                            </div>
+                            <div id="log-files-info" class="text-xs text-gray-500 mb-2"></div>
+                            <div id="log-viewer" class="bg-gray-900 rounded p-3 h-96 overflow-y-auto font-mono text-xs text-gray-300 whitespace-pre-wrap break-all">
+                                <span class="text-gray-500">Click Refresh to load logs…</span>
+                            </div>
+                        </div>
+                    </div>
+
                 </div>
             </section>
             
@@ -1762,7 +1952,7 @@
                                 </div>
                                 <div class="flex items-center gap-3">
                                     <button onclick="musicPlayer.previous()" class="p-3 bg-gray-700 hover:bg-gray-600 rounded-full" title="Previous">⏮️</button>
-                                    <button onclick="musicPlayer.playCurrentTrack()" class="p-4 bg-blue-600 hover:bg-blue-700 rounded-full text-xl" title="Play"><span id="play-btn-text">▶️</span></button>
+                                    <button onclick="musicPlayer.togglePlay()" class="p-4 bg-blue-600 hover:bg-blue-700 rounded-full text-xl" title="Play/Pause"><span id="play-btn-text">▶️</span></button>
                                     <button onclick="musicPlayer.next()" class="p-3 bg-gray-700 hover:bg-gray-600 rounded-full" title="Next">⏭️</button>
                                     <div class="border-l border-gray-600 h-8 mx-2"></div>
                                     <button onclick="musicPlayer.likeCurrent()" class="p-3 bg-green-700 hover:bg-green-600 rounded-full" title="Like this song" id="like-btn">👍</button>
@@ -2150,8 +2340,76 @@
                     alert('No tracks loaded');
                     return;
                 }
-                this.isPlaying = !this.isPlaying;
-                document.getElementById('play-btn-text').textContent = this.isPlaying ? '⏸️' : '▶️';
+
+                const playIcon = document.getElementById('play-btn-text');
+
+                if (this.isPlaying) {
+                    // Pause current playback without reloading the track
+                    let paused = false;
+                    try {
+                        if (this.ytPlayer && typeof this.ytPlayer.pauseVideo === 'function') {
+                            this.ytPlayer.pauseVideo();
+                            paused = true;
+                        }
+                    } catch (e) {
+                        console.warn('YT API pause failed:', e);
+                    }
+
+                    if (!paused) {
+                        const iframe = document.getElementById('yt-iframe') || document.getElementById('yt-iframe-fallback');
+                        if (iframe && iframe.contentWindow) {
+                            try {
+                                iframe.contentWindow.postMessage(JSON.stringify({
+                                    event: 'command',
+                                    func: 'pauseVideo',
+                                    args: []
+                                }), '*');
+                                paused = true;
+                            } catch (e) {
+                                console.warn('Iframe pause failed:', e);
+                            }
+                        }
+                    }
+
+                    this.isPlaying = false;
+                    if (playIcon) playIcon.textContent = '▶️';
+                    return;
+                }
+
+                // Resume existing playback if possible, otherwise start current track
+                let resumed = false;
+                try {
+                    if (this.ytPlayer && typeof this.ytPlayer.playVideo === 'function') {
+                        this.ytPlayer.playVideo();
+                        resumed = true;
+                    }
+                } catch (e) {
+                    console.warn('YT API resume failed:', e);
+                }
+
+                if (!resumed) {
+                    const iframe = document.getElementById('yt-iframe') || document.getElementById('yt-iframe-fallback');
+                    if (iframe && iframe.contentWindow) {
+                        try {
+                            iframe.contentWindow.postMessage(JSON.stringify({
+                                event: 'command',
+                                func: 'playVideo',
+                                args: []
+                            }), '*');
+                            resumed = true;
+                        } catch (e) {
+                            console.warn('Iframe resume failed:', e);
+                        }
+                    }
+                }
+
+                if (!resumed) {
+                    this.playCurrentTrack();
+                    return;
+                }
+
+                this.isPlaying = true;
+                if (playIcon) playIcon.textContent = '⏸️';
             },
             
             // Play current track on YouTube
@@ -2246,6 +2504,19 @@
                 if (event.data === 0) {
                     console.log('🎵 Song ended, auto-advancing to next track');
                     this.next();
+                    return;
+                }
+
+                // Sync UI icon with actual playback state
+                // YT.PlayerState.PLAYING = 1, PAUSED = 2
+                if (event.data === 1) {
+                    this.isPlaying = true;
+                    const playIcon = document.getElementById('play-btn-text');
+                    if (playIcon) playIcon.textContent = '⏸️';
+                } else if (event.data === 2) {
+                    this.isPlaying = false;
+                    const playIcon = document.getElementById('play-btn-text');
+                    if (playIcon) playIcon.textContent = '▶️';
                 }
             },
             
@@ -2354,7 +2625,7 @@
                                                 id="yt-iframe-fallback"
                                                 width="100%" 
                                                 height="100%" 
-                                                src="https://www.youtube.com/embed/${videoId}?autoplay=0&rel=0" 
+                                                src="https://www.youtube.com/embed/${videoId}?autoplay=0&rel=0&enablejsapi=1" 
                                                 frameborder="0" 
                                                 allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" 
                                                 allowfullscreen>
@@ -2380,7 +2651,7 @@
                                 id="yt-iframe"
                                 width="100%" 
                                 height="100%" 
-                                src="https://www.youtube.com/embed/${videoId}?autoplay=1&rel=0" 
+                                src="https://www.youtube.com/embed/${videoId}?autoplay=1&rel=0&enablejsapi=1" 
                                 frameborder="0" 
                                 allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" 
                                 allowfullscreen>
@@ -3213,10 +3484,17 @@ Use simple ASCII characters only - no special quotes or unicode.`;
                         console.warn('  ⚠️  providerManager not available');
                     }
                     break;
+                case 'servers':
+                    if (dataLoader.refreshSectionData) dataLoader.refreshSectionData('servers');
+                    else if (dataLoader.loadServers) dataLoader.loadServers();
+                    break;
+                case 'diagnostics':
+                    if (dataLoader.loadDiagnostics) dataLoader.loadDiagnostics(true);
+                    break;
                 case 'overview':
                     // Refresh overview sources in background when cached data exists.
                     if (dataLoader.refreshSectionData) {
-                        ['todos', 'calendar', 'emails', 'github', 'news', 'weather'].forEach(name => dataLoader.refreshSectionData(name));
+                        ['todos', 'calendar', 'emails', 'github', 'news', 'weather', 'servers'].forEach(name => dataLoader.refreshSectionData(name));
                     } else {
                         if (dataLoader.loadAllData) dataLoader.loadAllData();
                     }
@@ -3788,6 +4066,20 @@ Use simple ASCII characters only - no special quotes or unicode.`;
             const errorMessage = error.detail || error.message || 'An unexpected error occurred';
             const stackTrace = error.stack || error.traceback || 'No stack trace available';
             const errorContext = error.provider_type || error.context || '';
+
+            if (window.dataLoader && typeof window.dataLoader.reportRuntimeError === 'function') {
+                window.dataLoader.reportRuntimeError({
+                    title: errorType,
+                    module: 'general',
+                    source: 'ui_error_handler',
+                    message: errorMessage,
+                    stack: stackTrace,
+                    context: {
+                        provider_type: error.provider_type || null,
+                        context: errorContext || null
+                    }
+                });
+            }
             
             // Generate GitHub issue URL with pre-filled information
             const issueTitle = encodeURIComponent(`Error: ${errorType}`);
@@ -5796,12 +6088,29 @@ ${stackTrace}
     <script>
     // Register service worker for PWA
     if ('serviceWorker' in navigator) {
-        window.addEventListener('load', function() {
-            navigator.serviceWorker.register('/static/service-worker.js').then(function(reg) {
+        window.addEventListener('load', async function() {
+            try {
+                // One-time hard reset to recover from stale cached dashboard/API responses.
+                const resetKey = 'sw-hard-reset-v2';
+                if (!localStorage.getItem(resetKey)) {
+                    const regs = await navigator.serviceWorker.getRegistrations();
+                    await Promise.all(regs.map(r => r.unregister()));
+                    if (window.caches && caches.keys) {
+                        const keys = await caches.keys();
+                        await Promise.all(keys.map(k => caches.delete(k)));
+                    }
+                    localStorage.setItem(resetKey, '1');
+                    console.log('Service worker/cache reset completed');
+                }
+
+                const reg = await navigator.serviceWorker.register('/static/service-worker.js');
                 console.log('Service Worker registered:', reg);
-            }).catch(function(err) {
+                if (typeof reg.update === 'function') {
+                    reg.update();
+                }
+            } catch (err) {
                 console.error('Service Worker registration failed:', err);
-            });
+            }
         });
     }
 

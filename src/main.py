@@ -4,13 +4,15 @@ Simple Personal Dashboard with News Filtering
 Clean, minimal implementation focusing on core data sources
 """
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Query
 from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 import uvicorn
 import json
 from datetime import datetime, timedelta
 import os
+import subprocess
+import traceback
 import yaml
 from pathlib import Path
 import logging
@@ -125,7 +127,25 @@ except ImportError as e:
     AI_ASSISTANT_AVAILABLE = False
 
 # Set up logging
-logging.basicConfig(level=logging.INFO)
+# ── Logging setup ──────────────────────────────────────────────────────────────
+import logging.handlers as _logging_handlers
+LOG_FILE_PATH = Path(__file__).resolve().parent.parent / "dashboard.log"
+_log_formatter = logging.Formatter(
+    "%(asctime)s %(levelname)-8s %(name)s: %(message)s",
+    datefmt="%Y-%m-%dT%H:%M:%S"
+)
+_rotating_handler = _logging_handlers.RotatingFileHandler(
+    str(LOG_FILE_PATH),
+    maxBytes=5 * 1024 * 1024,   # 5 MB per file
+    backupCount=5,               # keep dashboard.log.1 … .5
+    encoding="utf-8"
+)
+_rotating_handler.setFormatter(_log_formatter)
+_stream_handler = logging.StreamHandler()
+_stream_handler.setFormatter(_log_formatter)
+logging.basicConfig(level=logging.INFO, handlers=[_rotating_handler, _stream_handler])
+logging.getLogger("uvicorn.access").setLevel(logging.WARNING)   # quiet access noise
+# ────────────────────────────────────────────────────────────────────────────────
 
 app = FastAPI(title="Simple Personal Dashboard")
 
@@ -548,6 +568,447 @@ class BackgroundDataManager:
 
 # Initialize background data manager
 background_manager = BackgroundDataManager()
+
+# In-memory diagnostics event log
+DIAGNOSTIC_EVENTS: List[Dict[str, Any]] = []
+DIAGNOSTIC_LOCK = threading.Lock()
+DIAGNOSTIC_MAX_EVENTS = 200
+
+
+def _extract_json_from_ai_text(raw_text: str) -> Optional[Dict[str, Any]]:
+    """Attempt to parse JSON from AI output, including fenced blocks."""
+    text = (raw_text or '').strip()
+    if not text:
+        return None
+
+    try:
+        return json.loads(text)
+    except Exception:
+        pass
+
+    if '```' in text:
+        for block in text.split('```'):
+            candidate = block.replace('json', '', 1).strip()
+            if not candidate:
+                continue
+            try:
+                return json.loads(candidate)
+            except Exception:
+                continue
+
+    start = text.find('{')
+    end = text.rfind('}')
+    if start >= 0 and end > start:
+        candidate = text[start:end + 1]
+        try:
+            return json.loads(candidate)
+        except Exception:
+            return None
+
+    return None
+
+
+def _build_default_diagnostic(error_message: str) -> Dict[str, Any]:
+    """Fallback diagnostic when AI parsing fails or provider is unavailable."""
+    message = (error_message or '').strip() or 'Unknown error'
+    return {
+        "summary": f"Dashboard reported: {message}",
+        "likely_causes": [
+            "Temporary service interruption",
+            "Misconfigured provider or credentials",
+            "Module-specific runtime exception"
+        ],
+        "confidence": "low",
+        "can_auto_fix": False,
+        "repair_actions": [],
+        "code_fixes": [],
+        "commit_message": "",
+        "pr_title": "",
+        "pr_body": "",
+        "manual_steps": [
+            "Open the affected module and click refresh.",
+            "Check Settings → AI/Providers and verify connectivity.",
+            "Review dashboard.log for backend stack traces."
+        ]
+    }
+
+
+def _allowed_repair_actions(module_name: Optional[str] = None) -> List[Dict[str, Any]]:
+    actions = [
+        {
+            "key": "apply_code_fix",
+            "label": "Apply Code Fix & Create PR",
+            "description": "AI writes file patches, commits to a fix branch, pushes, and opens a GitHub Pull Request for review.",
+            "requires_approval": True
+        },
+        {
+            "key": "refresh_module",
+            "label": "Refresh Module Cache",
+            "description": "Clears module cache and refreshes data for one widget.",
+            "requires_approval": True
+        },
+        {
+            "key": "restart_dashboard",
+            "label": "Restart Dashboard Service",
+            "description": "Runs ./ops/startup.sh restart to recover from service-level failures.",
+            "requires_approval": True
+        }
+    ]
+
+    if module_name:
+        for action in actions:
+            if action["key"] == "refresh_module":
+                action["module"] = module_name
+    return actions
+
+
+async def _run_ai_diagnostic(
+    *,
+    title: str,
+    module_name: str,
+    source: str,
+    error_message: str,
+    stack_trace: str,
+    context: Dict[str, Any],
+    include_repair_actions: bool = True
+) -> Dict[str, Any]:
+    """Use configured AI provider to generate diagnosis and repair plan."""
+    fallback = _build_default_diagnostic(error_message)
+
+    if not AI_ASSISTANT_AVAILABLE:
+        return fallback
+
+    try:
+        ai_service = get_ai_service(db, settings)
+        allowed_actions = _allowed_repair_actions(module_name if module_name else None)
+
+        log_context = _get_error_log_context(module_name, lines=80)
+
+        prompt = f"""
+    You are the dashboard self-diagnostic assistant.
+    Analyze this runtime issue and return STRICT JSON only.
+
+    Issue Title: {title}
+    Module: {module_name or 'unknown'}
+    Source: {source or 'unknown'}
+    Error Message: {error_message or 'n/a'}
+    Stack Trace:
+    {stack_trace or 'n/a'}
+    Context JSON:
+    {json.dumps(context or {}, ensure_ascii=False)[:4000]}
+
+    Recent ERROR/WARNING log lines (from dashboard.log):
+    {log_context[:3000]}
+
+    Allowed auto repair actions:
+    {json.dumps(allowed_actions, ensure_ascii=False)}
+
+    Project source files are under src/ (Python backend: src/main.py, collectors, processors; JS frontend: src/static/dashboard.js; HTML: src/templates/dashboard_modern.html).
+
+Return this JSON schema exactly:
+{{
+  "summary": "short explanation",
+  "likely_causes": ["cause 1", "cause 2"],
+  "confidence": "low|medium|high",
+  "can_auto_fix": true,
+  "repair_actions": [
+    {{"key":"apply_code_fix","label":"Apply Code Fix & Create PR","description":"...","requires_approval":true}},
+    {{"key":"refresh_module","label":"Refresh Module Cache","description":"...","requires_approval":true,"module":"emails"}},
+    {{"key":"restart_dashboard","label":"Restart Dashboard Service","description":"...","requires_approval":true}}
+  ],
+  "code_fixes": [
+    {{
+      "file": "src/relative/path/to/file.py",
+      "description": "what this change does",
+      "old_snippet": "exact existing code to replace (10-30 lines with context)",
+      "new_snippet": "replacement code"
+    }}
+  ],
+  "commit_message": "fix(<module>): short imperative description",
+  "pr_title": "Fix: <short title>",
+  "pr_body": "## Problem\n...\n## Solution\n...\n## Testing\n...",
+  "manual_steps": ["step 1", "step 2"]
+}}
+
+Rules:
+- If uncertain, set can_auto_fix=false and leave code_fixes empty.
+- Only include apply_code_fix action when you have specific, concrete code_fixes.
+- Never invent unsupported action keys.
+- code_fixes old_snippet must be exact verbatim text from the source file.
+- Prefer concise, actionable steps.
+""".strip()
+
+        result = await ai_service.chat(
+            message=prompt,
+            conversation_id=f"diag_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+            include_context=False,
+            assistant_id=None
+        )
+
+        if not result.get('success'):
+            return fallback
+
+        parsed = _extract_json_from_ai_text(result.get('response', ''))
+        if not parsed or not isinstance(parsed, dict):
+            return fallback
+
+        # Parse code_fixes from AI output
+        raw_code_fixes = parsed.get("code_fixes") if isinstance(parsed.get("code_fixes"), list) else []
+        normalized_fixes = []
+        for fix in raw_code_fixes:
+            if not isinstance(fix, dict):
+                continue
+            file_path = str(fix.get("file") or "").strip()
+            old_snippet = str(fix.get("old_snippet") or "").strip()
+            new_snippet = str(fix.get("new_snippet") or "").strip()
+            if file_path and old_snippet and new_snippet:
+                normalized_fixes.append({
+                    "file": file_path,
+                    "description": str(fix.get("description") or "").strip(),
+                    "old_snippet": old_snippet,
+                    "new_snippet": new_snippet
+                })
+
+        diagnosis = {
+            "summary": parsed.get("summary") or fallback["summary"],
+            "likely_causes": parsed.get("likely_causes") or fallback["likely_causes"],
+            "confidence": parsed.get("confidence") or "low",
+            "can_auto_fix": bool(parsed.get("can_auto_fix", False)) if include_repair_actions else False,
+            "repair_actions": parsed.get("repair_actions") if include_repair_actions else [],
+            "code_fixes": normalized_fixes,
+            "commit_message": str(parsed.get("commit_message") or "").strip() or f"fix({module_name or 'general'}): AI-assisted repair",
+            "pr_title": str(parsed.get("pr_title") or "").strip() or title,
+            "pr_body": str(parsed.get("pr_body") or "").strip(),
+            "manual_steps": parsed.get("manual_steps") or fallback["manual_steps"]
+        }
+
+        if not isinstance(diagnosis["repair_actions"], list):
+            diagnosis["repair_actions"] = []
+
+        allowed_keys = {"restart_dashboard", "refresh_module", "apply_code_fix"}
+        normalized_actions = []
+        for action in diagnosis["repair_actions"]:
+            if not isinstance(action, dict):
+                continue
+            key = str(action.get("key", "")).strip()
+            if key not in allowed_keys:
+                continue
+            # Only allow apply_code_fix if we actually have code patches
+            if key == "apply_code_fix" and not normalized_fixes:
+                continue
+            normalized_actions.append({
+                "key": key,
+                "label": action.get("label") or key.replace('_', ' ').title(),
+                "description": action.get("description") or "",
+                "requires_approval": True,
+                "module": action.get("module") or module_name
+            })
+
+        diagnosis["repair_actions"] = normalized_actions
+        if not diagnosis["repair_actions"]:
+            diagnosis["can_auto_fix"] = False
+
+        return diagnosis
+    except Exception as ai_err:
+        logger.warning(f"AI diagnostic generation failed: {ai_err}")
+        return fallback
+
+
+def _push_diagnostic_event(event: Dict[str, Any]) -> Dict[str, Any]:
+    with DIAGNOSTIC_LOCK:
+        DIAGNOSTIC_EVENTS.append(event)
+        if len(DIAGNOSTIC_EVENTS) > DIAGNOSTIC_MAX_EVENTS:
+            DIAGNOSTIC_EVENTS.pop(0)
+    return event
+
+
+def _find_diagnostic_event(event_id: str) -> Optional[Dict[str, Any]]:
+    with DIAGNOSTIC_LOCK:
+        for item in DIAGNOSTIC_EVENTS:
+            if item.get('id') == event_id:
+                return item
+    return None
+
+
+def _get_recent_logs(
+    lines: int = 200,
+    level_filter: Optional[str] = None,
+    module_filter: Optional[str] = None
+) -> List[str]:
+    """Read recent lines from the rotating log file, with optional level/module filter."""
+    try:
+        if not LOG_FILE_PATH.exists():
+            return []
+        with open(str(LOG_FILE_PATH), "r", encoding="utf-8", errors="replace") as f:
+            f.seek(0, 2)
+            size = f.tell()
+            read_size = min(size, 512 * 1024)  # at most 512 KB
+            f.seek(max(0, size - read_size))
+            raw_lines = f.readlines()
+
+        result = []
+        level_upper = (level_filter or "").upper()
+        module_lower = (module_filter or "").lower()
+
+        for line in raw_lines:
+            line = line.rstrip()
+            if not line:
+                continue
+            if level_upper and level_upper not in line:
+                continue
+            if module_lower and module_lower not in line.lower():
+                continue
+            result.append(line)
+
+        return result[-lines:]
+    except Exception as e:
+        logger.warning(f"Could not read log file: {e}")
+        return []
+
+
+def _get_error_log_context(module_name: Optional[str] = None, lines: int = 60) -> str:
+    """Fetch recent ERROR/WARNING lines for AI prompts."""
+    all_lines = _get_recent_logs(lines=lines, module_filter=module_name or None)
+    relevant = [l for l in all_lines if "ERROR" in l or "WARNING" in l or "Traceback" in l or "Exception" in l]
+    if not relevant:
+        relevant = _get_recent_logs(lines=30, level_filter="ERROR")
+    return "\n".join(relevant[-50:]) if relevant else "(no recent errors in log)"
+
+
+def _get_github_token_and_repo() -> Dict[str, Any]:
+    """Return github token, owner, and repo from credentials + git remote."""
+    try:
+        from database import get_credentials
+        github_creds = get_credentials('github') or {}
+        token = github_creds.get('token') or ''
+    except Exception:
+        token = ''
+
+    owner = ''
+    repo = ''
+    try:
+        result = subprocess.run(
+            ['git', 'remote', 'get-url', 'origin'],
+            capture_output=True, text=True, timeout=5,
+            cwd=str(project_root)
+        )
+        remote_url = result.stdout.strip()
+        # Handle https://github.com/owner/repo.git or git@github.com:owner/repo.git
+        if 'github.com' in remote_url:
+            parts = remote_url.rstrip('.git').replace(':', '/').split('/')
+            if len(parts) >= 2:
+                repo = parts[-1]
+                owner = parts[-2]
+    except Exception:
+        pass
+
+    return {'token': token, 'owner': owner, 'repo': repo}
+
+
+def _create_fix_branch(event_id: str) -> str:
+    """Create and checkout a new fix branch. Returns branch name."""
+    short_id = (event_id or 'fix').split('_')[-1][:8]
+    branch = f"fix/ai-diag-{short_id}"
+    subprocess.run(
+        ['git', 'checkout', '-b', branch],
+        check=True, capture_output=True, timeout=15,
+        cwd=str(project_root)
+    )
+    return branch
+
+
+def _apply_file_patches(patches: List[Dict[str, Any]]) -> List[str]:
+    """Apply old→new snippet replacements to source files. Returns list of modified file paths."""
+    modified = []
+    for patch in patches:
+        rel_path = (patch.get('file') or '').strip()
+        old_snippet = patch.get('old_snippet') or ''
+        new_snippet = patch.get('new_snippet') or ''
+        if not rel_path or not old_snippet:
+            continue
+        abs_path = project_root / rel_path
+        if not abs_path.exists():
+            logger.warning(f"Patch target file not found: {abs_path}")
+            continue
+        content = abs_path.read_text(encoding='utf-8')
+        if old_snippet not in content:
+            logger.warning(f"Snippet not found in {rel_path}, skipping patch")
+            continue
+        abs_path.write_text(content.replace(old_snippet, new_snippet, 1), encoding='utf-8')
+        modified.append(rel_path)
+    return modified
+
+
+def _git_commit_and_push(branch: str, file_paths: List[str], commit_message: str) -> str:
+    """Stage files, commit, and push branch. Returns short commit SHA."""
+    for fp in file_paths:
+        subprocess.run(
+            ['git', 'add', fp],
+            check=True, capture_output=True, timeout=10,
+            cwd=str(project_root)
+        )
+    subprocess.run(
+        ['git', 'commit', '-m', commit_message],
+        check=True, capture_output=True, timeout=15,
+        cwd=str(project_root)
+    )
+    subprocess.run(
+        ['git', 'push', 'origin', branch],
+        check=True, capture_output=True, timeout=30,
+        cwd=str(project_root)
+    )
+    result = subprocess.run(
+        ['git', 'rev-parse', '--short', 'HEAD'],
+        capture_output=True, text=True, timeout=5,
+        cwd=str(project_root)
+    )
+    return result.stdout.strip()
+
+
+def _create_github_pr_via_api(
+    token: str, owner: str, repo: str,
+    head_branch: str, base_branch: str,
+    title: str, body: str
+) -> Dict[str, Any]:
+    """Create a GitHub Pull Request via REST API. Returns PR data dict."""
+    import urllib.request as _urllib_request
+    url = f"https://api.github.com/repos/{owner}/{repo}/pulls"
+    payload = json.dumps({
+        "title": title,
+        "body": body or f"AI-generated fix branch `{head_branch}`.",
+        "head": head_branch,
+        "base": base_branch,
+        "draft": False
+    }).encode('utf-8')
+    req = _urllib_request.Request(
+        url,
+        data=payload,
+        headers={
+            'Authorization': f'token {token}',
+            'Accept': 'application/vnd.github.v3+json',
+            'Content-Type': 'application/json'
+        },
+        method='POST'
+    )
+    try:
+        with _urllib_request.urlopen(req, timeout=20) as resp:
+            return json.loads(resp.read().decode('utf-8'))
+    except Exception as pr_err:
+        return {'error': str(pr_err)}
+
+
+def _get_default_branch() -> str:
+    """Get the default branch name (main/master)."""
+    try:
+        result = subprocess.run(
+            ['git', 'symbolic-ref', 'refs/remotes/origin/HEAD'],
+            capture_output=True, text=True, timeout=5,
+            cwd=str(project_root)
+        )
+        ref = result.stdout.strip()  # refs/remotes/origin/main
+        return ref.split('/')[-1] if ref else 'main'
+    except Exception:
+        return 'main'
 
 
 # Load configuration if it exists
@@ -5598,13 +6059,13 @@ async def google_auth_status():
         if 'https://www.googleapis.com/auth/drive.readonly' in scopes:
             scope_names.append('Drive')
         can_modify_gmail = has_required_google_scopes(scopes, GOOGLE_GMAIL_WRITE_SCOPES)
-        # Only require reconnect for expiry when refresh is unavailable/failed.
-        needs_reconnect = (is_expired and not has_refresh_token) or not can_modify_gmail
+        # Require reconnect only for actual auth breakage, not merely reduced (read-only) scope.
+        needs_reconnect = (is_expired and not has_refresh_token)
 
         if is_expired:
             message = "⚠️ Token expired - please reconnect"
         elif not can_modify_gmail:
-            message = "⚠️ Gmail read-only access detected - reconnect Google to enable mark-read, archive, and labels"
+            message = "✅ Connected (read-only Gmail scope). Reconnect only if you need mark-read/archive/labels actions."
         else:
             message = f"✅ Connected ({', '.join(scope_names)})"
         
@@ -7950,6 +8411,540 @@ async def refresh_widget(widget_name: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/diagnostics/events")
+async def get_diagnostic_events(limit: int = Query(30, ge=1, le=200)):
+    """Get recent diagnostic events for self-heal UI."""
+    try:
+        with DIAGNOSTIC_LOCK:
+            events = list(DIAGNOSTIC_EVENTS)[-limit:]
+        return {
+            "success": True,
+            "events": list(reversed(events)),
+            "count": len(events)
+        }
+    except Exception as e:
+        logger.error(f"Error getting diagnostic events: {e}")
+        return {"success": False, "events": [], "error": str(e)}
+
+
+@app.post("/api/diagnostics/report")
+async def report_diagnostic_event(request: Request):
+    """Report runtime error/event and optionally run AI diagnosis."""
+    try:
+        data = await request.json()
+        module_name = (data.get('module') or 'general').strip()
+        source = (data.get('source') or 'runtime').strip()
+        error_message = (data.get('message') or data.get('detail') or 'Unknown error').strip()
+        stack_trace = (data.get('stack') or data.get('traceback') or '').strip()
+        title = (data.get('title') or error_message[:120]).strip() or 'Runtime error'
+        auto_analyze = bool(data.get('auto_analyze', True))
+        context = data.get('context') if isinstance(data.get('context'), dict) else {}
+
+        event = {
+            "id": f"diag_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{secrets.token_hex(3)}",
+            "created_at": datetime.now().isoformat(),
+            "title": title,
+            "module": module_name,
+            "source": source,
+            "message": error_message,
+            "stack": stack_trace,
+            "context": context,
+            "diagnosis": None,
+            "status": "reported"
+        }
+
+        if auto_analyze:
+            diagnosis = await _run_ai_diagnostic(
+                title=title,
+                module_name=module_name,
+                source=source,
+                error_message=error_message,
+                stack_trace=stack_trace,
+                context=context,
+                include_repair_actions=True
+            )
+            event["diagnosis"] = diagnosis
+            event["status"] = "diagnosed"
+
+        _push_diagnostic_event(event)
+
+        return {
+            "success": True,
+            "event": event,
+            "message": "Diagnostic event recorded"
+        }
+    except Exception as e:
+        logger.error(f"Error reporting diagnostic event: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/diagnostics/review")
+async def review_diagnostic_module(request: Request):
+    """User-requested AI diagnostic review for a module/section."""
+    try:
+        data = await request.json()
+        module_name = (data.get('module') or 'general').strip()
+        review_notes = (data.get('notes') or '').strip()
+        source = (data.get('source') or 'manual_review').strip()
+        context = data.get('context') if isinstance(data.get('context'), dict) else {}
+
+        combined_message = review_notes or f"User requested a diagnostic review for module '{module_name}'."
+        diagnosis = await _run_ai_diagnostic(
+            title=f"Manual review: {module_name}",
+            module_name=module_name,
+            source=source,
+            error_message=combined_message,
+            stack_trace='',
+            context=context,
+            include_repair_actions=True
+        )
+
+        event = {
+            "id": f"diag_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{secrets.token_hex(3)}",
+            "created_at": datetime.now().isoformat(),
+            "title": f"Manual review: {module_name}",
+            "module": module_name,
+            "source": source,
+            "message": combined_message,
+            "stack": '',
+            "context": context,
+            "diagnosis": diagnosis,
+            "status": "diagnosed"
+        }
+
+        _push_diagnostic_event(event)
+
+        return {
+            "success": True,
+            "event": event,
+            "diagnosis": diagnosis
+        }
+    except Exception as e:
+        logger.error(f"Error reviewing module diagnostics: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/diagnostics/repair")
+async def run_diagnostic_repair(request: Request):
+    """Execute approved repair action generated by diagnostics."""
+    try:
+        data = await request.json()
+        event_id = (data.get('event_id') or '').strip()
+        action_key = (data.get('action_key') or '').strip()
+        approved = bool(data.get('approved', False))
+        module_name = (data.get('module') or '').strip()
+
+        if not approved:
+            return {"success": False, "error": "Repair action must be explicitly approved"}
+        if not action_key:
+            return {"success": False, "error": "action_key is required"}
+
+        target_event = _find_diagnostic_event(event_id) if event_id else None
+        if target_event and not module_name:
+            module_name = str(target_event.get('module') or '').strip()
+
+        if action_key == 'restart_dashboard':
+            command = f"cd '{str(project_root)}' && ./ops/startup.sh restart"
+            subprocess.Popen(
+                ['bash', '-lc', command],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                preexec_fn=os.setpgrp
+            )
+            return {
+                "success": True,
+                "action": action_key,
+                "message": "Dashboard restart initiated"
+            }
+
+        if action_key == 'refresh_module':
+            widget_map = {
+                'emails': 'email',
+                'email': 'email',
+                'calendar': 'calendar',
+                'todos': 'tasks',
+                'tasks': 'tasks',
+                'github': 'github',
+                'news': 'news',
+                'weather': 'weather',
+                'music': 'music',
+                'servers': 'servers'
+            }
+            widget_name = widget_map.get(module_name.lower()) if module_name else None
+            if widget_name in background_manager.cache:
+                background_manager.cache.pop(widget_name, None)
+                background_manager.cache_timestamps.pop(widget_name, None)
+
+            return {
+                "success": True,
+                "action": action_key,
+                "module": module_name,
+                "message": f"Module refresh prepared for {module_name or 'selected section'}"
+            }
+
+        return {"success": False, "error": f"Unsupported repair action: {action_key}"}
+    except Exception as e:
+        logger.error(f"Error running diagnostic repair: {e}")
+        logger.error(traceback.format_exc())
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/diagnostics/apply-fix")
+async def apply_diagnostic_code_fix(request: Request):
+    """Apply AI-generated code patches, commit to a fix branch, push, and open a GitHub PR."""
+    try:
+        data = await request.json()
+        event_id = (data.get('event_id') or '').strip()
+        approved = bool(data.get('approved', False))
+        code_fixes = data.get('code_fixes')
+        commit_message = (data.get('commit_message') or '').strip()
+        pr_title = (data.get('pr_title') or '').strip()
+        pr_body = (data.get('pr_body') or '').strip()
+
+        if not approved:
+            return {"success": False, "error": "apply-fix must be explicitly approved"}
+
+        # Load fixes from event if not supplied inline
+        if not code_fixes and event_id:
+            target_event = _find_diagnostic_event(event_id)
+            if target_event:
+                diagnosis = target_event.get('diagnosis') or {}
+                code_fixes = diagnosis.get('code_fixes') or []
+                if not commit_message:
+                    commit_message = diagnosis.get('commit_message') or ''
+                if not pr_title:
+                    pr_title = diagnosis.get('pr_title') or target_event.get('title') or 'AI fix'
+                if not pr_body:
+                    pr_body = diagnosis.get('pr_body') or ''
+
+        if not isinstance(code_fixes, list) or not code_fixes:
+            return {"success": False, "error": "No code fixes provided"}
+
+        commit_message = commit_message or f"fix(ai-diag): automated repair for event {event_id or 'unknown'}"
+        pr_title = pr_title or commit_message
+
+        gh = _get_github_token_and_repo()
+        if not gh['token'] or not gh['owner'] or not gh['repo']:
+            return {
+                "success": False,
+                "error": "GitHub credentials or remote origin not configured. Set a GitHub token in Settings → Credentials."
+            }
+
+        base_branch = _get_default_branch()
+
+        # Ensure we're on the default branch before creating fix branch
+        subprocess.run(
+            ['git', 'checkout', base_branch],
+            check=True, capture_output=True, timeout=10,
+            cwd=str(project_root)
+        )
+
+        # Create a stash checkpoint so we can restore if something goes wrong
+        stash_label = f"diag-rollback-{event_id or 'fix'}"
+        subprocess.run(
+            ['git', 'stash', 'push', '-u', '-m', stash_label],
+            capture_output=True, timeout=15, cwd=str(project_root)
+        )
+
+        fix_branch = _create_fix_branch(event_id)
+
+        try:
+            modified_files = _apply_file_patches(code_fixes)
+        except Exception as patch_err:
+            # Roll back: restore stash, return to base branch, delete fix branch
+            subprocess.run(['git', 'checkout', base_branch], capture_output=True, cwd=str(project_root))
+            subprocess.run(['git', 'branch', '-D', fix_branch], capture_output=True, cwd=str(project_root))
+            subprocess.run(['git', 'stash', 'pop'], capture_output=True, cwd=str(project_root))
+            return {"success": False, "error": f"Patch failed: {patch_err}"}
+
+        if not modified_files:
+            subprocess.run(['git', 'checkout', base_branch], capture_output=True, cwd=str(project_root))
+            subprocess.run(['git', 'branch', '-D', fix_branch], capture_output=True, cwd=str(project_root))
+            return {"success": False, "error": "No files were modified (snippets may not match current source)"}
+
+        # Build enriched commit body
+        full_commit_message = commit_message + "\n\n" + "\n".join(
+            f"- {f.get('description') or f.get('file')}" for f in code_fixes if isinstance(f, dict)
+        )
+        full_commit_message += f"\n\nDiagnostic event: {event_id}"
+
+        try:
+            sha = _git_commit_and_push(fix_branch, modified_files, full_commit_message)
+        except subprocess.CalledProcessError as git_err:
+            subprocess.run(['git', 'checkout', base_branch], capture_output=True, cwd=str(project_root))
+            stderr = (git_err.stderr or b'').decode('utf-8', errors='replace')
+            return {"success": False, "error": f"Git commit/push failed: {stderr[:500]}"}
+
+        # Return to base branch so the running server is not on a detached state
+        subprocess.run(['git', 'checkout', base_branch], capture_output=True, cwd=str(project_root))
+
+        # Build PR body
+        if not pr_body:
+            file_list = "\n".join(f"- `{f}`" for f in modified_files)
+            pr_body = (
+                f"## AI-Generated Fix\n\n"
+                f"Diagnostic event: `{event_id}`\n\n"
+                f"### Modified Files\n{file_list}\n\n"
+                f"### Changes\n" +
+                "\n".join(f"- **{f.get('file')}**: {f.get('description')}" for f in code_fixes if isinstance(f, dict)) +
+                f"\n\n### Commit\n`{sha}`\n\n> ⚠️ **Review before merging.** AI-generated changes should be carefully validated."
+            )
+
+        pr_data = _create_github_pr_via_api(
+            token=gh['token'],
+            owner=gh['owner'],
+            repo=gh['repo'],
+            head_branch=fix_branch,
+            base_branch=base_branch,
+            title=pr_title,
+            body=pr_body
+        )
+
+        if 'error' in pr_data and not pr_data.get('html_url'):
+            return {
+                "success": False,
+                "error": f"Code committed to branch '{fix_branch}' (SHA {sha}) but PR creation failed: {pr_data.get('error')}",
+                "branch": fix_branch,
+                "sha": sha,
+                "modified_files": modified_files
+            }
+
+        pr_url = pr_data.get('html_url') or ''
+        pr_number = pr_data.get('number')
+
+        # Update diagnostic event with PR info
+        target_event = _find_diagnostic_event(event_id) if event_id else None
+        if target_event:
+            target_event['pr'] = {
+                "url": pr_url,
+                "number": pr_number,
+                "branch": fix_branch,
+                "sha": sha,
+                "modified_files": modified_files
+            }
+            target_event['status'] = 'pr_created'
+
+        return {
+            "success": True,
+            "pr_url": pr_url,
+            "pr_number": pr_number,
+            "branch": fix_branch,
+            "sha": sha,
+            "modified_files": modified_files,
+            "message": f"PR #{pr_number} created: {pr_url}"
+        }
+    except Exception as e:
+        logger.error(f"Error applying diagnostic code fix: {e}")
+        logger.error(traceback.format_exc())
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/diagnostics/logs")
+async def get_diagnostic_logs(
+    lines: int = Query(150, ge=10, le=2000),
+    level: Optional[str] = Query(None, description="Filter by level: ERROR, WARNING, INFO"),
+    module: Optional[str] = Query(None, description="Filter by module name substring")
+):
+    """Return recent log lines from dashboard.log."""
+    try:
+        log_lines = _get_recent_logs(lines=lines, level_filter=level, module_filter=module)
+        log_files = []
+        if LOG_FILE_PATH.exists():
+            import glob as _glob
+            pattern = str(LOG_FILE_PATH) + "*"
+            for lf in sorted(_glob.glob(pattern)):
+                size = Path(lf).stat().st_size
+                log_files.append({"path": lf, "size_kb": round(size / 1024, 1)})
+        return {
+            "success": True,
+            "lines": log_lines,
+            "count": len(log_lines),
+            "log_files": log_files
+        }
+    except Exception as e:
+        logger.error(f"Error reading logs: {e}")
+        return {"success": False, "lines": [], "error": str(e)}
+
+
+@app.post("/api/diagnostics/logs/clear")
+async def clear_diagnostic_logs(request: Request):
+    """Truncate the active dashboard.log (rotated backups are preserved)."""
+    try:
+        data = await request.json()
+        confirmed = bool(data.get('confirmed', False))
+        if not confirmed:
+            return {"success": False, "error": "Pass confirmed=true to clear logs"}
+        with open(str(LOG_FILE_PATH), "w", encoding="utf-8") as f:
+            f.write(f"{datetime.now().isoformat()} INFO     system: Log cleared by user\n")
+        logger.info("Dashboard log cleared by user via diagnostics API")
+        return {"success": True, "message": "Log cleared"}
+    except Exception as e:
+        logger.error(f"Error clearing log: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/diagnostics/suggest-fix")
+async def suggest_user_fix(request: Request):
+    """User describes how to fix a problem; AI translates into code patches and returns them for approval."""
+    try:
+        data = await request.json()
+        event_id = (data.get('event_id') or '').strip()
+        suggestion = (data.get('suggestion') or '').strip()
+        module_name = (data.get('module') or 'general').strip()
+
+        if not suggestion:
+            return {"success": False, "error": "suggestion text is required"}
+
+        # Pull original event context if available
+        original_message = ""
+        original_stack = ""
+        original_context: Dict[str, Any] = {}
+        if event_id:
+            ev = _find_diagnostic_event(event_id)
+            if ev:
+                original_message = ev.get('message') or ''
+                original_stack = ev.get('stack') or ''
+                original_context = ev.get('context') or {}
+                if not module_name or module_name == 'general':
+                    module_name = ev.get('module') or module_name
+
+        log_context = _get_error_log_context(module_name, lines=80)
+
+        if not AI_ASSISTANT_AVAILABLE:
+            return {"success": False, "error": "AI provider not available"}
+
+        ai_service = get_ai_service(db, settings)
+        prompt = f"""
+You are the dashboard self-diagnostic assistant.
+The user has described how they want to fix a problem. Translate their description into concrete code patches.
+Return STRICT JSON only.
+
+Module: {module_name}
+Original Error: {original_message or 'n/a'}
+Stack Trace: {original_stack or 'n/a'}
+Recent ERROR/WARNING Logs:
+{log_context[:2000]}
+
+User's Suggested Fix:
+{suggestion}
+
+Project source files are under src/ (Python: src/main.py; JS: src/static/dashboard.js; HTML: src/templates/dashboard_modern.html; collectors: src/collectors/; processors: src/processors/).
+
+Return this JSON schema exactly:
+{{
+  "summary": "what this fix does",
+  "code_fixes": [
+    {{
+      "file": "src/relative/path/to/file.py",
+      "description": "what this change does",
+      "old_snippet": "exact existing code to replace",
+      "new_snippet": "replacement code"
+    }}
+  ],
+  "commit_message": "fix(<module>): <description>",
+  "pr_title": "Fix: <short title>",
+  "pr_body": "## Problem\\n...\\n## Solution (user-suggested)\\n...\\n## Testing\\n...",
+  "confidence": "low|medium|high",
+  "risks": ["any risks to be aware of"],
+  "manual_steps": ["anything the user must do manually"]
+}}
+
+Rules:
+- old_snippet must be exact verbatim source text.
+- If you cannot find a safe code change, return code_fixes as empty array and explain in summary.
+- Be conservative and targeted.
+""".strip()
+
+        result = await ai_service.chat(
+            message=prompt,
+            conversation_id=f"suggest_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+            include_context=False,
+            assistant_id=None
+        )
+
+        if not result.get('success'):
+            return {"success": False, "error": "AI failed to generate fix"}
+
+        parsed = _extract_json_from_ai_text(result.get('response', ''))
+        if not parsed or not isinstance(parsed, dict):
+            return {"success": False, "error": "AI response could not be parsed", "raw": result.get('response', '')[:500]}
+
+        # Normalise code_fixes
+        raw_fixes = parsed.get('code_fixes') if isinstance(parsed.get('code_fixes'), list) else []
+        normalized_fixes = [
+            {
+                "file": str(f.get('file') or '').strip(),
+                "description": str(f.get('description') or '').strip(),
+                "old_snippet": str(f.get('old_snippet') or '').strip(),
+                "new_snippet": str(f.get('new_snippet') or '').strip()
+            }
+            for f in raw_fixes
+            if isinstance(f, dict) and f.get('file') and f.get('old_snippet') and f.get('new_snippet')
+        ]
+
+        fix_plan = {
+            "summary": parsed.get('summary') or '',
+            "code_fixes": normalized_fixes,
+            "commit_message": str(parsed.get('commit_message') or f"fix({module_name}): user-suggested repair").strip(),
+            "pr_title": str(parsed.get('pr_title') or f"Fix: {module_name} (user-suggested)").strip(),
+            "pr_body": str(parsed.get('pr_body') or '').strip(),
+            "confidence": parsed.get('confidence') or 'low',
+            "risks": parsed.get('risks') if isinstance(parsed.get('risks'), list) else [],
+            "manual_steps": parsed.get('manual_steps') if isinstance(parsed.get('manual_steps'), list) else []
+        }
+
+        # Attach fix plan to original event for later apply-fix call
+        if event_id:
+            ev = _find_diagnostic_event(event_id)
+            if ev:
+                if not ev.get('diagnosis'):
+                    ev['diagnosis'] = {}
+                ev['diagnosis']['code_fixes'] = normalized_fixes
+                ev['diagnosis']['commit_message'] = fix_plan['commit_message']
+                ev['diagnosis']['pr_title'] = fix_plan['pr_title']
+                ev['diagnosis']['pr_body'] = fix_plan['pr_body']
+                ev['status'] = 'fix_planned'
+
+        return {"success": True, "fix_plan": fix_plan, "event_id": event_id}
+    except Exception as e:
+        logger.error(f"Error in suggest-fix: {e}")
+        logger.error(traceback.format_exc())
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/diagnostics/rollback")
+async def rollback_diagnostic_fix(request: Request):
+    """Pop the latest git stash (diag-rollback-*) to undo a failed/unwanted patch application."""
+    try:
+        data = await request.json()
+        confirmed = bool(data.get('confirmed', False))
+        if not confirmed:
+            return {"success": False, "error": "Pass confirmed=true to rollback"}
+
+        result = subprocess.run(
+            ['git', 'stash', 'list', '--format=%gd %s'],
+            capture_output=True, text=True, timeout=10, cwd=str(project_root)
+        )
+        stash_entries = result.stdout.strip().splitlines()
+        diag_stash = next((e for e in stash_entries if 'diag-rollback' in e), None)
+
+        if not diag_stash:
+            return {"success": False, "error": "No diagnostic rollback stash found"}
+
+        stash_ref = diag_stash.split()[0]  # e.g. stash@{0}
+        pop_result = subprocess.run(
+            ['git', 'stash', 'pop', stash_ref],
+            capture_output=True, text=True, timeout=15, cwd=str(project_root)
+        )
+        if pop_result.returncode != 0:
+            return {"success": False, "error": f"Stash pop failed: {pop_result.stderr.strip()[:300]}"}
+
+        return {"success": True, "message": f"Rolled back using stash: {stash_ref}"}
+    except Exception as e:
+        logger.error(f"Error rolling back: {e}")
+        return {"success": False, "error": str(e)}
+
+
 @app.post("/api/dashboards/add")
 async def add_dashboard(request: Request):
     """Add a new dashboard to monitor."""
@@ -8988,13 +9983,17 @@ async def shutdown_event():
 # ===================================================================
 
 @app.get("/api/servers")
-async def get_all_servers():
-    """Get all Python web servers running on the system"""
+async def get_all_servers(include_remote: bool = Query(False)):
+    """Get user web servers running on common app ports."""
     try:
         from utils.server_manager import ServerManager
         
         server_manager = ServerManager()
-        servers = server_manager.discover_python_servers()
+        servers = server_manager.discover_web_servers(port_min=8000, port_max=9000)
+
+        if include_remote:
+            remote_servers = server_manager.discover_remote_web_servers(port_min=8000, port_max=9000)
+            servers = servers + remote_servers
         
         return {"success": True, "servers": servers}
     except Exception as e:
@@ -9022,7 +10021,7 @@ async def stop_server(port: int):
         from utils.server_manager import ServerManager
         
         server_manager = ServerManager()
-        servers = server_manager.discover_python_servers()
+        servers = server_manager.discover_web_servers(port_min=8000, port_max=9000)
         server = next((s for s in servers if s['port'] == port), None)
         
         if not server:
@@ -9044,14 +10043,46 @@ async def stop_server(port: int):
         logger.error(f"Error stopping server on port {port}: {e}")
         return {"success": False, "error": str(e)}
 
+@app.post("/api/servers/{port}/restart")
+async def restart_server(port: int):
+    """Restart a server running on a specific port."""
+    try:
+        from utils.server_manager import ServerManager
+
+        server_manager = ServerManager()
+        servers = server_manager.discover_web_servers(port_min=8000, port_max=9000)
+        server = next((s for s in servers if s['port'] == port), None)
+
+        if not server:
+            raise HTTPException(status_code=404, detail=f"Server on port {port} not found")
+
+        if not server.get('can_restart'):
+            raise HTTPException(status_code=400, detail=f"Cannot restart server on port {port} (no restart command available)")
+
+        success = server_manager.restart_server(server)
+
+        if success:
+            return {"success": True, "message": f"Restart triggered for server on port {port}"}
+        return {"success": False, "error": f"Failed to restart server on port {port}"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error restarting server on port {port}: {e}")
+        return {"success": False, "error": str(e)}
+
 @app.post("/api/servers/refresh")
-async def refresh_servers():
+async def refresh_servers(include_remote: bool = Query(False)):
     """Refresh the list of discovered servers"""
     try:
         from utils.server_manager import ServerManager
         
         server_manager = ServerManager()
-        servers = server_manager.discover_python_servers()
+        servers = server_manager.discover_web_servers(port_min=8000, port_max=9000)
+
+        if include_remote:
+            remote_servers = server_manager.discover_remote_web_servers(port_min=8000, port_max=9000)
+            servers = servers + remote_servers
         
         return {"success": True, "servers": servers, "message": f"Found {len(servers)} servers"}
     except Exception as e:

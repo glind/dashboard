@@ -1,61 +1,17 @@
-// Simple service worker for PWA support
-self.addEventListener('install', event => {
-  self.skipWaiting();
-});
-
-self.addEventListener('activate', event => {
-  event.waitUntil(clients.claim());
-});
-
-self.addEventListener('fetch', event => {
-  // Optionally add caching logic here
-});
-
-// Additional existing code can be removed or commented out as needed
-// const CACHE_NAME = 'dashboard-cache-v1';
-// const urlsToCache = [
-//   '/',
-//   '/static/manifest.json',
-//   '/static/styles.css',
-//   '/static/app.js',
-//   // Add more assets as needed
-// ];
-const CACHE_NAME = 'dashboard-cache-v1';
-const urlsToCache = [
-  '/',
-  '/static/manifest.json',
-  '/static/styles.css',
-  '/static/app.js',
-  // Add more assets as needed
+// Dashboard Service Worker (safe caching policy)
+// - Never cache API responses (prevents stale auth/data)
+// - Network-first for HTML/JS/CSS
+// - Cache-first only for immutable assets/images
+const CACHE_NAME = 'dashboard-cache-v2';
+const CORE_ASSETS = [
+  '/static/manifest.json'
 ];
-
 
 self.addEventListener('install', event => {
   event.waitUntil(
-    caches.open(CACHE_NAME)
-      .then(cache => cache.addAll(urlsToCache))
+    caches.open(CACHE_NAME).then(cache => cache.addAll(CORE_ASSETS))
   );
   self.skipWaiting();
-});
-
-self.addEventListener('fetch', event => {
-  event.respondWith(
-    caches.match(event.request)
-      .then(response => {
-        if (response) {
-          return response;
-        }
-        return fetch(event.request).then(networkResponse => {
-          // Dynamic caching for GET requests
-          if (event.request.method === 'GET') {
-            caches.open(CACHE_NAME).then(cache => {
-              cache.put(event.request, networkResponse.clone());
-            });
-          }
-          return networkResponse;
-        });
-      })
-  );
 });
 
 self.addEventListener('activate', event => {
@@ -65,6 +21,54 @@ self.addEventListener('activate', event => {
     ))
   );
   self.clients.claim();
+});
+
+self.addEventListener('fetch', event => {
+  const req = event.request;
+  const url = new URL(req.url);
+
+  if (req.method !== 'GET') {
+    return;
+  }
+
+  // Never cache API endpoints
+  if (url.pathname.startsWith('/api/')) {
+    event.respondWith(fetch(req));
+    return;
+  }
+
+  const isDocument = req.mode === 'navigate' || req.destination === 'document';
+  const isCriticalStatic = url.pathname.startsWith('/static/') && /\.(js|css|html)$/i.test(url.pathname);
+
+  // Network-first for pages and critical static files to avoid stale dashboard code
+  if (isDocument || isCriticalStatic) {
+    event.respondWith(
+      fetch(req)
+        .then(response => {
+          if (response && response.ok) {
+            const clone = response.clone();
+            caches.open(CACHE_NAME).then(cache => cache.put(req, clone));
+          }
+          return response;
+        })
+        .catch(() => caches.match(req))
+    );
+    return;
+  }
+
+  // Cache-first for other static assets
+  event.respondWith(
+    caches.match(req).then(cached => {
+      if (cached) return cached;
+      return fetch(req).then(response => {
+        if (response && response.ok) {
+          const clone = response.clone();
+          caches.open(CACHE_NAME).then(cache => cache.put(req, clone));
+        }
+        return response;
+      });
+    })
+  );
 });
 
 // Push notifications

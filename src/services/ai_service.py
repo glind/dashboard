@@ -8,6 +8,7 @@ import gzip
 import hashlib
 import logging
 import re
+import os
 import httpx
 from collections import OrderedDict
 from datetime import datetime, timedelta
@@ -62,8 +63,27 @@ class AIService:
             if provider:
                 provider_type = getattr(provider, 'provider_type', '')
                 provider_model = str(getattr(provider, 'model_name', '') or '').strip()
-                if provider_type == 'ollama' and not provider_model:
-                    logger.warning("Ignoring stale Ollama provider with empty model_name; reinitializing from settings")
+                if provider_type == 'ollama':
+                    configured_host = str(self.db.get_setting('ollama_host', 'localhost') or '').strip()
+                    configured_model = str(self.db.get_setting('ollama_model', 'deepseek-r1:latest') or '').strip()
+                    provider_base_url = str(getattr(provider, 'base_url', '') or '').strip()
+                    host_mismatch = configured_host and configured_host not in provider_base_url
+                    model_mismatch = configured_model and provider_model and configured_model != provider_model
+
+                    if not provider_model:
+                        logger.warning("Ignoring stale Ollama provider with empty model_name; reinitializing from settings")
+                    elif host_mismatch or model_mismatch:
+                        logger.warning(
+                            "Ignoring stale Ollama provider (%s, model=%s); expected host=%s model=%s",
+                            provider_base_url,
+                            provider_model,
+                            configured_host,
+                            configured_model
+                        )
+                    else:
+                        self._provider = provider
+                        logger.info(f"Using existing AI provider: {provider.name}")
+                        return
                 else:
                     self._provider = provider
                     logger.info(f"Using existing AI provider: {provider.name}")
@@ -1340,6 +1360,7 @@ class AIService:
                     'error': 'No AI provider configured',
                     'success': False
                 }
+            provider_name_used = provider.name
 
             is_ollama = getattr(provider, 'provider_type', '') == 'ollama'
             
@@ -1508,6 +1529,60 @@ Use the context below to provide concrete prioritization and summaries.
                     logger.warning("Model response still generic/unstructured; using deterministic fallback brief")
                     response = self._build_fallback_daily_brief(prompt_context)
 
+            # Final availability fallback: if Ollama failed, try OpenAI automatically.
+            if is_ollama and isinstance(response, str) and response.startswith('Error:'):
+                try:
+                    openai_creds = self.db.get_credentials('openai') or {}
+                    key_candidates = [
+                        openai_creds.get('api_key'),
+                        self.db.get_setting('openai_api_key', ''),
+                        os.getenv('OPENAI_API_KEY', ''),
+                    ]
+                    openai_api_key = ''
+                    for candidate in key_candidates:
+                        if not isinstance(candidate, str):
+                            continue
+                        candidate = candidate.strip()
+                        if candidate.startswith('sk-'):
+                            openai_api_key = candidate
+                            break
+                    openai_model = self.db.get_setting('openai_model', 'gpt-4o-mini')
+
+                    if openai_api_key:
+                        from processors.ai_providers import create_provider
+
+                        fallback_provider = create_provider(
+                            'openai',
+                            'auto-openai-fallback',
+                            {
+                                'api_key': openai_api_key,
+                                'model_name': openai_model,
+                            }
+                        )
+
+                        logger.warning(
+                            "Ollama returned error (%s); retrying with OpenAI fallback model %s",
+                            response,
+                            openai_model
+                        )
+                        fallback_response = await fallback_provider.chat(messages, stream=False)
+                        if fallback_response and not str(fallback_response).startswith('Error:'):
+                            response = fallback_response
+                            provider_name_used = fallback_provider.name
+                        else:
+                            logger.warning("OpenAI fallback returned error response: %s", fallback_response)
+                    else:
+                        logger.warning("Skipping OpenAI fallback: no valid API key available")
+                except Exception as fallback_error:
+                    logger.warning(f"OpenAI fallback attempt failed: {fallback_error}")
+
+            # If all provider attempts failed, return a stable degraded message instead of raw provider error.
+            if isinstance(response, str) and response.startswith('Error:'):
+                response = (
+                    "AI assistant is temporarily unavailable because the local model is timing out or unreachable. "
+                    "Dashboard data collection is still running; retry AI chat shortly."
+                )
+
             self._update_conversation_memory(message, response)
             
             # Save to conversation history
@@ -1521,7 +1596,7 @@ Use the context below to provide concrete prioritization and summaries.
             return {
                 'success': True,
                 'response': response,
-                'provider': provider.name,
+                'provider': provider_name_used,
                 'conversation_id': conversation_id,
                 'context_included': include_context,
                 'context_hash': self.get_context_hash(context) if context else None

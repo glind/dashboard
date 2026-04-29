@@ -4128,9 +4128,9 @@ ${stackTrace}
             if (text) text.textContent = 'Collecting...';
             
             // Show starting notification
-            showNotification('info', '🔍 Searching emails, calendar, and notes for tasks...', 'tasks-notification');
+            showNotification('info', '🔍 Searching emails, calendar, notes, and GitHub for tasks...', 'tasks-notification');
             
-            const response = await fetch('/api/tasks/collect?days_back=30&sources=email,calendar,notes', {
+            const response = await fetch('/api/tasks/collect?days_back=30&sources=email,calendar,notes,github', {
                 method: 'POST'
             });
             
@@ -4155,6 +4155,9 @@ ${stackTrace}
                     }
                     if (bySource.email && bySource.email.tasks_extracted > 0) {
                         sources.push(`${bySource.email.tasks_extracted} from emails`);
+                    }
+                    if (bySource.github && bySource.github.tasks_extracted > 0) {
+                        sources.push(`${bySource.github.tasks_extracted} from GitHub`);
                     }
                     
                     message = `✅ Created ${data.tasks_created} new tasks! (${sources.join(', ')})`;

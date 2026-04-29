@@ -51,9 +51,20 @@ class OllamaProvider(AIProvider):
     
     def __init__(self, name: str, config: Dict[str, Any]):
         super().__init__(name, config)
-        self.base_url = config.get('base_url', 'http://localhost:11434')
-        self.model_name = config.get('model_name', 'llama2')
+        self.base_url = self._normalize_base_url(config.get('base_url', 'http://localhost:11434'))
+        self.model_name = (config.get('model_name') or 'qwen2.5:7b').strip()
         self.system_prompt = self._build_system_prompt()
+
+    def _normalize_base_url(self, base_url: str) -> str:
+        """Normalize base URL once to avoid malformed endpoint paths."""
+        return str(base_url or 'http://localhost:11434').strip().rstrip('/')
+
+    def _endpoint_url(self, endpoint: str) -> str:
+        """Build endpoint URL supporting base URLs with or without trailing /api."""
+        endpoint = endpoint.lstrip('/')
+        if self.base_url.endswith('/api') and endpoint.startswith('api/'):
+            endpoint = endpoint[4:]
+        return f"{self.base_url}/{endpoint}"
     
     def _build_system_prompt(self) -> str:
         """Build system prompt based on user preferences and context."""
@@ -93,7 +104,7 @@ class OllamaProvider(AIProvider):
                     'stream': stream
                 }
                 
-                async with session.post(f"{self.base_url}/api/chat", json=payload) as response:
+                async with session.post(self._endpoint_url('api/chat'), json=payload) as response:
                     # Some Ollama setups reject /api/chat (400/404). Fall back to /api/generate.
                     if response.status in (400, 404):
                         error_text = (await response.text()).strip()
@@ -121,7 +132,7 @@ class OllamaProvider(AIProvider):
                                         'messages': messages,
                                         'stream': stream
                                     }
-                                    async with session.post(f"{self.base_url}/api/chat", json=retry_payload) as retry_response:
+                                    async with session.post(self._endpoint_url('api/chat'), json=retry_payload) as retry_response:
                                         if retry_response.status == 200:
                                             self.model_name = fallback_model
                                             if stream:
@@ -177,7 +188,46 @@ class OllamaProvider(AIProvider):
                         return f"Error: {error_msg}"
                         
         except asyncio.TimeoutError:
-            logger.error(f"Timeout communicating with Ollama at {self.base_url}")
+            logger.error(f"Timeout communicating with Ollama at {self.base_url}; attempting fallback model retry")
+            try:
+                retry_timeout = aiohttp.ClientTimeout(total=50, connect=10, sock_read=40)
+                async with aiohttp.ClientSession(timeout=retry_timeout) as retry_session:
+                    fallback_model = await self._select_fallback_model(retry_session)
+                    if fallback_model and fallback_model != self.model_name:
+                        logger.warning(
+                            "Retrying timed-out Ollama request with fallback model %s (original %s)",
+                            fallback_model,
+                            self.model_name
+                        )
+                        retry_payload = {
+                            'model': fallback_model,
+                            'messages': messages,
+                            'stream': stream
+                        }
+                        async with retry_session.post(self._endpoint_url('api/chat'), json=retry_payload) as retry_response:
+                            if retry_response.status == 200:
+                                self.model_name = fallback_model
+                                if stream:
+                                    content = ""
+                                    async for line in retry_response.content:
+                                        if line:
+                                            try:
+                                                line_text = line.decode().strip()
+                                                if line_text:
+                                                    data = json.loads(line_text)
+                                                    if 'message' in data and 'content' in data['message']:
+                                                        content += data['message']['content']
+                                            except json.JSONDecodeError:
+                                                continue
+                                    return content
+
+                                retry_text = await retry_response.text()
+                                retry_data = json.loads(retry_text)
+                                if 'message' in retry_data and 'content' in retry_data['message']:
+                                    return retry_data['message']['content']
+            except Exception as retry_error:
+                logger.warning(f"Fallback retry after timeout failed: {retry_error}")
+
             return "Error: Ollama request timed out. The model may be loading or the context is very large."
         except aiohttp.ClientConnectorError as e:
             logger.error(f"Connection error to Ollama at {self.base_url}: {e}")
@@ -213,32 +263,42 @@ class OllamaProvider(AIProvider):
                 'stream': stream
             }
             
-            async with session.post(f"{self.base_url}/api/generate", json=payload) as response:
-                if response.status == 200:
-                    if stream:
-                        content = ""
-                        async for line in response.content:
-                            if line:
-                                try:
-                                    line_text = line.decode().strip()
-                                    if line_text:
-                                        data = json.loads(line_text)
-                                        if 'response' in data:
-                                            content += data['response']
-                                except json.JSONDecodeError:
-                                    continue
-                        return content
-                    else:
-                        response_text = await response.text()
-                        data = json.loads(response_text)
-                        if 'response' in data:
-                            return data['response']
+            generate_urls = [self._endpoint_url('api/generate'), self._endpoint_url('generate')]
+            last_error_text = ''
+            for generate_url in generate_urls:
+                async with session.post(generate_url, json=payload) as response:
+                    if response.status == 200:
+                        if stream:
+                            content = ""
+                            async for line in response.content:
+                                if line:
+                                    try:
+                                        line_text = line.decode().strip()
+                                        if line_text:
+                                            data = json.loads(line_text)
+                                            if 'response' in data:
+                                                content += data['response']
+                                    except json.JSONDecodeError:
+                                        continue
+                            return content
                         else:
-                            return "No response received from Ollama"
-                else:
-                    error_msg = f"Ollama generate API error: {response.status}"
-                    logger.error(error_msg)
-                    return f"Error: {error_msg}"
+                            response_text = await response.text()
+                            data = json.loads(response_text)
+                            if 'response' in data:
+                                return data['response']
+                            else:
+                                return "No response received from Ollama"
+
+                    last_error_text = (await response.text()).strip()
+                    if response.status != 404:
+                        error_msg = f"Ollama generate API error: {response.status}"
+                        logger.error("%s body=%s", error_msg, last_error_text[:240])
+                        return f"Error: {error_msg}"
+
+            # If both generate endpoints returned 404, surface one deterministic error.
+            error_msg = "Ollama generate API error: 404"
+            logger.error("%s body=%s", error_msg, last_error_text[:240])
+            return f"Error: {error_msg}"
         except Exception as e:
             logger.error(f"Error using Ollama generate API: {e}")
             return f"Error: {str(e)}"
@@ -246,7 +306,7 @@ class OllamaProvider(AIProvider):
     async def _select_fallback_model(self, session: aiohttp.ClientSession) -> Optional[str]:
         """Pick a fallback model from /api/tags when current model is invalid/unavailable."""
         try:
-            async with session.get(f"{self.base_url}/api/tags") as response:
+            async with session.get(self._endpoint_url('api/tags')) as response:
                 if response.status != 200:
                     return None
                 data = await response.json()
@@ -276,7 +336,7 @@ class OllamaProvider(AIProvider):
                     'modelfile': modelfile_content
                 }
                 
-                async with session.post(f"{self.base_url}/api/create", json=payload) as response:
+                async with session.post(self._endpoint_url('api/create'), json=payload) as response:
                     if response.status == 200:
                         return {
                             'status': 'success',
@@ -314,7 +374,7 @@ PARAMETER top_p 0.9"""
         """Check Ollama server health."""
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.get(f"{self.base_url}/api/tags") as response:
+                async with session.get(self._endpoint_url('api/tags')) as response:
                     return response.status == 200
         except:
             return False

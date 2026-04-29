@@ -205,6 +205,7 @@ class GoogleDriveNotesCollector:
             
         try:
             from google.oauth2.credentials import Credentials
+            from google.auth.transport.requests import Request
             from googleapiclient.discovery import build
             from pathlib import Path
             
@@ -235,6 +236,19 @@ class GoogleDriveNotesCollector:
                 client_secret=token_data.get('client_secret'),
                 scopes=token_data.get('scopes')
             )
+
+            if creds.expired and creds.refresh_token:
+                try:
+                    creds.refresh(Request())
+                    with open(token_path, 'w') as f:
+                        f.write(creds.to_json())
+                    logger.info(f"Refreshed and saved Google Drive token to {token_path}")
+                except Exception as refresh_error:
+                    logger.warning(f"Could not refresh Google Drive token: {refresh_error}")
+
+            if not creds.valid:
+                logger.error("Google Drive credentials are invalid. Reconnect Google OAuth.")
+                return None
             
             logger.info("Building Google Drive service...")
             self.service = build('drive', 'v3', credentials=creds)

@@ -3,11 +3,13 @@ Task Collection API Endpoints
 """
 
 import logging
+import os
 from fastapi import APIRouter, HTTPException, Query
 from datetime import datetime, timedelta
 
 from collectors.gmail_collector import GmailCollector
 from collectors.calendar_collector import CalendarCollector
+from collectors.github_collector import GitHubCollector
 from collectors.notes_collector import collect_all_notes
 from database import DatabaseManager, get_credentials
 from processors.task_generator import TaskGenerator, generate_tasks_from_all_sources
@@ -33,7 +35,7 @@ except Exception as e:
 @router.post("/collect")
 async def collect_tasks(
     days_back: int = Query(default=30, ge=1, le=90),
-    sources: str = Query(default="email,calendar,notes", description="Comma-separated: email,calendar,notes")
+    sources: str = Query(default="email,calendar,notes,github", description="Comma-separated: email,calendar,notes,github")
 ):
     """
     Collect tasks from emails, calendar, and notes.
@@ -64,6 +66,7 @@ async def collect_tasks(
         notes_data = None
         calendar_data = None
         email_data = None
+        github_data = None
         
         # Collect from notes
         if 'notes' in source_list:
@@ -71,7 +74,6 @@ async def collect_tasks(
                 logger.info("Collecting tasks from notes...")
                 notes_config = get_credentials('notes') or {}
                 
-                import os
                 obsidian_path = (
                     os.getenv('OBSIDIAN_VAULT_PATH') or
                     db.get_setting('obsidian_vault_path') or
@@ -134,7 +136,18 @@ async def collect_tasks(
         if 'email' in source_list:
             try:
                 logger.info("Collecting tasks from emails...")
-                gmail_collector = GmailCollector(app_settings)
+                project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
+                token_file = os.path.join(project_root, 'tokens', 'google_credentials.json')
+
+                account_config = {
+                    'name': 'primary',
+                    'credentials_file': token_file,
+                    'scopes': [
+                        'https://www.googleapis.com/auth/gmail.readonly',
+                        'https://www.googleapis.com/auth/calendar.readonly'
+                    ]
+                }
+                gmail_collector = GmailCollector(account_config)
                 
                 # Get recent emails
                 start_date = datetime.now() - timedelta(days=days_back)
@@ -162,6 +175,29 @@ async def collect_tasks(
                     
                     if len(emails) >= 50:  # Limit to prevent overload
                         break
+
+                # Fallback to recent stored emails when API collection yields nothing.
+                if not emails:
+                    with db.get_connection() as conn:
+                        cursor = conn.cursor()
+                        cursor.execute(
+                            """
+                            SELECT id, subject, sender, body, received_date, priority, has_todos
+                            FROM emails
+                            ORDER BY received_date DESC
+                            LIMIT 200
+                            """
+                        )
+                        db_emails = [dict(row) for row in cursor.fetchall()]
+
+                    for email_item in db_emails:
+                        subject = (email_item.get('subject') or '').lower()
+                        body = (email_item.get('body') or '').lower()
+                        has_todos = bool(email_item.get('has_todos'))
+                        if has_todos or any(keyword.lower() in subject or keyword.lower() in body[:1000] for keyword in action_keywords):
+                            emails.append(email_item)
+                        if len(emails) >= 50:
+                            break
                 
                 email_data = {'emails': emails}
                 results['sources_processed'].append('email')
@@ -173,16 +209,43 @@ async def collect_tasks(
             except Exception as e:
                 logger.error(f"Error collecting from emails: {e}")
                 results['errors'].append(f"Email: {str(e)}")
+
+        # Collect from GitHub
+        if 'github' in source_list:
+            try:
+                logger.info("Collecting tasks from GitHub issues...")
+
+                active_settings = app_settings
+                if active_settings is None:
+                    from config.settings import Settings
+                    active_settings = Settings()
+
+                github_collector = GitHubCollector(active_settings)
+                start_date = datetime.now() - timedelta(days=days_back)
+                end_date = datetime.now()
+                issues = await github_collector.collect_issues(start_date=start_date, end_date=end_date)
+
+                github_data = {'issues': issues}
+                results['sources_processed'].append('github')
+                results['by_source']['github'] = {
+                    'issues_found': len(issues)
+                }
+                logger.info(f"Found {len(issues)} GitHub issues")
+
+            except Exception as e:
+                logger.error(f"Error collecting from GitHub: {e}")
+                results['errors'].append(f"GitHub: {str(e)}")
         
         # Generate tasks from all collected data
-        if notes_data or calendar_data or email_data:
+        if notes_data or calendar_data or email_data or github_data:
             logger.info("Generating tasks from collected data...")
             
             task_result = generate_tasks_from_all_sources(
                 db_manager=db,
                 notes_data=notes_data,
                 calendar_data=calendar_data,
-                email_data=email_data
+                email_data=email_data,
+                github_data=github_data
             )
             
             results['tasks_found'] = task_result['tasks_found']

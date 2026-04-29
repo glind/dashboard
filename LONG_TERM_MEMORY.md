@@ -31,4 +31,4 @@
 - Record stable instructions the assistant should continue following.
 
 ## Last Updated
-- 2026-04-28T11:16:17.368184
+- 2026-04-28T16:08:19.979381

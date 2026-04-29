@@ -5544,6 +5544,8 @@ async def google_auth_status():
     try:
         import json
         from datetime import datetime
+        from google.oauth2.credentials import Credentials
+        from google.auth.transport.requests import Request
         
         tokens_file = project_root / "tokens" / "google_credentials.json"
         
@@ -5558,6 +5560,9 @@ async def google_auth_status():
         with open(tokens_file, 'r') as f:
             token_data = json.load(f)
         
+        scopes = token_data.get('scopes', [])
+        has_refresh_token = bool(token_data.get('refresh_token'))
+
         # Check expiry
         expiry_str = token_data.get('expiry')
         is_expired = False
@@ -5567,8 +5572,24 @@ async def google_auth_status():
                 is_expired = expiry < datetime.now(expiry.tzinfo)
             except:
                 pass
+
+        # If expired but we have a refresh token, refresh silently and persist.
+        if is_expired and has_refresh_token:
+            try:
+                creds = Credentials.from_authorized_user_file(str(tokens_file), get_google_oauth_scopes())
+                if creds.expired and creds.refresh_token:
+                    creds.refresh(Request())
+                    with open(tokens_file, 'w') as f:
+                        f.write(creds.to_json())
+
+                    # Reload token data after successful refresh.
+                    token_data = json.loads(creds.to_json())
+                    scopes = token_data.get('scopes', scopes)
+                    is_expired = False
+                    logger.info("Refreshed Google credentials during status check")
+            except Exception as refresh_error:
+                logger.warning(f"Could not refresh Google token during status check: {refresh_error}")
         
-        scopes = token_data.get('scopes', [])
         scope_names = []
         if 'https://www.googleapis.com/auth/calendar.readonly' in scopes:
             scope_names.append('Calendar')
@@ -5577,7 +5598,8 @@ async def google_auth_status():
         if 'https://www.googleapis.com/auth/drive.readonly' in scopes:
             scope_names.append('Drive')
         can_modify_gmail = has_required_google_scopes(scopes, GOOGLE_GMAIL_WRITE_SCOPES)
-        needs_reconnect = is_expired or not can_modify_gmail
+        # Only require reconnect for expiry when refresh is unavailable/failed.
+        needs_reconnect = (is_expired and not has_refresh_token) or not can_modify_gmail
 
         if is_expired:
             message = "⚠️ Token expired - please reconnect"
@@ -5591,6 +5613,7 @@ async def google_auth_status():
             "expired": is_expired,
             "needs_reconnect": needs_reconnect,
             "can_modify_gmail": can_modify_gmail,
+            "has_refresh_token": has_refresh_token,
             "message": message,
             "scopes": scopes,
             "scope_names": scope_names

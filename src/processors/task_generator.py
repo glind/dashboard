@@ -26,8 +26,33 @@ class TaskGenerator:
         tasks = []
         
         for note in notes:
+            # Prefer explicit TODO extraction from note collectors when present.
+            for note_todo in note.get('todos', []) or []:
+                todo_text = (note_todo.get('text') or '').strip()
+                if not todo_text:
+                    continue
+                tasks.append({
+                    'id': str(uuid.uuid4()),
+                    'title': todo_text,
+                    'description': f"From {note.get('source', 'notes')}: {note.get('title', 'Untitled')}",
+                    'source': note.get('source', 'notes'),
+                    'source_id': note.get('doc_id') or note.get('relative_path') or note.get('id'),
+                    'source_url': note.get('url') or note.get('path'),
+                    'priority': self._determine_priority(todo_text, 'todo'),
+                    'status': 'pending',
+                    'category': self._categorize_task(todo_text, note.get('source', 'notes')),
+                    'pattern_type': 'note_todo',
+                    'raw_context': note_todo.get('context', '')
+                })
+
+            note_text = "\n".join([
+                note.get('preview', '') or '',
+                note.get('content', '') or '',
+                note.get('description', '') or ''
+            ]).strip()
+
             note_tasks = self._extract_todos_from_text(
-                content=note.get('preview', '') or '',
+                content=note_text,
                 source=note['source'],
                 source_title=note['title'],
                 source_url=note.get('url') or note.get('path'),
@@ -44,6 +69,7 @@ class TaskGenerator:
         for event in events:
             # Extract from event description/summary
             description = event.get('description', '') or event.get('summary', '')
+            due_context = event.get('start_time') or event.get('start', {}).get('dateTime')
             
             if description:
                 event_tasks = self._extract_todos_from_text(
@@ -52,9 +78,28 @@ class TaskGenerator:
                     source_title=f"Meeting: {event.get('summary', 'Untitled')}",
                     source_url=event.get('htmlLink'),
                     source_id=event.get('id'),
-                    due_context=event.get('start', {}).get('dateTime')
+                    due_context=due_context
                 )
                 tasks.extend(event_tasks)
+
+            # Include pre-extracted TODOs coming from calendar collector.
+            for event_todo in event.get('todos', []) or []:
+                todo_text = (event_todo.get('text') or '').strip()
+                if not todo_text:
+                    continue
+                tasks.append({
+                    'id': str(uuid.uuid4()),
+                    'title': todo_text,
+                    'description': f"From calendar event: {event.get('summary', 'Untitled')}",
+                    'source': 'calendar',
+                    'source_id': event.get('id'),
+                    'source_url': event.get('htmlLink'),
+                    'priority': self._determine_priority(todo_text, 'action'),
+                    'status': 'pending',
+                    'category': self._categorize_task(todo_text, 'calendar'),
+                    'pattern_type': 'calendar_todo',
+                    'raw_context': event_todo.get('context', '')
+                })
             
             # Extract tasks based on meeting patterns
             meeting_tasks = self._extract_meeting_follow_ups(event)
@@ -80,6 +125,43 @@ class TaskGenerator:
                 )
                 tasks.extend(email_tasks)
         
+        return tasks
+
+    def extract_tasks_from_github_issues(self, issues: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Extract tasks from open GitHub issues and issue body action patterns."""
+        tasks = []
+
+        for issue in issues:
+            title = (issue.get('title') or '').strip()
+            body = issue.get('body') or ''
+            source_title = issue.get('repository') or issue.get('repo') or 'GitHub'
+            source_id = str(issue.get('id') or issue.get('number') or '')
+            source_url = issue.get('url') or issue.get('html_url') or issue.get('github_url')
+
+            if title:
+                tasks.append({
+                    'id': str(uuid.uuid4()),
+                    'title': title,
+                    'description': f"From GitHub issue in {source_title}\n\n{body[:600]}",
+                    'source': 'github',
+                    'source_id': source_id,
+                    'source_url': source_url,
+                    'priority': 'high' if 'bug' in (str(issue.get('labels', '')).lower()) else 'medium',
+                    'status': 'pending',
+                    'category': 'github',
+                    'pattern_type': 'github_issue',
+                    'raw_context': body[:600]
+                })
+
+            extracted = self._extract_todos_from_text(
+                content=body,
+                source='github',
+                source_title=title or source_title,
+                source_url=source_url,
+                source_id=source_id
+            )
+            tasks.extend(extracted)
+
         return tasks
     
     def _extract_todos_from_text(self, content: str, source: str, source_title: str,
@@ -265,6 +347,8 @@ class TaskGenerator:
             return 'meeting_related'
         elif source == 'email':
             return 'email_related'
+        elif source == 'github':
+            return 'github'
         elif source in ['obsidian', 'google_drive']:
             return 'notes_related'
         
@@ -317,7 +401,7 @@ class TaskGenerator:
         }
 
 
-def generate_tasks_from_all_sources(db_manager, notes_data=None, calendar_data=None, email_data=None) -> Dict[str, Any]:
+def generate_tasks_from_all_sources(db_manager, notes_data=None, calendar_data=None, email_data=None, github_data=None) -> Dict[str, Any]:
     """Generate tasks from all available sources."""
     generator = TaskGenerator(db_manager)
     all_tasks = []
@@ -336,6 +420,11 @@ def generate_tasks_from_all_sources(db_manager, notes_data=None, calendar_data=N
     if email_data:
         email_tasks = generator.extract_tasks_from_emails(email_data.get('emails', []))
         all_tasks.extend(email_tasks)
+
+    # Extract from GitHub issues
+    if github_data:
+        github_tasks = generator.extract_tasks_from_github_issues(github_data.get('issues', []))
+        all_tasks.extend(github_tasks)
     
     # Create tasks in database
     result = generator.create_tasks_if_not_exist(all_tasks)
@@ -345,7 +434,8 @@ def generate_tasks_from_all_sources(db_manager, notes_data=None, calendar_data=N
         'by_source': {
             'notes': len([t for t in all_tasks if t['source'] in ['obsidian', 'google_drive']]),
             'calendar': len([t for t in all_tasks if t['source'] == 'calendar']),
-            'email': len([t for t in all_tasks if t['source'] == 'email'])
+            'email': len([t for t in all_tasks if t['source'] == 'email']),
+            'github': len([t for t in all_tasks if t['source'] == 'github'])
         },
         'creation_result': result,
         'sample_tasks': all_tasks[:5]  # First 5 for preview

@@ -120,7 +120,32 @@ class GoogleProvider(BaseProvider):
         if not self.credentials:
             # Try to authenticate
             return await self.authenticate()
+
+        # Refresh silently when access token expires but refresh token exists.
+        if self.credentials.expired and self.credentials.refresh_token:
+            try:
+                self.credentials.refresh(Request())
+                self._persist_credentials()
+                logger.info("Refreshed Google provider credentials in is_authenticated")
+            except Exception as e:
+                logger.warning(f"Failed to refresh Google provider credentials: {e}")
+                return False
+
         return self.credentials.valid
+
+    def _persist_credentials(self):
+        """Persist refreshed credentials to the default token path."""
+        if not self.credentials:
+            return
+
+        try:
+            project_root = Path(__file__).parent.parent.parent
+            token_file = project_root / "tokens" / "google_credentials.json"
+            token_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(token_file, 'w') as f:
+                f.write(self.credentials.to_json())
+        except Exception as e:
+            logger.warning(f"Could not persist refreshed Google credentials: {e}")
     
     async def get_auth_url(self) -> Optional[str]:
         """Get OAuth URL for authentication."""

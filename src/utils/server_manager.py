@@ -158,11 +158,16 @@ class ServerManager:
                 server_type = "Gunicorn"
             elif "http.server" in cmdline.lower():
                 server_type = "HTTP Server"
-            
-            # Try to determine project name from path
-            project_name = self._extract_project_name(cmdline)
+
             app_path = self._extract_app_path(proc, cmdline)
             working_dir = self._safe_get_cwd(proc)
+
+            # Try to get a real project name by reading metadata files first
+            project_name = (
+                self._read_project_name_from_dir(working_dir)
+                or self._read_project_name_from_dir(app_path)
+                or self._extract_project_name(cmdline)
+            )
             repo_info = self._find_git_info(app_path or working_dir)
             restart_command = self._build_restart_command(proc, app_path, working_dir, port)
             memory_info = proc.info.get('memory_info')
@@ -203,6 +208,74 @@ class ServerManager:
             logger.error(f"Error analyzing process: {e}")
             return None
     
+    def _read_project_name_from_dir(self, directory: Optional[str]) -> Optional[str]:
+        """Try to read a human-readable project name from metadata files in a directory."""
+        if not directory:
+            return None
+        root = Path(directory)
+        if not root.is_dir():
+            root = root.parent
+
+        # Walk up at most 3 levels looking for metadata files
+        for check_root in [root] + list(root.parents)[:3]:
+            # BUILDLY.yaml
+            buildly = check_root / 'BUILDLY.yaml'
+            if buildly.exists():
+                try:
+                    import yaml as _yaml
+                    with open(buildly) as f:
+                        data = _yaml.safe_load(f)
+                    name = (data or {}).get('name') or (data or {}).get('title')
+                    if name:
+                        return str(name)
+                except Exception:
+                    pass
+
+            # pyproject.toml
+            pyproj = check_root / 'pyproject.toml'
+            if pyproj.exists():
+                try:
+                    import tomllib
+                    with open(pyproj, 'rb') as f:
+                        data = tomllib.load(f)
+                    name = (data.get('project') or data.get('tool', {}).get('poetry') or {}).get('name')
+                    if name:
+                        return str(name)
+                except Exception:
+                    pass
+
+            # package.json
+            pkg = check_root / 'package.json'
+            if pkg.exists():
+                try:
+                    with open(pkg) as f:
+                        data = json.load(f)
+                    name = data.get('name') or data.get('displayName')
+                    if name:
+                        return str(name)
+                except Exception:
+                    pass
+
+            # setup.cfg / setup.py name line
+            setup_cfg = check_root / 'setup.cfg'
+            if setup_cfg.exists():
+                try:
+                    import configparser
+                    cfg = configparser.ConfigParser()
+                    cfg.read(str(setup_cfg))
+                    name = cfg.get('metadata', 'name', fallback=None)
+                    if name:
+                        return name
+                except Exception:
+                    pass
+
+            # Fall back to the directory name if a known project marker exists
+            markers = ['.git', 'requirements.txt', 'Makefile', 'Dockerfile', 'ops']
+            if any((check_root / m).exists() for m in markers):
+                return check_root.name
+
+        return None
+
     def _extract_project_name(self, cmdline: str) -> str:
         """Extract project name from command line"""
         # Look for common project directory patterns
@@ -210,22 +283,24 @@ class ServerManager:
             if '/' in part and ('main.py' in part or 'app.py' in part or 'server.py' in part):
                 path = Path(part)
                 if path.is_absolute():
+                    project_name = self._read_project_name_from_dir(str(path.parent))
+                    if project_name:
+                        return project_name
                     return path.parent.name
-                else:
-                    # Try to find the project root
-                    for parent_part in cmdline.split():
-                        if parent_part.startswith('/') and parent_part in part:
-                            return Path(parent_part).parent.name
-        
+
         # Fallback: look for directory names in the cmdline
         parts = cmdline.split()
         for part in parts:
-            if '/' in part:
-                path_parts = part.split('/')
-                for path_part in path_parts:
-                    if path_part and not path_part.startswith('-') and not path_part.endswith('.py'):
-                        return path_part
-        
+            if '/' in part and not part.startswith('-'):
+                candidate = Path(part)
+                if candidate.is_absolute() and candidate.exists():
+                    project_name = self._read_project_name_from_dir(
+                        str(candidate if candidate.is_dir() else candidate.parent)
+                    )
+                    if project_name:
+                        return project_name
+                    return candidate.name if candidate.is_dir() else candidate.parent.name
+
         return f"Server-{hash(cmdline) % 10000}"
 
     def _guess_local_use(self, cmdline: str, app_path: Optional[str], project_name: str) -> str:

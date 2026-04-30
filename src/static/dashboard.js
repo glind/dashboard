@@ -7774,27 +7774,32 @@ Then ask me: "What would you like to do with this email?"`,
         const pid   = s.pid ? `PID ${s.pid}` : '—';
         const remote = s.host && s.host !== 'localhost' && s.host !== '127.0.0.1';
         const hostLabel = remote ? `${s.host}:${s.port}` : `localhost:${s.port}`;
-
-        const openHref = `http://${s.host || 'localhost'}:${s.port}`;
+        const openHref  = `http://${s.host || 'localhost'}:${s.port}`;
+        const isSelf    = !!s.is_self;
+        const borderCls = isSelf ? 'border-purple-600 bg-purple-950' : 'border-gray-700 bg-gray-800';
 
         return `
-        <div class="bg-gray-800 border border-gray-700 rounded-xl p-5 mb-4 flex flex-wrap items-start gap-4">
+        <div class="border ${borderCls} rounded-xl p-5 mb-4 flex flex-wrap items-start gap-4">
             <!-- Status dot + name -->
             <div class="flex items-center gap-3 min-w-48">
                 <span class="h-3 w-3 rounded-full bg-${statusColor}-400 mt-1 shrink-0"></span>
                 <div>
-                    <p class="font-semibold text-white">${this._escHtml(s.name || s.command || hostLabel)}</p>
+                    <p class="font-semibold text-white">${this._escHtml(s.name || hostLabel)}</p>
                     <p class="text-xs text-gray-400 font-mono">${this._escHtml(hostLabel)}</p>
+                    ${s.likely_use ? `<p class="text-xs text-gray-400 mt-0.5 italic">${this._escHtml(s.likely_use)}</p>` : ''}
                 </div>
             </div>
 
             <!-- Stats -->
             <div class="flex flex-wrap gap-4 text-xs text-gray-400 flex-1">
+                ${s.type && s.type !== 'unknown' ? `<span class="px-2 py-0.5 bg-gray-700 rounded">${this._escHtml(s.type)}</span>` : ''}
                 <span title="Process ID">🆔 ${this._escHtml(pid)}</span>
                 <span title="CPU">⚡ ${this._escHtml(cpu)}</span>
                 <span title="Memory">🧠 ${this._escHtml(memMb)}</span>
-                ${s.command ? `<span class="font-mono truncate max-w-xs" title="${this._escHtml(s.command)}">$ ${this._escHtml(s.command.slice(0, 60))}</span>` : ''}
+                ${s.working_dir ? `<span class="font-mono text-gray-500 truncate max-w-xs" title="${this._escHtml(s.working_dir)}">📁 ${this._escHtml(s.working_dir.split('/').slice(-2).join('/'))}</span>` : ''}
+                ${s.command || s.cmdline ? `<span class="font-mono truncate max-w-xs text-gray-500" title="${this._escHtml(s.command || s.cmdline)}">$ ${this._escHtml((s.command || s.cmdline || '').slice(0, 60))}</span>` : ''}
                 <span class="px-2 py-0.5 bg-${statusColor}-900 text-${statusColor}-300 rounded">${this._escHtml(s.status || 'unknown')}</span>
+                ${isSelf ? '<span class="px-2 py-0.5 bg-purple-800 text-purple-200 rounded">▶ running now</span>' : ''}
             </div>
 
             <!-- Actions -->
@@ -7803,7 +7808,12 @@ Then ask me: "What would you like to do with this email?"`,
                    class="px-3 py-1.5 bg-blue-700 hover:bg-blue-600 text-white text-xs rounded font-semibold">
                     🌐 Open
                 </a>
-                ${s.can_control && s.status === 'running' ? `
+                ${isSelf ? `
+                <button onclick="window.dataLoader && dataLoader.restartSelf()"
+                        class="px-3 py-1.5 bg-purple-700 hover:bg-purple-600 text-white text-xs rounded font-semibold">
+                    🔄 Restart Dashboard
+                </button>` : ''}
+                ${s.can_control && s.status === 'running' && !isSelf ? `
                 <button onclick="window.dataLoader && dataLoader.stopServer(${s.port})"
                         class="px-3 py-1.5 bg-red-800 hover:bg-red-700 text-white text-xs rounded font-semibold">
                     ⏹ Stop
@@ -7814,6 +7824,21 @@ Then ask me: "What would you like to do with this email?"`,
                 </button>` : ''}
             </div>
         </div>`;
+    }
+
+    async restartSelf() {
+        if (!confirm('Restart the dashboard server? The page will reload automatically once it comes back up.')) return;
+        try {
+            await fetch('/api/diagnostics/repair', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action_key: 'restart_dashboard', approved: true })
+            });
+            this.showNotification('🔄 Dashboard restarting… page will reload in ~8s', 'success');
+            setTimeout(() => location.reload(), 8000);
+        } catch (e) {
+            this.showNotification('Restart request failed', 'error');
+        }
     }
 
     async stopServer(port) {

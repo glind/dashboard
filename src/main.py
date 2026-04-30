@@ -9987,14 +9987,46 @@ async def get_all_servers(include_remote: bool = Query(False)):
     """Get user web servers running on common app ports."""
     try:
         from utils.server_manager import ServerManager
-        
+
         server_manager = ServerManager()
         servers = server_manager.discover_web_servers(port_min=8000, port_max=9000)
 
         if include_remote:
             remote_servers = server_manager.discover_remote_web_servers(port_min=8000, port_max=9000)
             servers = servers + remote_servers
-        
+
+        # Self-identify: stamp the entry that matches this running process
+        self_port = int(os.environ.get('PORT', 8008))
+        self_pid  = os.getpid()
+        self_cwd  = str(project_root)
+
+        # Read app name from BUILDLY.yaml if present
+        _self_name = 'Founder Dashboard'
+        try:
+            import yaml as _yaml
+            _buildly = project_root / 'BUILDLY.yaml'
+            if _buildly.exists():
+                with open(_buildly) as _f:
+                    _bd = _yaml.safe_load(_f) or {}
+                    _self_name = _bd.get('name') or _bd.get('title') or _self_name
+        except Exception:
+            pass
+
+        for s in servers:
+            _is_self = (
+                s.get('port') == self_port
+                or s.get('pid') == self_pid
+                or (s.get('working_dir') and str(s['working_dir']).startswith(self_cwd))
+            )
+            if _is_self:
+                s['name']        = f'⭐ {_self_name} (this app)'
+                s['type']        = 'FastAPI / Uvicorn'
+                s['likely_use']  = 'This dashboard application'
+                s['working_dir'] = self_cwd
+                s['is_self']     = True
+                s['port']        = self_port
+                s['url']         = f'http://localhost:{self_port}'
+
         return {"success": True, "servers": servers}
     except Exception as e:
         logger.error(f"Error discovering servers: {e}")

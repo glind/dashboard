@@ -7719,6 +7719,585 @@ Then ask me: "What would you like to do with this email?"`,
         }
     }
     
+    // ── Servers ──────────────────────────────────────────────────────────────
+
+    async loadServers(retryCount = 0, options = {}) {
+        const container = document.getElementById('servers-content');
+        if (!container) return;
+
+        const includeRemote = document.getElementById('include-remote-servers')?.checked || false;
+        const params = new URLSearchParams();
+        if (includeRemote) params.set('include_remote', 'true');
+
+        if (!options.silent) {
+            container.innerHTML = `
+                <div class="flex items-center gap-3 py-8 text-gray-400">
+                    <svg class="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
+                    </svg>
+                    <span>Scanning ports…</span>
+                </div>`;
+        }
+
+        try {
+            const r    = await fetch(`/api/servers?${params}`);
+            const data = await r.json();
+
+            if (!data.success) throw new Error(data.error || 'Server discovery failed');
+
+            const servers = data.servers || [];
+            if (!servers.length) {
+                container.innerHTML = `
+                    <div class="flex flex-col items-center py-12 text-gray-500">
+                        <span class="text-4xl mb-3">🔇</span>
+                        <p class="text-sm">No web servers detected on ports 8000–9000.</p>
+                    </div>`;
+                return;
+            }
+
+            container.innerHTML = servers.map(s => this._renderServerCard(s)).join('');
+        } catch (e) {
+            console.error('loadServers error:', e);
+            if (retryCount < 1) {
+                setTimeout(() => this.loadServers(retryCount + 1, { silent: true }), 2000);
+            } else {
+                container.innerHTML = `<p class="text-red-400 text-sm">Failed to load servers: ${this._escHtml(e.message)}</p>`;
+            }
+        }
+    }
+
+    _renderServerCard(s) {
+        const statusColor = s.status === 'running' ? 'green' : s.status === 'stopped' ? 'red' : 'yellow';
+        const memMb = s.memory_mb != null ? `${Math.round(s.memory_mb)} MB` : '—';
+        const cpu   = s.cpu_percent != null ? `${s.cpu_percent.toFixed(1)}%` : '—';
+        const pid   = s.pid ? `PID ${s.pid}` : '—';
+        const remote = s.host && s.host !== 'localhost' && s.host !== '127.0.0.1';
+        const hostLabel = remote ? `${s.host}:${s.port}` : `localhost:${s.port}`;
+
+        const openHref = `http://${s.host || 'localhost'}:${s.port}`;
+
+        return `
+        <div class="bg-gray-800 border border-gray-700 rounded-xl p-5 mb-4 flex flex-wrap items-start gap-4">
+            <!-- Status dot + name -->
+            <div class="flex items-center gap-3 min-w-48">
+                <span class="h-3 w-3 rounded-full bg-${statusColor}-400 mt-1 shrink-0"></span>
+                <div>
+                    <p class="font-semibold text-white">${this._escHtml(s.name || s.command || hostLabel)}</p>
+                    <p class="text-xs text-gray-400 font-mono">${this._escHtml(hostLabel)}</p>
+                </div>
+            </div>
+
+            <!-- Stats -->
+            <div class="flex flex-wrap gap-4 text-xs text-gray-400 flex-1">
+                <span title="Process ID">🆔 ${this._escHtml(pid)}</span>
+                <span title="CPU">⚡ ${this._escHtml(cpu)}</span>
+                <span title="Memory">🧠 ${this._escHtml(memMb)}</span>
+                ${s.command ? `<span class="font-mono truncate max-w-xs" title="${this._escHtml(s.command)}">$ ${this._escHtml(s.command.slice(0, 60))}</span>` : ''}
+                <span class="px-2 py-0.5 bg-${statusColor}-900 text-${statusColor}-300 rounded">${this._escHtml(s.status || 'unknown')}</span>
+            </div>
+
+            <!-- Actions -->
+            <div class="flex gap-2 shrink-0">
+                <a href="${this._escHtml(openHref)}" target="_blank"
+                   class="px-3 py-1.5 bg-blue-700 hover:bg-blue-600 text-white text-xs rounded font-semibold">
+                    🌐 Open
+                </a>
+                ${s.can_control && s.status === 'running' ? `
+                <button onclick="window.dataLoader && dataLoader.stopServer(${s.port})"
+                        class="px-3 py-1.5 bg-red-800 hover:bg-red-700 text-white text-xs rounded font-semibold">
+                    ⏹ Stop
+                </button>
+                <button onclick="window.dataLoader && dataLoader.restartServer(${s.port})"
+                        class="px-3 py-1.5 bg-yellow-700 hover:bg-yellow-600 text-white text-xs rounded font-semibold">
+                    🔄 Restart
+                </button>` : ''}
+            </div>
+        </div>`;
+    }
+
+    async stopServer(port) {
+        if (!confirm(`Stop server on port ${port}?`)) return;
+        try {
+            const r    = await fetch(`/api/servers/${port}/stop`, { method: 'POST' });
+            const data = await r.json();
+            if (data.success) {
+                this.showNotification(`✅ Server on port ${port} stopped`, 'success');
+                setTimeout(() => this.loadServers(0, { silent: true }), 800);
+            } else {
+                this.showNotification(data.error || 'Failed to stop server', 'error');
+            }
+        } catch (e) {
+            this.showNotification('Failed to stop server', 'error');
+        }
+    }
+
+    async restartServer(port) {
+        if (!confirm(`Restart server on port ${port}?`)) return;
+        try {
+            const r    = await fetch(`/api/servers/${port}/restart`, { method: 'POST' });
+            const data = await r.json();
+            if (data.success) {
+                this.showNotification(`✅ Server on port ${port} restarting…`, 'success');
+                setTimeout(() => this.loadServers(0, { silent: true }), 2000);
+            } else {
+                this.showNotification(data.error || 'Failed to restart server', 'error');
+            }
+        } catch (e) {
+            this.showNotification('Failed to restart server', 'error');
+        }
+    }
+
+    toggleRemoteServers(checked) {
+        this.loadServers(0, { force: true });
+    }
+
+    // ── Diagnostics ──────────────────────────────────────────────────────────
+
+    switchDiagTab(tab) {
+        const tabs = ['events', 'review', 'suggest', 'logs', 'ask'];
+        tabs.forEach(t => {
+            const btn   = document.getElementById(`diag-tab-${t}`);
+            const panel = document.getElementById(`diag-panel-${t}`);
+            if (!btn || !panel) return;
+            const active = t === tab;
+            panel.classList.toggle('hidden', !active);
+            if (active) {
+                btn.classList.add('bg-gray-700', 'text-white');
+                btn.classList.remove('text-gray-400');
+            } else {
+                btn.classList.remove('bg-gray-700', 'text-white');
+                btn.classList.add('text-gray-400');
+            }
+        });
+        if (tab === 'events') this.loadDiagnostics();
+        if (tab === 'logs')   this.loadDiagLogs();
+    }
+
+    // ── Report a JS / runtime error to the backend ──────────────────────────
+    async reportErrorToDiag(message, stack = '', module = 'frontend', autoAnalyze = true) {
+        try {
+            const r = await fetch('/api/diagnostics/report', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    title: message.slice(0, 120),
+                    module,
+                    source: 'js_runtime',
+                    message,
+                    stack,
+                    auto_analyze: autoAnalyze
+                })
+            });
+            const data = await r.json();
+            return data;
+        } catch (e) {
+            console.warn('[diag] Failed to report error to backend:', e);
+            return null;
+        }
+    }
+
+    // ── Events tab (rich rendering) ──────────────────────────────────────────
+    async loadDiagnostics() {
+        const container = document.getElementById('diagnostics-content');
+        if (!container) return;
+        container.innerHTML = '<p class="text-gray-500 text-sm animate-pulse">Loading events…</p>';
+        try {
+            const r    = await fetch('/api/diagnostics/events?limit=50');
+            const data = await r.json();
+            const events = data.events || [];
+            if (!events.length) {
+                container.innerHTML = `
+                    <div class="flex flex-col items-center justify-center py-12 text-gray-500">
+                        <span class="text-4xl mb-3">✅</span>
+                        <p class="text-sm">No diagnostic events recorded yet.</p>
+                        <p class="text-xs mt-1 text-gray-600">Errors detected at runtime will appear here with AI analysis.</p>
+                    </div>`;
+                return;
+            }
+            container.innerHTML = events.map(ev => this._renderDiagEventCard(ev)).join('');
+        } catch (e) {
+            console.error('loadDiagnostics error:', e);
+            container.innerHTML = '<p class="text-red-400 text-sm">Failed to load events.</p>';
+        }
+    }
+
+    _renderDiagEventCard(ev) {
+        const d = ev.diagnosis || {};
+        const confidence = d.confidence || '';
+        const confColor = { high: 'green', medium: 'yellow', low: 'red' }[confidence] || 'gray';
+        const status = ev.status || 'reported';
+        const statusColor = { diagnosed: 'blue', pr_created: 'green', fix_planned: 'purple', reported: 'yellow' }[status] || 'gray';
+        const canFix = d.can_auto_fix && (d.code_fixes || []).length > 0;
+        const ts = ev.created_at ? new Date(ev.created_at).toLocaleString() : '';
+
+        const causesHtml = (d.likely_causes || []).map(c =>
+            `<li class="text-xs text-gray-300 ml-3 list-disc">${this._escHtml(c)}</li>`
+        ).join('');
+
+        const stepsHtml = (d.manual_steps || []).map(s =>
+            `<li class="text-xs text-gray-300 ml-3 list-disc">${this._escHtml(s)}</li>`
+        ).join('');
+
+        const actionsHtml = (d.repair_actions || []).map(a => {
+            if (a.key === 'apply_code_fix') return ''; // handled separately
+            return `<button onclick="window.dataLoader && dataLoader.approveDiagRepair('${this._escHtml(ev.id)}','${a.key}','${this._escHtml(a.module||'')}')"
+                            class="px-3 py-1.5 bg-blue-700 hover:bg-blue-600 text-white text-xs rounded font-semibold"
+                            title="${this._escHtml(a.description)}">
+                        ${this._escHtml(a.label)}
+                    </button>`;
+        }).join('');
+
+        const fixesHtml = (d.code_fixes || []).map((f, i) => `
+            <div class="mt-2 border border-gray-600 rounded-lg overflow-hidden text-xs">
+                <div class="flex items-center gap-2 px-3 py-1.5 bg-gray-700">
+                    <span class="font-mono text-purple-300">${this._escHtml(f.file)}</span>
+                    <span class="text-gray-400 flex-1">${this._escHtml(f.description)}</span>
+                </div>
+                <div class="grid grid-cols-2 divide-x divide-gray-600">
+                    <div class="p-2 bg-red-950 font-mono whitespace-pre-wrap text-red-200 max-h-48 overflow-y-auto">${this._escHtml(f.old_snippet)}</div>
+                    <div class="p-2 bg-green-950 font-mono whitespace-pre-wrap text-green-200 max-h-48 overflow-y-auto">${this._escHtml(f.new_snippet)}</div>
+                </div>
+            </div>`).join('');
+
+        const prBadge = ev.pr ? `<a href="${this._escHtml(ev.pr.url)}" target="_blank"
+            class="px-2 py-0.5 bg-green-800 text-green-200 text-xs rounded hover:bg-green-700">
+            PR #${ev.pr.number} ↗</a>` : '';
+
+        return `
+        <div id="diag-ev-${this._escHtml(ev.id)}" class="mb-4 rounded-xl border border-gray-700 bg-gray-800 overflow-hidden">
+            <!-- Header -->
+            <div class="flex flex-wrap items-center gap-2 px-4 py-3 bg-gray-700 cursor-pointer"
+                 onclick="document.getElementById('diag-body-${this._escHtml(ev.id)}').classList.toggle('hidden')">
+                <span class="text-xs font-mono text-gray-400">${ts}</span>
+                <span class="px-2 py-0.5 bg-${statusColor}-800 text-${statusColor}-200 text-xs rounded">${status}</span>
+                ${confidence ? `<span class="px-2 py-0.5 bg-${confColor}-900 text-${confColor}-300 text-xs rounded">${confidence} confidence</span>` : ''}
+                <span class="flex-1 text-sm font-semibold text-white truncate">${this._escHtml(ev.title || ev.message || 'Event')}</span>
+                <span class="text-xs text-gray-400">${this._escHtml(ev.module || '')}</span>
+                ${prBadge}
+                <span class="text-gray-500 text-xs ml-1">▼</span>
+            </div>
+
+            <!-- Body -->
+            <div id="diag-body-${this._escHtml(ev.id)}" class="">
+                <div class="px-4 pt-3 pb-1">
+                    <!-- Error message + stack -->
+                    <p class="text-sm text-red-300 font-mono break-words mb-1">${this._escHtml(ev.message || '')}</p>
+                    ${ev.stack ? `<pre class="text-xs text-gray-500 bg-gray-900 rounded p-2 overflow-x-auto max-h-28 mb-2">${this._escHtml(ev.stack)}</pre>` : ''}
+                </div>
+
+                ${d.summary ? `
+                <div class="px-4 py-2 border-t border-gray-700">
+                    <p class="text-xs uppercase text-gray-500 font-semibold mb-1">AI Analysis</p>
+                    <p class="text-sm text-gray-200">${this._escHtml(d.summary)}</p>
+                    ${causesHtml ? `<ul class="mt-2">${causesHtml}</ul>` : ''}
+                </div>` : ''}
+
+                ${fixesHtml ? `
+                <div class="px-4 py-2 border-t border-gray-700">
+                    <p class="text-xs uppercase text-gray-500 font-semibold mb-1">Proposed Code Changes</p>
+                    <p class="text-xs text-gray-500 mb-1">Left = current code &nbsp;|&nbsp; Right = replacement</p>
+                    ${fixesHtml}
+                </div>` : ''}
+
+                ${stepsHtml ? `
+                <div class="px-4 py-2 border-t border-gray-700">
+                    <p class="text-xs uppercase text-gray-500 font-semibold mb-1">Manual Steps</p>
+                    <ul>${stepsHtml}</ul>
+                </div>` : ''}
+
+                <!-- Actions -->
+                <div class="px-4 py-3 border-t border-gray-700 flex flex-wrap gap-2 items-center">
+                    ${actionsHtml}
+                    ${canFix && !ev.pr ? `
+                    <button onclick="window.dataLoader && dataLoader.applyDiagFix('${this._escHtml(ev.id)}')"
+                            class="px-3 py-1.5 bg-purple-700 hover:bg-purple-600 text-white text-xs rounded font-semibold">
+                        ✅ Approve &amp; Apply Code Fix → PR
+                    </button>` : ''}
+                    ${!d.summary ? `
+                    <button onclick="window.dataLoader && dataLoader.reDiagnoseEvent('${this._escHtml(ev.id)}')"
+                            class="px-3 py-1.5 bg-gray-600 hover:bg-gray-500 text-white text-xs rounded font-semibold">
+                        🔍 Analyze with AI
+                    </button>` : ''}
+                    <span class="text-xs text-gray-600 font-mono ml-auto">${this._escHtml(ev.id)}</span>
+                </div>
+            </div>
+        </div>`;
+    }
+
+    async approveDiagRepair(eventId, actionKey, module) {
+        if (!confirm(`Run repair action "${actionKey}" for event ${eventId}?`)) return;
+        try {
+            const r = await fetch('/api/diagnostics/repair', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ event_id: eventId, action_key: actionKey, module, approved: true })
+            });
+            const data = await r.json();
+            if (data.success) {
+                this.showNotification(data.message || '✅ Repair action completed', 'success');
+                setTimeout(() => this.loadDiagnostics(), 500);
+            } else {
+                this.showNotification(data.error || 'Repair failed', 'error');
+            }
+        } catch (e) {
+            this.showNotification('Repair request failed', 'error');
+        }
+    }
+
+    async applyDiagFix(eventId) {
+        if (!confirm(`Apply AI-generated code fix for event ${eventId} and create a GitHub PR?\n\nThis will modify source files. Review the diff above before continuing.`)) return;
+        const card = document.getElementById(`diag-ev-${eventId}`);
+        const btn  = card?.querySelector('button[onclick*="applyDiagFix"]');
+        if (btn) { btn.disabled = true; btn.textContent = '⏳ Applying…'; }
+        try {
+            const r = await fetch('/api/diagnostics/apply-fix', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ event_id: eventId, approved: true })
+            });
+            const data = await r.json();
+            if (data.success) {
+                this.showNotification(`✅ PR created: ${data.pr_url || ''}`, 'success');
+                setTimeout(() => this.loadDiagnostics(), 800);
+            } else {
+                this.showNotification(data.error || 'Apply fix failed', 'error');
+                if (btn) { btn.disabled = false; btn.textContent = '✅ Approve & Apply Code Fix → PR'; }
+            }
+        } catch (e) {
+            this.showNotification('Apply fix request failed', 'error');
+            if (btn) { btn.disabled = false; btn.textContent = '✅ Approve & Apply Code Fix → PR'; }
+        }
+    }
+
+    async reDiagnoseEvent(eventId) {
+        const card = document.getElementById(`diag-ev-${eventId}`);
+        const btn  = card?.querySelector('button[onclick*="reDiagnoseEvent"]');
+        if (btn) { btn.disabled = true; btn.textContent = '⏳ Analyzing…'; }
+        try {
+            // Re-report the event to trigger AI analysis
+            const evData = await fetch('/api/diagnostics/events?limit=200').then(r => r.json());
+            const ev = (evData.events || []).find(e => e.id === eventId);
+            if (!ev) { this.showNotification('Event not found', 'error'); return; }
+            await this.reportErrorToDiag(ev.message || ev.title || 'Unknown', ev.stack || '', ev.module || 'general');
+            this.showNotification('Re-analysis complete', 'success');
+            setTimeout(() => this.loadDiagnostics(), 600);
+        } catch (e) {
+            this.showNotification('Re-diagnosis failed', 'error');
+        } finally {
+            if (btn) { btn.disabled = false; btn.textContent = '🔍 Analyze with AI'; }
+        }
+    }
+
+    // ── Review tab ───────────────────────────────────────────────────────────
+    async runManualDiagnosticReview() {
+        const btn    = document.getElementById('diag-review-btn');
+        const module = document.getElementById('diagnostics-module')?.value || 'general';
+        const notes  = document.getElementById('diagnostics-notes')?.value || '';
+        if (btn) { btn.disabled = true; btn.textContent = '⏳ Running…'; }
+        try {
+            const r    = await fetch('/api/diagnostics/review', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ module, notes })
+            });
+            const data = await r.json();
+            if (data.success) {
+                this.showNotification('✅ Review complete – see Events tab', 'success');
+                this.switchDiagTab('events');
+            } else {
+                this.showNotification(data.error || 'Review failed', 'error');
+            }
+        } catch (e) {
+            this.showNotification('Review request failed', 'error');
+        } finally {
+            if (btn) { btn.disabled = false; btn.textContent = 'Run AI Diagnostic Review'; }
+        }
+    }
+
+    // ── Suggest-fix tab ──────────────────────────────────────────────────────
+    async runSuggestFix() {
+        const btn     = document.getElementById('suggest-fix-btn');
+        const module  = document.getElementById('suggest-module')?.value || 'general';
+        const eventId = document.getElementById('suggest-event-id')?.value || '';
+        const text    = document.getElementById('suggest-text')?.value || '';
+        const resultEl = document.getElementById('suggest-fix-result');
+        if (!text.trim()) { this.showNotification('Please describe the fix', 'warning'); return; }
+        if (btn) { btn.disabled = true; btn.textContent = '⏳ Generating…'; }
+        if (resultEl) resultEl.innerHTML = '<p class="text-gray-400 text-sm">⏳ Asking AI to generate a fix plan…</p>';
+        try {
+            const r    = await fetch('/api/diagnostics/suggest-fix', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ module, event_id: eventId, suggestion: text })
+            });
+            const data = await r.json();
+            if (!resultEl) return;
+            if (data.success && data.fix_plan) {
+                const fp = data.fix_plan;
+                const confColor = { high: 'green', medium: 'yellow', low: 'red' }[fp.confidence] || 'gray';
+                const fixesHtml = (fp.code_fixes || []).map(f => `
+                    <div class="border border-gray-600 rounded overflow-hidden mt-2 text-xs">
+                        <div class="flex items-center gap-2 px-3 py-1 bg-gray-700">
+                            <span class="font-mono text-purple-300">${this._escHtml(f.file)}</span>
+                            <span class="text-gray-400">${this._escHtml(f.description)}</span>
+                        </div>
+                        <div class="grid grid-cols-2 divide-x divide-gray-600">
+                            <div class="p-2 bg-red-950 font-mono whitespace-pre-wrap text-red-200 max-h-40 overflow-y-auto">${this._escHtml(f.old_snippet)}</div>
+                            <div class="p-2 bg-green-950 font-mono whitespace-pre-wrap text-green-200 max-h-40 overflow-y-auto">${this._escHtml(f.new_snippet)}</div>
+                        </div>
+                    </div>`).join('');
+                const risksHtml = (fp.risks || []).map(r => `<li class="text-xs text-yellow-300 ml-3 list-disc">${this._escHtml(r)}</li>`).join('');
+                const stepsHtml = (fp.manual_steps || []).map(s => `<li class="text-xs text-gray-300 ml-3 list-disc">${this._escHtml(s)}</li>`).join('');
+                resultEl.innerHTML = `
+                    <div class="bg-gray-900 border border-gray-700 rounded-xl p-4">
+                        <div class="flex items-center gap-3 mb-3">
+                            <span class="text-sm font-semibold text-white">${this._escHtml(fp.summary)}</span>
+                            <span class="px-2 py-0.5 bg-${confColor}-900 text-${confColor}-300 text-xs rounded">${fp.confidence} confidence</span>
+                        </div>
+                        ${fixesHtml ? `<div class="mb-2"><p class="text-xs uppercase text-gray-500 font-semibold mb-1">Code Changes</p><p class="text-xs text-gray-500 mb-1">Left = current &nbsp;|&nbsp; Right = replacement</p>${fixesHtml}</div>` : '<p class="text-xs text-yellow-400 mb-2">⚠ AI could not produce concrete code changes. Check summary for manual steps.</p>'}
+                        ${risksHtml ? `<div class="mt-3"><p class="text-xs uppercase text-gray-500 font-semibold mb-1">Risks</p><ul>${risksHtml}</ul></div>` : ''}
+                        ${stepsHtml ? `<div class="mt-2"><p class="text-xs uppercase text-gray-500 font-semibold mb-1">Manual Steps</p><ul>${stepsHtml}</ul></div>` : ''}
+                        ${(fp.code_fixes || []).length > 0 ? `
+                        <div class="mt-4 flex gap-2">
+                            <button onclick="window.dataLoader && dataLoader.applyDiagFix('${this._escHtml(data.event_id || eventId)}')"
+                                    class="px-4 py-2 bg-purple-700 hover:bg-purple-600 text-white text-xs rounded font-semibold">
+                                ✅ Approve &amp; Apply Fix → PR
+                            </button>
+                            <button onclick="document.getElementById('suggest-fix-result').innerHTML=''"
+                                    class="px-3 py-2 bg-gray-700 hover:bg-gray-600 text-xs rounded">Dismiss</button>
+                        </div>` : ''}
+                    </div>`;
+            } else {
+                resultEl.innerHTML = `<p class="text-red-400 text-sm">${this._escHtml(data.error || 'Failed to generate fix plan')}</p>`;
+            }
+        } catch (e) {
+            if (resultEl) resultEl.innerHTML = '<p class="text-red-400 text-sm">Failed to generate fix plan.</p>';
+        } finally {
+            if (btn) { btn.disabled = false; btn.textContent = '🤖 Generate Fix Plan'; }
+        }
+    }
+
+    // ── Logs tab ─────────────────────────────────────────────────────────────
+    async loadDiagLogs() {
+        const viewer = document.getElementById('log-viewer');
+        const info   = document.getElementById('log-files-info');
+        const level  = document.getElementById('log-level-filter')?.value  || '';
+        const mod    = document.getElementById('log-module-filter')?.value || '';
+        const lines  = document.getElementById('log-lines-count')?.value   || '200';
+        if (viewer) viewer.innerHTML = '<span class="text-gray-500">Loading…</span>';
+        try {
+            const params = new URLSearchParams({ lines });
+            if (level) params.set('level', level);
+            if (mod)   params.set('module', mod);
+            const r    = await fetch(`/api/diagnostics/logs?${params}`);
+            const data = await r.json();
+            const logFiles = data.log_files || [];
+            if (info) info.textContent = logFiles.length
+                ? `Files: ${logFiles.map(f => `${f.path} (${f.size_kb} KB)`).join(', ')}`
+                : '';
+            if (viewer) {
+                const rawLines = data.lines || [];
+                if (!rawLines.length) {
+                    viewer.innerHTML = '<span class="text-gray-500">No log entries found.</span>';
+                } else {
+                    viewer.innerHTML = rawLines.map(line => {
+                        const escaped = this._escHtml(typeof line === 'string' ? line : JSON.stringify(line));
+                        const color = escaped.includes('ERROR')   ? 'text-red-300' :
+                                      escaped.includes('WARNING') ? 'text-yellow-300' :
+                                      escaped.includes('INFO')    ? 'text-blue-300' : 'text-gray-300';
+                        return `<span class="${color}">${escaped}</span>`;
+                    }).join('\n');
+                    viewer.scrollTop = viewer.scrollHeight;
+                }
+            }
+        } catch (e) {
+            if (viewer) viewer.innerHTML = '<span class="text-red-400">Failed to load logs.</span>';
+        }
+    }
+
+    async clearDiagLogs() {
+        if (!confirm('Clear the dashboard log file? This cannot be undone.')) return;
+        try {
+            await fetch('/api/diagnostics/logs/clear', {
+                method:'POST',
+                headers:{'Content-Type':'application/json'},
+                body: JSON.stringify({ confirmed: true })
+            });
+            this.showNotification('Log cleared', 'success');
+            await this.loadDiagLogs();
+        } catch (e) {
+            this.showNotification('Failed to clear logs', 'error');
+        }
+    }
+
+    async runDiagnosticRollback() {
+        if (!confirm('Roll back the last applied diagnostic patch?')) return;
+        try {
+            const r    = await fetch('/api/diagnostics/rollback', {
+                method:'POST',
+                headers:{'Content-Type':'application/json'},
+                body: JSON.stringify({ confirmed: true })
+            });
+            const data = await r.json();
+            if (data.success) {
+                this.showNotification(data.message || '↩ Rollback complete', 'success');
+            } else {
+                this.showNotification(data.error || 'Rollback failed', 'error');
+            }
+        } catch (e) {
+            this.showNotification('Rollback failed', 'error');
+        }
+    }
+
+    // ── Ask AI tab ───────────────────────────────────────────────────────────
+    async askDiagAI() {
+        const input    = document.getElementById('diag-ask-input');
+        const output   = document.getElementById('diag-ask-output');
+        const btn      = document.getElementById('diag-ask-btn');
+        const question = input?.value?.trim();
+        if (!question) { this.showNotification('Please enter a question', 'warning'); return; }
+        if (btn)    { btn.disabled = true; btn.textContent = '⏳ Asking…'; }
+        if (output) output.innerHTML = '<p class="text-gray-400 text-sm animate-pulse">⏳ Waiting for AI response…</p>';
+        try {
+            const r    = await fetch('/api/ai/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ message: question, context: 'diagnostics' })
+            });
+            const data = await r.json();
+            const reply = data.response || data.message || data.content || JSON.stringify(data);
+            if (output) {
+                output.innerHTML = `<div class="bg-gray-900 border border-gray-700 rounded-lg p-4 text-sm text-gray-200 whitespace-pre-wrap">${this._escHtml(reply)}</div>
+                    <div class="flex gap-2 mt-2">
+                        <button onclick="window.dataLoader && dataLoader._sendDiagQuestionToReport('${this._escHtml(question)}')"
+                                class="px-3 py-1 bg-yellow-700 hover:bg-yellow-600 text-xs rounded font-semibold">
+                            🔍 Send to Self-Diagnostics for Code Fix
+                        </button>
+                    </div>`;
+            }
+        } catch (e) {
+            if (output) output.innerHTML = '<p class="text-red-400 text-sm">Failed to get AI response. Make sure Ollama is running.</p>';
+        } finally {
+            if (btn) { btn.disabled = false; btn.textContent = '🤖 Ask AI'; }
+        }
+    }
+
+    async _sendDiagQuestionToReport(question) {
+        const data = await this.reportErrorToDiag(question, '', 'user_reported', true);
+        if (data?.success) {
+            this.showNotification('Sent to Self-Diagnostics – check Events tab', 'success');
+            this.switchDiagTab('events');
+        } else {
+            this.showNotification(data?.error || 'Failed to send', 'error');
+        }
+    }
+
+    _escHtml(str) {
+        if (!str) return '';
+        return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
     // Initialize dashboard on page load
     async init() {
         try {
@@ -8276,7 +8855,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         loadTodos: () => console.warn('dataLoader not functional'),
         loadGithub: () => console.warn('dataLoader not functional'),
         loadNews: () => console.warn('dataLoader not functional'),
-        showNotification: (msg) => alert(msg)
+        loadServers: () => console.warn('dataLoader not functional'),
+        showNotification: (msg) => alert(msg),
+        switchDiagTab: () => console.warn('dataLoader not functional'),
+        loadDiagnostics: () => console.warn('dataLoader not functional'),
+        loadDiagLogs: () => console.warn('dataLoader not functional'),
+        askDiagAI: () => console.warn('dataLoader not functional')
     };
 }
 

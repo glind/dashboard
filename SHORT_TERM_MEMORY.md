@@ -14,6 +14,7 @@
 - You are the dashboard self-diagnostic assistant. Analyze this runtime issue and return STRICT JSON only. Issue Title: Load Failed: diagnostics Module: diagnostics Source: sectio...
 - You are the dashboard self-diagnostic assistant. Analyze this runtime issue and return STRICT JSON only. Issue Title: Load Failed: general Module: general Source: section_loader...
 - You are the dashboard self-diagnostic assistant. Analyze this runtime issue and return STRICT JSON only. Issue Title: Manual review: emails Module: emails Source: manual_review...
+- You are the dashboard self-diagnostic assistant. Analyze this runtime issue and return STRICT JSON only. Issue Title: Manual review: servers Module: servers Source: manual_revie...
 
 ## Open Loops
 - Record pending follow-ups, unfinished threads, and near-term reminders.
@@ -21,7 +22,6 @@
 - You are the dashboard self-diagnostic assistant. Analyze this runtime issue and return STRICT JSON only. Issue Title: Manual review: general Module: general Source: manual_revie...
 
 ## Recent Conversations
-- 2026-04-29 10:34 | User: You are the dashboard self-diagnostic assistant. Analyze this runtime issue and return STRICT JSON only. Issue Title: Load Failed: diagnostics Module: diagno... | Assistant: Today Snapshot - Calendar: unavailable or no upcoming events - Email: unavailable or no recent emails
 - 2026-04-29 10:35 | User: You are the dashboard self-diagnostic assistant. Analyze this runtime issue and return STRICT JSON only. Issue Title: Load Failed: general Module: general So... | Assistant: Today Snapshot - Calendar: unavailable or no upcoming events - Email: unavailable or no recent emails
 - 2026-04-29 10:39 | User: You are the dashboard self-diagnostic assistant. Analyze this runtime issue and return STRICT JSON only. Issue Title: Load Failed: diagnostics Module: diagno... | Assistant: Today Snapshot - Calendar: unavailable or no upcoming events - Email: unavailable or no recent emails
 - 2026-04-29 10:40 | User: You are the dashboard self-diagnostic assistant. Analyze this runtime issue and return STRICT JSON only. Issue Title: Load Failed: general Module: general So... | Assistant: Today Snapshot - Calendar: unavailable or no upcoming events - Email: unavailable or no recent emails
@@ -46,10 +46,11 @@
 - 2026-04-29 11:29 | User: You are the dashboard self-diagnostic assistant. Analyze this runtime issue and return STRICT JSON only. Issue Title: Load Failed: general Module: general So... | Assistant: Today Snapshot - Calendar: unavailable or no upcoming events - Email: unavailable or no recent emails
 - 2026-04-29 11:30 | User: You are the dashboard self-diagnostic assistant. Analyze this runtime issue and return STRICT JSON only. Issue Title: Load Failed: diagnostics Module: diagno... | Assistant: Today Snapshot - Calendar: unavailable or no upcoming events - Email: unavailable or no recent emails
 - 2026-04-29 11:31 | User: You are the dashboard self-diagnostic assistant. Analyze this runtime issue and return STRICT JSON only. Issue Title: Manual review: emails Module: emails So... | Assistant: Today Snapshot - Calendar: unavailable or no upcoming events - Email: unavailable or no recent emails
+- 2026-04-29 14:14 | User: You are the dashboard self-diagnostic assistant. Analyze this runtime issue and return STRICT JSON only. Issue Title: Manual review: servers Module: servers... | Assistant: Today Snapshot - Calendar: unavailable or no upcoming events - Email: unavailable or no recent emails
 
 ## Recent Research
 - Store useful findings from recent research and analysis.
 - Today Snapshot - Calendar: unavailable or no upcoming events - Email: unavailable or no recent emails - Tasks: no high-priority tasks detected Top Priorities 1) Review upcoming calendar commitments — why now: aligns d...
 
 ## Last Updated
-- 2026-04-29T11:31:40.300826
+- 2026-04-29T14:14:31.457482

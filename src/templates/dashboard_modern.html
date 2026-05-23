@@ -2199,14 +2199,20 @@
                                     const res = await fetch(`/api/music/playlists/${playlistId}`);
                                     const data = await res.json();
                                     if (data.playlist && data.playlist.tracks) {
+                                        const player = window.musicPlayer;
+                                        if (!player || typeof player.setPlaylist !== 'function') {
+                                            throw new Error('Music player is still initializing. Please try again.');
+                                        }
                                         // Use setPlaylist with playlist info - this saves to server automatically
-                                        musicPlayer.setPlaylist(
+                                        player.setPlaylist(
                                             data.playlist.tracks, 
                                             playlistId, 
                                             data.playlist.name || playlistId
                                         );
                                         if (autoPlay) {
-                                            musicPlayer.playCurrentTrack();
+                                            if (typeof player.playCurrentTrack === 'function') {
+                                                player.playCurrentTrack();
+                                            }
                                         }
                                         console.log(`✅ Loaded playlist: ${data.playlist.name || playlistId}`);
                                         return true;
@@ -2321,6 +2327,22 @@
     
     <!-- Modal Container -->
     <div id="modal-container"></div>
+
+    <script>
+        // Early fallback so inline nav handlers never throw ReferenceError.
+        window.showSection = window.showSection || function(sectionName) {
+            if (!sectionName) return;
+            document.querySelectorAll('.section-content').forEach(section => section.classList.add('hidden'));
+            const target = document.getElementById(`section-${sectionName}`);
+            if (target) {
+                target.classList.remove('hidden');
+                window.__activeSection = sectionName;
+            }
+            if (window.dataLoader && typeof window.dataLoader.refreshSectionData === 'function') {
+                window.dataLoader.refreshSectionData(sectionName);
+            }
+        };
+    </script>
     
     <!-- Scripts -->
     <script src="/static/dashboard.js?v=22"></script>
@@ -2338,6 +2360,9 @@
             currentVideoId: null,
             currentPlaylistId: null,
             currentPlaylistName: 'Current Queue',
+            ytApiReady: false,
+            ytApiLoading: false,
+            ytPlayer: null,
             saveTimeout: null,
             
             setPlaylist(tracks, playlistId = null, playlistName = 'Current Queue') {
@@ -2506,18 +2531,35 @@
             // Initialize YouTube IFrame API for auto-advance
             initYouTubeAPI() {
                 if (window.YT && window.YT.Player) return; // Already loaded
+                if (this.ytApiLoading) return; // Already loading
+                
+                this.ytApiLoading = true;
                 
                 // Load YouTube IFrame API
                 const tag = document.createElement('script');
                 tag.src = 'https://www.youtube.com/iframe_api';
+                tag.onerror = () => {
+                    console.warn('Failed to load YouTube IFrame API script');
+                    this.ytApiLoading = false;
+                };
                 const firstScriptTag = document.getElementsByTagName('script')[0];
                 firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
                 
                 // Define callback for when API is ready
                 window.onYouTubeIframeAPIReady = () => {
-                    console.log('YouTube IFrame API ready');
+                    console.log('✅ YouTube IFrame API ready');
                     this.ytApiReady = true;
+                    this.ytApiLoading = false;
                 };
+            },
+            
+            // Wait for YouTube API to be ready (with timeout)
+            async waitForYouTubeAPI(maxWaitMs = 3000) {
+                const startTime = Date.now();
+                while (!this.ytApiReady && (Date.now() - startTime) < maxWaitMs) {
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                }
+                return this.ytApiReady && window.YT && window.YT.Player;
             },
             
             // Handle YouTube player state changes
@@ -2547,157 +2589,167 @@
                 const query = encodeURIComponent(`${artist} ${title}`);
                 const playerDiv = document.getElementById('youtube-player');
                 
-                // Ensure YouTube API is loaded
+                // Ensure YouTube API is loading
                 this.initYouTubeAPI();
                 
-                if (playerDiv) {
-                    // Show loading state
-                    playerDiv.innerHTML = `<div class="w-full h-full flex items-center justify-center text-gray-400">
-                        <div class="text-center">
-                            <div class="text-2xl mb-2">🔍</div>
-                            <div>Searching YouTube for: ${title}</div>
-                            <div class="text-xs text-gray-500 mt-2">Please wait...</div>
-                        </div>
-                    </div>`;
-                    
-                    document.getElementById('player-title').textContent = title;
-                    document.getElementById('player-artist').textContent = artist;
-                    
-                    let videoId = preferredVideoId;
-                    let searchAttempts = 0;
-                    const maxAttempts = 2;
+                if (!playerDiv) {
+                    console.error('YouTube player div not found');
+                    return;
+                }
+                
+                // Show loading state
+                playerDiv.innerHTML = `<div class="w-full h-full flex items-center justify-center text-gray-400">
+                    <div class="text-center">
+                        <div class="text-2xl mb-2">🔍</div>
+                        <div>Searching for: ${title}</div>
+                        <div class="text-xs text-gray-500 mt-2">Please wait...</div>
+                    </div>
+                </div>`;
+                
+                document.getElementById('player-title').textContent = title;
+                document.getElementById('player-artist').textContent = artist;
+                
+                let videoId = preferredVideoId;
+                let searchAttempts = 0;
+                const maxAttempts = 2;
 
-                    if (!videoId) {
-                        const matchedTrack = this.tracks.find(t =>
-                            t.artist === artist &&
-                            t.title === title &&
-                            (t.youtubeId || t.youtube_id)
-                        );
-                        videoId = matchedTrack ? (matchedTrack.youtubeId || matchedTrack.youtube_id) : null;
-                    }
-                    
-                    // Try to get video ID from our backend (with retry)
-                    while (!videoId && searchAttempts < maxAttempts) {
-                        try {
-                            searchAttempts++;
-                            console.log(`🔍 YouTube search attempt ${searchAttempts}/${maxAttempts} for: ${artist} - ${title}`);
+                if (!videoId) {
+                    const matchedTrack = this.tracks.find(t =>
+                        t.artist === artist &&
+                        t.title === title &&
+                        (t.youtubeId || t.youtube_id)
+                    );
+                    videoId = matchedTrack ? (matchedTrack.youtubeId || matchedTrack.youtube_id) : null;
+                }
+                
+                // Try to get video ID from our backend (with retry)
+                while (!videoId && searchAttempts < maxAttempts) {
+                    try {
+                        searchAttempts++;
+                        console.log(`🔍 YouTube search attempt ${searchAttempts}/${maxAttempts} for: ${artist} - ${title}`);
 
-                            const controller = new AbortController();
-                            const timeoutId = setTimeout(() => controller.abort(), 4500);
-                            const response = await fetch(`/api/youtube/search?q=${query}`, {
-                                method: 'GET',
-                                headers: { 'Accept': 'application/json' },
-                                signal: controller.signal
-                            });
-                            clearTimeout(timeoutId);
+                        const controller = new AbortController();
+                        const timeoutId = setTimeout(() => controller.abort(), 4500);
+                        const response = await fetch(`/api/youtube/search?q=${query}`, {
+                            method: 'GET',
+                            headers: { 'Accept': 'application/json' },
+                            signal: controller.signal
+                        });
+                        clearTimeout(timeoutId);
+                        
+                        if (response.ok) {
+                            const data = await response.json();
+                            console.log(`📡 YouTube API response:`, data);
                             
-                            if (response.ok) {
-                                const data = await response.json();
-                                console.log(`📡 YouTube API response:`, data);
-                                
-                                if (data.videoId) {
-                                    videoId = data.videoId;
-                                    this.currentVideoId = videoId;
-                                    console.log(`✅ Found video ID: ${videoId}`);
-                                }
-                            } else {
-                                console.warn(`YouTube search returned status ${response.status}`);
-                                if (searchAttempts < maxAttempts) {
-                                    await new Promise(resolve => setTimeout(resolve, 500)); // Wait before retry
-                                }
+                            if (data.videoId) {
+                                videoId = data.videoId;
+                                this.currentVideoId = videoId;
+                                console.log(`✅ Found video ID: ${videoId}`);
                             }
-                        } catch (e) {
-                            console.warn(`YouTube search attempt ${searchAttempts} failed:`, e);
+                        } else {
+                            console.warn(`YouTube search returned status ${response.status}`);
                             if (searchAttempts < maxAttempts) {
                                 await new Promise(resolve => setTimeout(resolve, 500)); // Wait before retry
                             }
                         }
-                    }
-                    
-                    // If we found a video ID, embed it
-                    if (videoId) {
-                        this.currentVideoId = videoId;
-                        // Clear the div and create a container for the player
-                        playerDiv.innerHTML = '<div id="yt-player-container"></div>';
-                        
-                        // Use YouTube IFrame API for state change detection
-                        if (window.YT && window.YT.Player) {
-                            try {
-                                // Destroy existing player if any
-                                if (this.ytPlayer) {
-                                    try { this.ytPlayer.destroy(); } catch(e) {}
-                                }
-                                
-                                this.ytPlayer = new YT.Player('yt-player-container', {
-                                    width: '100%',
-                                    height: '100%',
-                                    videoId: videoId,
-                                    playerVars: {
-                                        autoplay: 1,
-                                        rel: 0,
-                                        modestbranding: 1
-                                    },
-                                    events: {
-                                        onStateChange: (event) => this.onYouTubePlayerStateChange(event),
-                                        onError: (event) => {
-                                            console.warn('YouTube player error code:', event.data);
-                                            console.warn('Trying simple iframe fallback...');
-                                            // Fallback to simple iframe on player error
-                                            playerDiv.innerHTML = `<iframe 
-                                                id="yt-iframe-fallback"
-                                                width="100%" 
-                                                height="100%" 
-                                                src="https://www.youtube.com/embed/${videoId}?autoplay=0&rel=0&enablejsapi=1" 
-                                                frameborder="0" 
-                                                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" 
-                                                allowfullscreen>
-                                            </iframe>`;
-                                            setTimeout(() => this.next(), 3000);
-                                        }
-                                    }
-                                });
-                                
-                                this.isPlaying = true;
-                                document.getElementById('play-btn-text').textContent = '⏸️';
-                                console.log(`🎵 Playing with YT API: ${artist} - ${title} (${videoId})`);
-                                return;
-                            } catch (apiError) {
-                                console.warn('YT.Player failed, falling back to iframe:', apiError);
-                                // Fall through to iframe fallback
-                            }
+                    } catch (e) {
+                        console.warn(`YouTube search attempt ${searchAttempts} failed:`, e);
+                        if (searchAttempts < maxAttempts) {
+                            await new Promise(resolve => setTimeout(resolve, 500)); // Wait before retry
                         }
-                        
-                        // Fallback to simple iframe if API not available or failed
+                    }
+                }
+                
+                // If we found a video ID, embed it
+                if (videoId) {
+                    this.currentVideoId = videoId;
+                    
+                    // Try to use YouTube IFrame API if available
+                    const apiReady = await this.waitForYouTubeAPI(3000);
+                    if (apiReady) {
                         try {
-                            playerDiv.innerHTML = `<iframe 
-                                id="yt-iframe"
-                                width="100%" 
-                                height="100%" 
-                                src="https://www.youtube.com/embed/${videoId}?autoplay=1&rel=0&enablejsapi=1" 
-                                frameborder="0" 
-                                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" 
-                                allowfullscreen>
-                            </iframe>`;
+                            // Clear the div and create a container for the player
+                            playerDiv.innerHTML = '<div id="yt-player-container"></div>';
+                            
+                            // Destroy existing player if any
+                            if (this.ytPlayer) {
+                                try { this.ytPlayer.destroy(); } catch(e) {}
+                            }
+                            
+                            this.ytPlayer = new YT.Player('yt-player-container', {
+                                width: '100%',
+                                height: '100%',
+                                videoId: videoId,
+                                playerVars: {
+                                    autoplay: 1,
+                                    rel: 0,
+                                    modestbranding: 1
+                                },
+                                events: {
+                                    onStateChange: (event) => this.onYouTubePlayerStateChange(event),
+                                    onError: (event) => {
+                                        console.warn('YouTube player error code:', event.data);
+                                        console.warn('Falling back to iframe player...');
+                                        // Fallback to simple iframe on player error
+                                        playerDiv.innerHTML = `<iframe 
+                                            id="yt-iframe-fallback"
+                                            width="100%" 
+                                            height="100%" 
+                                            src="https://www.youtube.com/embed/${videoId}?autoplay=0&rel=0&enablejsapi=1" 
+                                            frameborder="0" 
+                                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" 
+                                            allowfullscreen>
+                                        </iframe>`;
+                                        this.isPlaying = true;
+                                        document.getElementById('play-btn-text').textContent = '⏸️';
+                                        setTimeout(() => this.next(), 3000);
+                                    }
+                                }
+                            });
                             
                             this.isPlaying = true;
                             document.getElementById('play-btn-text').textContent = '⏸️';
-                            console.log(`🎵 Playing with iframe: ${artist} - ${title} (${videoId})`);
+                            console.log(`🎵 Playing with YT API: ${artist} - ${title} (${videoId})`);
                             return;
-                        } catch (iframeError) {
-                            console.error('Failed to create iframe:', iframeError);
+                        } catch (apiError) {
+                            console.warn('YT.Player creation failed, falling back to iframe:', apiError);
+                            // Fall through to iframe fallback
                         }
+                    } else {
+                        console.log('YouTube API not available in time, using iframe fallback');
                     }
                     
-                    // Fallback: Show player with link to open YouTube
-                    const youtubeSearchUrl = `https://www.youtube.com/results?search_query=${query}`;
-                    this.currentVideoId = null;
-                    console.log(`⚠️ Could not find video ID for: ${artist} - ${title}, showing YouTube search link`);
-                    playerDiv.innerHTML = `<div class="w-full h-full flex flex-col items-center justify-center bg-gray-900 rounded-lg p-4">
-                        <div class="text-lg mb-2">🎵 ${title}</div>
-                        <div class="text-gray-400 mb-4">by ${artist}</div>
-                        <p class="text-sm text-gray-500 mb-4 text-center">Could not embed YouTube player</p>
-                        <a href="${youtubeSearchUrl}" target="_blank" 
-                           class="bg-red-600 hover:bg-red-700 text-white px-6 py-3 rounded-lg flex items-center gap-2 transition">
+                    // Fallback to simple iframe if API not available or failed
+                    try {
+                        playerDiv.innerHTML = `<iframe 
+                            id="yt-iframe"
+                            width="100%" 
+                            height="100%" 
+                            src="https://www.youtube.com/embed/${videoId}?autoplay=1&rel=0&enablejsapi=1" 
+                            frameborder="0" 
+                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" 
+                            allowfullscreen>
+                        </iframe>`;
+                        
+                        this.isPlaying = true;
+                        document.getElementById('play-btn-text').textContent = '⏸️';
+                        console.log(`🎵 Playing with iframe: ${artist} - ${title} (${videoId})`);
+                        return;
+                    } catch (iframeError) {
+                        console.error('Failed to create iframe:', iframeError);
+                    }
+                }
+                
+                // Fallback: Show player with link to open YouTube
+                const youtubeSearchUrl = `https://www.youtube.com/results?search_query=${query}`;
+                this.currentVideoId = null;
+                console.log(`⚠️ Could not find video ID for: ${artist} - ${title}, showing YouTube search link`);
+                playerDiv.innerHTML = `<div class="w-full h-full flex flex-col items-center justify-center bg-gray-900 rounded-lg p-4">
+                    <div class="text-lg mb-2">🎵 ${title}</div>
+                    <div class="text-gray-400 mb-4">by ${artist}</div>
+                    <p class="text-sm text-gray-500 mb-4 text-center">Could not embed YouTube player</p>
+                    <a href="${youtubeSearchUrl}" target="_blank" 
+                       class="bg-red-600 hover:bg-red-700 text-white px-6 py-3 rounded-lg flex items-center gap-2 transition">
                             <span>▶️</span> Search on YouTube
                         </a>
                         <p class="text-xs text-gray-500 mt-4">Opens in new tab</p>
@@ -3284,6 +3336,9 @@ Use simple ASCII characters only - no special quotes or unicode.`;
             // Load section data if needed
             loadSectionData(sectionName);
         }
+
+        // Explicitly expose navigation function for inline onclick handlers.
+        window.showSection = showSection;
         
         let dashboardInitialized = false;
         let initRetries = 0;
@@ -3446,19 +3501,20 @@ Use simple ASCII characters only - no special quotes or unicode.`;
                     if (dataLoader.loadUnifiedLibrary) dataLoader.loadUnifiedLibrary();
 
                     const ensureMusicEmbed = () => {
-                        if (!window.musicPlayer || !musicPlayer.tracks || musicPlayer.tracks.length === 0) return;
+                        const player = window.musicPlayer;
+                        if (!player || !player.tracks || player.tracks.length === 0) return;
                         const playerDiv = document.getElementById('youtube-player');
                         const hasEmbed = !!(playerDiv && playerDiv.querySelector('iframe, #yt-player-container'));
-                        if (!hasEmbed && typeof musicPlayer.playCurrentTrack === 'function') {
-                            musicPlayer.playCurrentTrack();
+                        if (!hasEmbed && typeof player.playCurrentTrack === 'function') {
+                            player.playCurrentTrack();
                         }
                     };
                     
                     // The music player state is already loaded from server on DOMContentLoaded
                     // Only load default if there's nothing in the queue
-                    if (window.musicPlayer && musicPlayer.tracks.length === 0) {
+                    if (window.musicPlayer && window.musicPlayer.tracks.length === 0) {
                         // Try to load state from server first (in case it wasn't loaded yet)
-                        musicPlayer.loadStateFromServer().then(loaded => {
+                        window.musicPlayer.loadStateFromServer().then(loaded => {
                             if (!loaded) {
                                 // No saved state, load default sample playlist
                                 loadDefaultPlaylist();
@@ -3479,10 +3535,10 @@ Use simple ASCII characters only - no special quotes or unicode.`;
                             { artist: 'Taylor Swift', title: 'Anti-Hero' },
                             { artist: 'The Weeknd', title: 'After Hours' }
                         ];
-                        musicPlayer.setPlaylist(sampleTracks, 'default', 'Sample Playlist');
+                        window.musicPlayer.setPlaylist(sampleTracks, 'default', 'Sample Playlist');
                         setTimeout(() => {
-                            if (typeof musicPlayer.playCurrentTrack === 'function') {
-                                musicPlayer.playCurrentTrack();
+                            if (window.musicPlayer && typeof window.musicPlayer.playCurrentTrack === 'function') {
+                                window.musicPlayer.playCurrentTrack();
                             }
                         }, 250);
                         console.log('✅ Music player loaded with default sample playlist');

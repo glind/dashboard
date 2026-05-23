@@ -2824,8 +2824,12 @@ async def remove_safe_sender(sender_email: str):
 
 # Email Client API Endpoints (Send, Reply, Forward, Delete, Archive, etc.)
 
-def get_gmail_service():
-    """Get authenticated Gmail service."""
+def get_gmail_service(require_write: bool = False):
+    """Get authenticated Gmail service.
+
+    Args:
+        require_write: Require Gmail write scopes (modify/send/archive/etc.).
+    """
     from google.oauth2.credentials import Credentials
     from googleapiclient.discovery import build
     import json
@@ -2841,15 +2845,22 @@ def get_gmail_service():
     except Exception as e:
         logger.warning(f"Could not read Google token scopes: {e}")
 
-    if not has_required_google_scopes(token_scopes, GOOGLE_GMAIL_WRITE_SCOPES):
+    required_scopes = [*GOOGLE_GMAIL_READ_SCOPES]
+    if require_write:
+        required_scopes.extend(GOOGLE_GMAIL_WRITE_SCOPES)
+
+    if not has_required_google_scopes(token_scopes, required_scopes):
+        detail = "Google account needs Gmail permissions. Please reconnect Google."
+        if require_write:
+            detail = "Google account needs Gmail write permissions. Please reconnect Google to grant read/write email access."
         raise HTTPException(
             status_code=403,
-            detail="Google account needs Gmail write permissions. Please reconnect Google to grant read/write email access."
+            detail=detail
         )
     
     creds = Credentials.from_authorized_user_file(
         str(tokens_file),
-        scopes=[*GOOGLE_GMAIL_READ_SCOPES, *GOOGLE_GMAIL_WRITE_SCOPES]
+        scopes=required_scopes
     )
     
     if not creds or not creds.valid:
@@ -2886,7 +2897,7 @@ async def send_email(request: Request):
         if not to:
             raise HTTPException(status_code=400, detail="Recipient (to) is required")
         
-        service = get_gmail_service()
+        service = get_gmail_service(require_write=True)
         
         # Create message
         if html_body or attachments:
@@ -2958,7 +2969,7 @@ async def reply_to_email(request: Request):
         if not message_id:
             raise HTTPException(status_code=400, detail="message_id is required")
         
-        service = get_gmail_service()
+        service = get_gmail_service(require_write=True)
         
         # Get original message to get thread info and headers
         original = service.users().messages().get(userId='me', id=message_id, format='full').execute()
@@ -3039,7 +3050,7 @@ async def forward_email(request: Request):
         if not message_id or not to:
             raise HTTPException(status_code=400, detail="message_id and to are required")
         
-        service = get_gmail_service()
+        service = get_gmail_service(require_write=True)
         
         # Get original message
         original = service.users().messages().get(userId='me', id=message_id, format='full').execute()
@@ -3103,7 +3114,7 @@ async def delete_email(request: Request):
         if not message_id:
             raise HTTPException(status_code=400, detail="message_id is required")
         
-        service = get_gmail_service()
+        service = get_gmail_service(require_write=True)
         
         if permanent:
             # Permanently delete
@@ -3136,7 +3147,7 @@ async def archive_email(request: Request):
         if not message_id:
             raise HTTPException(status_code=400, detail="message_id is required")
         
-        service = get_gmail_service()
+        service = get_gmail_service(require_write=True)
         
         # Remove INBOX label to archive
         service.users().messages().modify(
@@ -3170,7 +3181,7 @@ async def mark_email_read(request: Request):
         if not message_id:
             raise HTTPException(status_code=400, detail="message_id is required")
         
-        service = get_gmail_service()
+        service = get_gmail_service(require_write=True)
         
         if read:
             # Mark as read (remove UNREAD label)
@@ -3212,7 +3223,7 @@ async def star_email(request: Request):
         if not message_id:
             raise HTTPException(status_code=400, detail="message_id is required")
         
-        service = get_gmail_service()
+        service = get_gmail_service(require_write=True)
         
         if starred:
             service.users().messages().modify(
@@ -3422,7 +3433,7 @@ async def apply_email_label(request: Request):
         if not message_id:
             raise HTTPException(status_code=400, detail="message_id is required")
         
-        service = get_gmail_service()
+        service = get_gmail_service(require_write=True)
         
         body = {}
         if add_labels:

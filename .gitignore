@@ -31,6 +31,8 @@ env/
 .idea/
 *.swp
 *.swo
+.bb/
+settings.json
 
 # OS
 .DS_Store
@@ -38,7 +40,10 @@ Thumbs.db
 
 # Logs
 *.log
+*.log.*
 logs/
+dashboard.log*
+*.pid
 
 # Database
 *.db
@@ -76,6 +81,10 @@ node_modules/
 # Cache
 .cache/
 dashboard.pid
+
+# Memory and session files
+LONG_TERM_MEMORY.md
+SHORT_TERM_MEMORY.md
 
 # Voice system models and cache (large binary files)
 data/voice_models/

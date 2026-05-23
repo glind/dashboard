@@ -149,6 +149,21 @@ The dashboard requires API credentials that are **NOT** included in this reposit
 - ✅ Never commit actual API keys
 - ✅ Rotate credentials regularly
 
+### 🧠 Local Memory Files (Per Instance)
+
+The dashboard uses local AI memory files that should never be committed.
+
+- `LONG_TERM_MEMORY.md` and `SHORT_TERM_MEMORY.md` are gitignored and must stay local.
+- On a new machine/instance, copy the templates:
+
+```bash
+cp LONG_TERM_MEMORY.example.md LONG_TERM_MEMORY.md
+cp SHORT_TERM_MEMORY.example.md SHORT_TERM_MEMORY.md
+```
+
+- Fill the copied files with real local context for that instance.
+- Keep personal/sensitive notes only in the local `.md` files, not in the `.example.md` templates.
+
 # Clone repository
 
 # Open browsergit clone https://github.com/buildly-marketplace/personal-dashboard.git

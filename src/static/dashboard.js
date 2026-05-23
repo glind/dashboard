@@ -6430,6 +6430,9 @@ Then ask me: "What would you like to do with this email?"`,
         // Load available voices
         this.loadAvailableVoices();
         
+        // Populate the voice selector dropdown
+        this.populateVoiceOptions();
+        
         // Voices may not be loaded immediately, reload on voiceschanged event
         if (this.speechSynthesis) {
             this.speechSynthesis.onvoiceschanged = () => {
@@ -6438,6 +6441,8 @@ Then ask me: "What would you like to do with this email?"`,
                 if (!this.selectedVoice) {
                     this.setDefaultVoice();
                 }
+                // Repopulate the dropdown when voices change
+                this.populateVoiceOptions();
             };
         }
     }
@@ -8886,6 +8891,39 @@ document.addEventListener('DOMContentLoaded', async () => {
         loadDiagnostics: () => console.warn('dataLoader not functional'),
         loadDiagLogs: () => console.warn('dataLoader not functional'),
         askDiagAI: () => console.warn('dataLoader not functional')
+    };
+}
+
+// Compatibility shim for inline section navigation handlers.
+// Some templates/buttons call showSection(...) directly; keep a safe global available.
+if (typeof window.showSection !== 'function') {
+    window.showSection = function(sectionName) {
+        if (!sectionName) return;
+        if (window.__activeSection === sectionName) return;
+
+        document.querySelectorAll('.section-content').forEach(section => {
+            section.classList.add('hidden');
+        });
+
+        document.querySelectorAll('.nav-link').forEach(link => {
+            link.classList.remove('bg-gray-700', 'text-white');
+            link.classList.add('text-gray-300');
+        });
+
+        const targetSection = document.getElementById(`section-${sectionName}`);
+        if (targetSection) {
+            targetSection.classList.remove('hidden');
+            window.__activeSection = sectionName;
+        }
+
+        const dataLoader = window.dataLoader;
+        if (dataLoader && typeof dataLoader.applyBackground === 'function') {
+            dataLoader.applyBackground();
+        }
+
+        if (dataLoader && typeof dataLoader.refreshSectionData === 'function') {
+            dataLoader.refreshSectionData(sectionName);
+        }
     };
 }
 

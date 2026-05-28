@@ -2338,8 +2338,13 @@
                 target.classList.remove('hidden');
                 window.__activeSection = sectionName;
             }
-            if (window.dataLoader && typeof window.dataLoader.refreshSectionData === 'function') {
-                window.dataLoader.refreshSectionData(sectionName);
+            if (window.dataLoader) {
+                if (typeof window.dataLoader.refreshSectionData === 'function') {
+                    window.dataLoader.refreshSectionData(sectionName);
+                }
+                if (sectionName === 'vanity' && typeof window.dataLoader.loadVanityAlerts === 'function') {
+                    window.dataLoader.loadVanityAlerts();
+                }
             }
         };
     </script>
@@ -3298,6 +3303,14 @@ Use simple ASCII characters only - no special quotes or unicode.`;
         // Navigation
         function showSection(sectionName) {
             if (window.__activeSection === sectionName) {
+                // If the active vanity section is blank, force a fresh load.
+                if (sectionName === 'vanity') {
+                    const vanityGrid = document.getElementById('vanity-grid');
+                    const hasRenderedChildren = !!(vanityGrid && vanityGrid.children && vanityGrid.children.length > 0);
+                    if (!hasRenderedChildren && window.dataLoader && typeof dataLoader.loadVanityAlerts === 'function') {
+                        dataLoader.loadVanityAlerts();
+                    }
+                }
                 return;
             }
 
@@ -3421,11 +3434,17 @@ Use simple ASCII characters only - no special quotes or unicode.`;
         // Track recent section loads to prevent repeated reloading loops
         const sectionLastLoadAt = {};
         const SECTION_MIN_INTERVAL_MS = 1500;
+        const SECTION_READY_RETRY_MAX = 12;
+        const SECTION_READY_RETRY_DELAY_MS = 300;
         
-        function loadSectionData(sectionName) {
+        function loadSectionData(sectionName, retryCount = 0) {
             // Wait for dataLoader to be ready
             if (typeof window.dataLoader === 'undefined') {
-                console.warn(`dataLoader not ready for ${sectionName}; skipping section load`);
+                if (retryCount < SECTION_READY_RETRY_MAX) {
+                    setTimeout(() => loadSectionData(sectionName, retryCount + 1), SECTION_READY_RETRY_DELAY_MS);
+                } else {
+                    console.warn(`dataLoader not ready for ${sectionName}; skipping section load after retries`);
+                }
                 return;
             }
 

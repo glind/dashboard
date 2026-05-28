@@ -4,7 +4,7 @@ Application settings and configuration management.
 
 import os
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from pydantic_settings import BaseSettings
 from pydantic import Field
 import yaml
@@ -183,6 +183,20 @@ class DashboardSettings(BaseSettings):
     })
 
 
+class TaskSyncSettings(BaseSettings):
+    """Task sync provider preferences."""
+    enabled: bool = Field(default=False, description="Enable syncing created tasks to external providers")
+    default_provider: str = Field(default="ticktick", description="Primary task sync provider")
+    provider_order: List[str] = Field(
+        default_factory=lambda: ["ticktick", "apple_reminders", "todoist"],
+        description="Ordered list of task sync providers to try",
+    )
+    apple_reminders_list: Optional[str] = Field(default=None, description="Apple Reminders list name for synced tasks")
+
+    class Config:
+        env_prefix = "TASK_SYNC_"
+
+
 class Settings(BaseSettings):
     """Main application settings."""
     # Environment
@@ -209,6 +223,7 @@ class Settings(BaseSettings):
     weather: WeatherSettings = Field(default_factory=WeatherSettings)
     music: MusicSettings = Field(default_factory=MusicSettings)
     notes: NotesSettings = Field(default_factory=NotesSettings)
+    task_sync: TaskSyncSettings = Field(default_factory=TaskSyncSettings)
     dashboard: DashboardSettings = Field(default_factory=DashboardSettings)
     
     # Music OAuth shortcuts for easier access

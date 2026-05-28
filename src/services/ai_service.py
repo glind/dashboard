@@ -1832,7 +1832,8 @@ Use the context below to provide concrete prioritization and summaries.
                 if success:
                     created_tasks.append({
                         'task_id': task_id,
-                        'title': task_data.get('title', '')
+                        'title': task_data.get('title', ''),
+                        'task': todo_dict.copy(),
                     })
                     logger.info(f"AI created task ({i}/{len(tasks)}): {task_data.get('title', '')}")
                 else:

@@ -188,6 +188,18 @@ async function syncWithTickTick(direction = 'both') {
     }
 }
 
+function getTaskSyncSettings() {
+    const allowedServices = ['ticktick', 'apple_reminders', 'todoist'];
+    const stored = JSON.parse(localStorage.getItem('taskSyncSettings') || '{}');
+    const service = allowedServices.includes(stored.service) ? stored.service : 'ticktick';
+
+    return {
+        enabled: Boolean(stored.enabled),
+        service,
+        order: [service, ...allowedServices.filter(item => item !== service)],
+    };
+}
+
 // Render tasks in the UI
 function renderTasks() {
     const tasksContainer = document.getElementById('tasks-container');
@@ -438,13 +450,18 @@ function setupTaskEventListeners() {
             e.preventDefault();
             
             const formData = new FormData(e.target);
+            const syncSettings = getTaskSyncSettings();
+            const shouldSync = formData.get('sync_to_ticktick') === 'on';
             const taskData = {
                 title: formData.get('title'),
                 description: formData.get('description'),
                 priority: formData.get('priority'),
                 category: formData.get('category'),
                 due_date: formData.get('due_date') || null,
-                sync_to_ticktick: formData.get('sync_to_ticktick') === 'on'
+                sync_to_ticktick: shouldSync && syncSettings.service === 'ticktick',
+                sync_to_tasks: shouldSync,
+                task_sync_provider: syncSettings.service,
+                task_sync_provider_order: syncSettings.order,
             };
             
             const success = await createTask(taskData);
@@ -695,8 +712,15 @@ function renderSuggestedTodos(suggestions) {
 
 async function approveSuggestedTodo(suggestionId) {
     try {
+        const syncSettings = getTaskSyncSettings();
         const response = await fetch(`/api/suggested-todos/${suggestionId}/approve`, {
-            method: 'POST'
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                sync_to_tasks: syncSettings.enabled,
+                task_sync_provider: syncSettings.service,
+                task_sync_provider_order: syncSettings.order,
+            })
         });
         const data = await response.json();
         

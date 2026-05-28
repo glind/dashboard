@@ -1879,7 +1879,10 @@ class DatabaseManager:
             logger.error(f"Error getting suggested todos by source: {e}")
             return []
 
-    def approve_suggested_todo(self, suggestion_id: str) -> bool:
+    def approve_suggested_todo(self, suggestion_id: str, sync_enabled: bool = False,
+                               preferred_provider: Optional[str] = None,
+                               provider_order: Optional[List[str]] = None,
+                               settings: Any = None) -> bool:
         """Approve a suggested todo and move it to the main todos list."""
         try:
             with self.get_connection() as conn:
@@ -1936,62 +1939,49 @@ class DatabaseManager:
                 """, (suggestion_id,))
                 
                 conn.commit()
-                
-                # Try to sync to TickTick (async, non-blocking)
-                try:
-                    import asyncio
-                    from collectors.ticktick_collector import TickTickCollector
-                    
-                    # Create sync task in background
-                    async def sync_to_ticktick():
-                        try:
-                            ticktick = TickTickCollector()
-                            
-                            # Map priority: 0=None, 1=Low, 3=Medium, 5=High
-                            priority_map = {'low': 1, 'medium': 3, 'high': 5}
-                            priority_value = get_value('priority')
-                            ticktick_priority = priority_map.get(priority_value, 0) if priority_value else 0
-                            
-                            # Parse due date if present
-                            due_date = None
-                            due_date_value = get_value('due_date')
-                            if due_date_value:
-                                from datetime import datetime
-                                try:
-                                    due_date = datetime.fromisoformat(due_date_value)
-                                except:
-                                    pass
-                            
-                            # Create task in TickTick
-                            result = await ticktick.create_task(
-                                title=get_value('title', ''),
-                                content=get_value('description') or context,
-                                due_date=due_date,
-                                priority=ticktick_priority,
-                                tags=['dashboard']
-                            )
-                            
-                            if result:
-                                logger.info(f"Synced todo '{get_value('title', '')}' to TickTick")
-                            else:
-                                logger.warning(f"Failed to sync todo '{get_value('title', '')}' to TickTick")
-                                
-                        except Exception as e:
-                            logger.error(f"Error syncing to TickTick: {e}")
-                    
-                    # Run sync in background (don't wait)
+
+                if sync_enabled:
                     try:
-                        loop = asyncio.get_event_loop()
-                        if loop.is_running():
-                            asyncio.create_task(sync_to_ticktick())
-                        else:
-                            asyncio.run(sync_to_ticktick())
-                    except:
-                        # If we can't get event loop, skip sync
-                        logger.warning("Could not sync to TickTick - no event loop")
-                        
-                except Exception as e:
-                    logger.warning(f"TickTick sync skipped: {e}")
+                        import asyncio
+                        from services.task_sync_service import TaskSyncService
+
+                        task_payload = {
+                            'id': todo_id,
+                            'title': get_value('title', ''),
+                            'description': get_value('description') or context,
+                            'priority': get_value('priority', 'medium'),
+                            'due_date': get_value('due_date'),
+                            'category': source,
+                            'source': source,
+                            'source_id': get_value('source_id'),
+                        }
+
+                        async def sync_task():
+                            sync_service = TaskSyncService(settings)
+                            result = await sync_service.sync_task(
+                                task_payload,
+                                preferred_provider=preferred_provider,
+                                provider_order=provider_order,
+                            )
+                            if result.get('success'):
+                                logger.info(
+                                    f"Synced todo '{task_payload['title']}' to {result.get('provider')}"
+                                )
+                            else:
+                                logger.warning(
+                                    f"Task sync failed for '{task_payload['title']}': {result.get('error')}"
+                                )
+
+                        try:
+                            loop = asyncio.get_event_loop()
+                            if loop.is_running():
+                                asyncio.create_task(sync_task())
+                            else:
+                                asyncio.run(sync_task())
+                        except Exception:
+                            logger.warning("Could not start background task sync for suggested todo")
+                    except Exception as e:
+                        logger.warning(f"Suggested todo sync skipped: {e}")
                 
                 return True
                 

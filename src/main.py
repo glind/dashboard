@@ -89,6 +89,32 @@ def normalize_ollama_host(raw_host: Optional[str]) -> str:
         host = host.split(':')[0].strip()
     return host or 'localhost'
 
+
+def extract_task_sync_preferences(payload: Optional[Dict[str, Any]], default_enabled: bool = False) -> Dict[str, Any]:
+    """Normalize task sync preferences from request payloads."""
+    from services.task_sync_service import normalize_task_sync_order, normalize_task_sync_provider
+
+    data = payload or {}
+    raw_enabled = data.get('sync_to_tasks')
+    if raw_enabled is None:
+        raw_enabled = data.get('sync_to_ticktick')
+    if raw_enabled is None:
+        raw_enabled = default_enabled
+
+    raw_order = data.get('task_sync_provider_order') or data.get('task_sync_order') or []
+    if isinstance(raw_order, str):
+        raw_order = [item.strip() for item in raw_order.split(',') if item.strip()]
+
+    preferred_provider = normalize_task_sync_provider(
+        data.get('task_sync_provider') or data.get('task_sync_service')
+    )
+
+    return {
+        'enabled': bool(raw_enabled),
+        'preferred_provider': preferred_provider,
+        'provider_order': normalize_task_sync_order(preferred_provider, raw_order),
+    }
+
 # Configure SSL globally to fix certificate verification issues
 try:
     from utils.ssl_helper import configure_ssl_globally
@@ -3592,10 +3618,16 @@ async def create_task(request: Request):
         data = await request.json()
         
         if not COLLECTORS_AVAILABLE:
+            settings_obj = None
             task_manager = TaskManager(None)
         else:
-            settings = Settings()
-            task_manager = TaskManager(settings)
+            settings_obj = Settings()
+            task_manager = TaskManager(settings_obj)
+
+        sync_preferences = extract_task_sync_preferences(
+            data,
+            default_enabled=getattr(getattr(settings_obj, 'task_sync', None), 'enabled', False),
+        )
         
         # Parse due_date if provided
         due_date = None
@@ -3614,12 +3646,22 @@ async def create_task(request: Request):
             source=data.get('source', 'manual'),
             source_id=data.get('source_id', ''),
             email_id=data.get('email_id', ''),
-            sync_to_ticktick=data.get('sync_to_ticktick', True) and COLLECTORS_AVAILABLE,
+            sync_to_ticktick=False,
             source_title=data.get('source_title'),
             source_url=data.get('source_url'),
             source_preview=data.get('source_preview'),
             creation_reason=data.get('creation_reason')
         )
+
+        if result.get('success') and sync_preferences['enabled']:
+            from services.task_sync_service import TaskSyncService
+
+            sync_service = TaskSyncService(settings_obj)
+            result['task_sync'] = await sync_service.sync_task(
+                result.get('task', {}),
+                preferred_provider=sync_preferences['preferred_provider'],
+                provider_order=sync_preferences['provider_order'],
+            )
         
         return result
         
@@ -3922,10 +3964,27 @@ async def get_suggested_todos(status: str = "pending"):
 
 
 @app.post("/api/suggested-todos/{suggestion_id}/approve")
-async def approve_suggested_todo(suggestion_id: str):
+async def approve_suggested_todo(suggestion_id: str, request: Request):
     """Approve a suggested todo and add it to the main todos list."""
     try:
-        success = db.approve_suggested_todo(suggestion_id)
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = {}
+
+        settings_obj = Settings() if COLLECTORS_AVAILABLE else None
+        sync_preferences = extract_task_sync_preferences(
+            payload,
+            default_enabled=getattr(getattr(settings_obj, 'task_sync', None), 'enabled', False),
+        )
+
+        success = db.approve_suggested_todo(
+            suggestion_id,
+            sync_enabled=sync_preferences['enabled'],
+            preferred_provider=sync_preferences['preferred_provider'],
+            provider_order=sync_preferences['provider_order'],
+            settings=settings_obj,
+        )
         
         if not success:
             raise HTTPException(status_code=404, detail="Suggested todo not found")
@@ -3961,11 +4020,22 @@ async def bulk_process_suggested_todos(request: Request):
 
         processed = 0
         failed = 0
+        settings_obj = Settings() if COLLECTORS_AVAILABLE else None
+        sync_preferences = extract_task_sync_preferences(
+            payload,
+            default_enabled=getattr(getattr(settings_obj, 'task_sync', None), 'enabled', False),
+        )
 
         for suggestion_id in target_ids:
             try:
                 if action == "approve":
-                    success = db.approve_suggested_todo(suggestion_id)
+                    success = db.approve_suggested_todo(
+                        suggestion_id,
+                        sync_enabled=sync_preferences['enabled'],
+                        preferred_provider=sync_preferences['preferred_provider'],
+                        provider_order=sync_preferences['provider_order'],
+                        settings=settings_obj,
+                    )
                 else:
                     success = db.reject_suggested_todo(suggestion_id)
                 if success:
@@ -4760,7 +4830,54 @@ async def get_vanity_alerts():
                     'is_liked': bool(row[8]),
                 })
 
-            return {"alerts": alerts, "count": len(alerts), "success": True}
+            if alerts:
+                return {"alerts": alerts, "count": len(alerts), "success": True}
+
+            # If table-backed alerts are empty, fall back to the broader vanity feed
+            # so the UI isn't empty while collectors repopulate the database table.
+            default_fallback_alerts = [{
+                'id': f"fallback-{int(time.time())}",
+                'title': 'Buildly Platform Update',
+                'description': 'Tracking mentions from configured vanity sources while fresh results are loading.',
+                'type': 'buildly',
+                'source': 'Dashboard Fallback',
+                'url': '',
+                'timestamp': datetime.now().isoformat(),
+                'is_liked': False,
+            }]
+            try:
+                # Bound collector latency so the UI receives a result quickly.
+                fallback = await asyncio.wait_for(get_vanity(), timeout=8.0)
+                fallback_alerts = []
+                for item in (fallback or {}).get("alerts", [])[:100]:
+                    fallback_alerts.append({
+                        'id': item.get('id') or f"fallback-{hash(item.get('title', ''))}",
+                        'title': item.get('title', 'Untitled mention'),
+                        'description': item.get('snippet') or item.get('content') or '',
+                        'type': item.get('search_term') or item.get('category') or 'mention',
+                        'source': item.get('source', ''),
+                        'url': item.get('url', ''),
+                        'timestamp': item.get('timestamp', ''),
+                        'is_liked': bool(item.get('is_liked', False)),
+                    })
+
+                if not fallback_alerts:
+                    fallback_alerts = default_fallback_alerts
+
+                return {
+                    "alerts": fallback_alerts,
+                    "count": len(fallback_alerts),
+                    "success": True,
+                    "source": "fallback",
+                }
+            except Exception as fallback_error:
+                logger.warning(f"Vanity alerts fallback failed: {fallback_error}")
+                return {
+                    "alerts": default_fallback_alerts,
+                    "count": len(default_fallback_alerts),
+                    "success": True,
+                    "source": "static-fallback",
+                }
     except Exception as e:
         logger.error(f"Error loading vanity alerts from database: {e}")
         return {"alerts": [], "count": 0, "success": False, "error": str(e)}
@@ -7141,7 +7258,11 @@ async def ai_create_tasks_batch(request: Request):
         data = await request.json()
         approved = data.get('approved', False)
         tasks = data.get('tasks', [])
-        sync_to_ticktick = data.get('sync_to_ticktick', False)
+        settings_obj = Settings() if COLLECTORS_AVAILABLE else None
+        sync_preferences = extract_task_sync_preferences(
+            data,
+            default_enabled=getattr(getattr(settings_obj, 'task_sync', None), 'enabled', False),
+        )
         
         if not approved:
             return {"error": "Action not approved by user", "success": False}
@@ -7153,21 +7274,36 @@ async def ai_create_tasks_batch(request: Request):
         ai_service = get_ai_service(db, settings)
         result = ai_service.create_tasks_batch(tasks)
         
-        # Sync to TickTick if requested
-        if sync_to_ticktick and result.get('success') and result.get('created_count', 0) > 0:
+        # Sync newly-created tasks if requested
+        if sync_preferences['enabled'] and result.get('success') and result.get('created_count', 0) > 0:
             try:
-                if COLLECTORS_AVAILABLE and TASK_MANAGER_AVAILABLE:
-                    from processors.task_manager import TaskManager
-                    from config.settings import Settings
-                    task_manager = TaskManager(Settings())
-                    sync_result = await task_manager.sync_with_ticktick(direction='to_ticktick')
-                    result['ticktick_sync'] = sync_result
-                    logger.info(f"Batch synced {result['created_count']} AI tasks to TickTick")
-                else:
-                    result['ticktick_sync'] = {"error": "TickTick sync not available"}
+                from services.task_sync_service import TaskSyncService
+
+                sync_service = TaskSyncService(settings_obj)
+                sync_results = []
+                for created_task in result.get('created_tasks', []):
+                    task_payload = created_task.get('task') or {}
+                    if not task_payload:
+                        continue
+                    sync_results.append(
+                        await sync_service.sync_task(
+                            task_payload,
+                            preferred_provider=sync_preferences['preferred_provider'],
+                            provider_order=sync_preferences['provider_order'],
+                        )
+                    )
+
+                synced_count = sum(1 for item in sync_results if item.get('success'))
+                result['task_sync'] = {
+                    'success': synced_count > 0,
+                    'synced_count': synced_count,
+                    'requested_count': len(sync_results),
+                    'results': sync_results,
+                }
+                logger.info(f"Batch synced {synced_count} AI tasks via task sync providers")
             except Exception as sync_err:
-                logger.error(f"Error syncing AI tasks to TickTick: {sync_err}")
-                result['ticktick_sync'] = {"error": str(sync_err)}
+                logger.error(f"Error syncing AI tasks to external providers: {sync_err}")
+                result['task_sync'] = {"error": str(sync_err), "success": False}
         
         return result
         

@@ -127,12 +127,9 @@
                     window.dataLoader.showAudioControlPanel('music', `${now.title} - ${now.artist}`);
                 }
             } else {
-                // Fallback: link to YouTube search
-                const searchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(now.artist + ' ' + now.title)}`;
-                ytDiv.innerHTML = `<div class="w-full h-full flex flex-col items-center justify-center bg-gray-800 rounded p-4">
-                    <p class="mb-4 text-center">${now.title} - ${now.artist}</p>
-                    <a href="${searchUrl}" target="_blank" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded">▶️ Play on YouTube</a>
-                </div>`;
+                // Fallback: YouTube embed search query so playback still works without a stored video ID.
+                const searchQuery = encodeURIComponent(`${now.artist} ${now.title}`);
+                ytDiv.innerHTML = `<iframe width="100%" height="315" src="https://www.youtube.com/embed?listType=search&list=${searchQuery}&autoplay=1" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>`;
             }
         } else if (ytDiv) {
             ytDiv.innerHTML = '';
@@ -261,8 +258,8 @@ try {
         this.backgroundRotation = 'random'; // 'random', 'sequential', 'fixed'
         this.fullPageBackground = false; // Full-page background with transparent cards
         this.savedBackgrounds = []; // Liked backgrounds saved as base64
-        this.taskSyncEnabled = false; // TickTick/Todoist sync
-        this.taskSyncService = 'ticktick'; // 'ticktick' or 'todoist'
+        this.taskSyncEnabled = true; // External task sync
+        this.taskSyncService = 'ticktick'; // 'ticktick', 'apple_reminders', or 'todoist'
         this.selectedVoice = null; // Selected TTS voice
         this.availableVoices = []; // Available TTS voices
         this.voiceSignatureEnabled = localStorage.getItem('voiceSignatureEnabled') === 'true'; // "Roger Roger" signature
@@ -2203,10 +2200,10 @@ try {
             const feedback = this.feedbackData[`news-${article.id}`] || null;
             const isRead = article.is_read || false;
             const displayImg = this.getNewsImageUrl(article, imgUrl);
-            const fallbackImg = this.getNewsFallbackImage(article);
+            const fallbackImg = this.getNewsPlaceholderImage(article);
             
             return `
-            <div class="news-card bg-gray-800 border border-gray-700 rounded-xl overflow-hidden hover:border-purple-500 transition-all cursor-pointer ${isRead ? 'opacity-70' : ''}"
+              <div class="news-card bg-gray-800 border border-gray-700 rounded-xl overflow-hidden hover:border-purple-500 transition-all cursor-pointer ${isRead ? 'opacity-70' : ''}"
                  data-category="${this.escapeHtml(article.category || '')}"
                  data-article-id="${article.id}"
                  onclick="dataLoader.openNewsArticle('${article.id}')">
@@ -2251,12 +2248,51 @@ try {
         `;
     }
 
+    normalizeExternalUrl(url, baseUrl = '') {
+        const raw = String(url || '').trim();
+        if (!raw) return '';
+
+        // Guard against script/data URIs.
+        if (/^(javascript|data|vbscript):/i.test(raw)) {
+            return '';
+        }
+
+        if (/^https?:\/\//i.test(raw)) {
+            return raw;
+        }
+
+        if (raw.startsWith('//')) {
+            return `https:${raw}`;
+        }
+
+        if (raw.startsWith('/')) {
+            try {
+                const base = new URL(baseUrl || '');
+                return `${base.origin}${raw}`;
+            } catch (_) {
+                return '';
+            }
+        }
+
+        // Looks like a bare domain/path.
+        if (/^[a-z0-9.-]+\.[a-z]{2,}(\/|$)/i.test(raw)) {
+            return `https://${raw}`;
+        }
+
+        return '';
+    }
+
     getNewsImageUrl(article, extractedImageUrl = null) {
         const preferred = article?.image_url || extractedImageUrl;
-        if (preferred && /^https?:\/\//i.test(preferred)) {
-            return preferred;
+        const normalized = this.normalizeExternalUrl(preferred, article?.url || '');
+        if (normalized) {
+            return normalized;
         }
         return this.getNewsFallbackImage(article);
+    }
+
+    getNewsPlaceholderImage(article) {
+        return '/assets/images/forge-logo.png';
     }
 
     getNewsFallbackImage(article) {
@@ -2344,11 +2380,17 @@ try {
         }
 
         const displayImg = this.getNewsImageUrl(article, imgUrl);
-        const fallbackImg = this.getNewsFallbackImage(article);
+        const fallbackImg = this.getNewsPlaceholderImage(article);
         
         // Clean description
         cleanDesc = cleanDesc.replace(/<img[^>]*>/gi, '');
-        cleanDesc = cleanDesc.replace(/<a\s+(?:[^>]*?\s+)?href="([^"]*)"[^>]*>(.*?)<\/a>/gi, '<a href="$1" target="_blank" class="text-blue-400 hover:underline">$2</a>');
+        cleanDesc = cleanDesc.replace(/<a\s+(?:[^>]*?\s+)?href="([^"]*)"[^>]*>(.*?)<\/a>/gi, (_m, href, text) => {
+            const safeHref = this.normalizeExternalUrl(href, article.url || '');
+            if (!safeHref) {
+                return this.escapeHtml(text || '');
+            }
+            return `<a href="${safeHref}" target="_blank" rel="noopener noreferrer" class="text-blue-400 hover:underline">${text}</a>`;
+        });
         cleanDesc = cleanDesc.replace(/<(?!a\s|\/a>)[^>]*>/gi, '');
         cleanDesc = cleanDesc.trim();
         
@@ -2358,8 +2400,13 @@ try {
         document.getElementById('news-modal-category').textContent = article.category || 'General';
         document.getElementById('news-modal-date').textContent = this.formatDate(article.published_at);
         document.getElementById('news-modal-content').innerHTML = cleanDesc || 'No content available. Click "Read Full Article" to view the complete story.';
-        document.getElementById('news-modal-link').href = article.url;
-        document.getElementById('news-modal-link').onclick = () => this.markArticleRead(articleId);
+        const safeArticleUrl = this.normalizeExternalUrl(article.url, article.url || '');
+        const modalLink = document.getElementById('news-modal-link');
+        modalLink.href = safeArticleUrl || '#';
+        modalLink.rel = 'noopener noreferrer';
+        modalLink.style.pointerEvents = safeArticleUrl ? 'auto' : 'none';
+        modalLink.style.opacity = safeArticleUrl ? '1' : '0.5';
+        modalLink.onclick = () => this.markArticleRead(articleId);
         
         // Show/hide image
         const imgContainer = document.getElementById('news-modal-image-container');
@@ -5545,34 +5592,38 @@ Then ask me: "What would you like to do with this email?"`,
     // VANITY ALERTS
     async loadVanityAlerts() {
         this.setSectionLoading('vanity-grid', 'Loading vanity alerts...');
-        try {
-            const response = await this.fetchJsonWithTimeout('/api/vanity-alerts', {}, 12000);
-            if (!response.ok) {
-                this.vanityAlerts = [];
-                this.renderVanityAlerts();
-                return;
-            }
-
+        const loadPrimary = async () => {
+            const response = await fetch('/api/vanity-alerts', { cache: 'no-store' });
+            if (!response.ok) return [];
             const data = await response.json();
-            this.vanityAlerts = data.alerts || [];
+            return Array.isArray(data.alerts) ? data.alerts : [];
+        };
+
+        const loadFallback = async () => {
+            const response = await fetch('/api/vanity', { cache: 'no-store' });
+            if (!response.ok) return [];
+            const data = await response.json();
+            return Array.isArray(data.alerts) ? data.alerts : [];
+        };
+
+        try {
+            this.vanityAlerts = await loadPrimary();
 
             if (!this.vanityAlerts.length) {
-                try {
-                    const fallbackResponse = await fetch('/api/vanity');
-                    if (fallbackResponse.ok) {
-                        const fallbackData = await fallbackResponse.json();
-                        this.vanityAlerts = fallbackData.alerts || [];
-                    }
-                } catch (fallbackError) {
-                    console.warn('Vanity fallback fetch failed:', fallbackError);
-                }
+                this.vanityAlerts = await loadFallback();
             }
 
             this.renderVanityAlerts();
         } catch (error) {
-            console.error('Error loading vanity alerts:', error);
-            this.vanityAlerts = [];
-            this.setSectionError('vanity-grid', this.getLoadErrorMessage('Unable to load vanity alerts right now.', error));
+            console.error('Error loading vanity alerts from primary source:', error);
+            try {
+                this.vanityAlerts = await loadFallback();
+                this.renderVanityAlerts();
+            } catch (fallbackError) {
+                console.error('Error loading vanity alerts fallback:', fallbackError);
+                this.vanityAlerts = [];
+                this.setSectionError('vanity-grid', this.getLoadErrorMessage('Unable to load vanity alerts right now.', fallbackError));
+            }
         }
     }
     
@@ -6117,13 +6168,34 @@ Then ask me: "What would you like to do with this email?"`,
     renderPlaylists(playlists) {
         const grid = document.getElementById('playlists-grid');
         if (!grid) return;
+
+        const normalizedPlaylists = (playlists || []).map(playlist => {
+            let tracks = playlist?.tracks || [];
+            if (typeof tracks === 'string') {
+                try {
+                    tracks = JSON.parse(tracks);
+                } catch (_) {
+                    tracks = [];
+                }
+            }
+            if (!Array.isArray(tracks)) {
+                tracks = [];
+            }
+
+            return {
+                ...playlist,
+                id: playlist?.id || '',
+                name: playlist?.name || 'Untitled Playlist',
+                tracks,
+            };
+        }).filter(playlist => playlist.id);
         
-        if (playlists.length === 0) {
+        if (normalizedPlaylists.length === 0) {
             grid.innerHTML = '<p class="text-gray-400 col-span-full text-center">No playlists yet. Create one above!</p>';
             return;
         }
         
-        const html = playlists.map(playlist => `
+        const html = normalizedPlaylists.map(playlist => `
             <div class="bg-gray-750 rounded-lg p-4 border border-gray-600 hover:border-purple-500 transition cursor-pointer"
                  onclick="dataLoader.playPlaylist('${playlist.id}')">
                 <div class="flex items-center gap-3 mb-3">
@@ -6173,19 +6245,45 @@ Then ask me: "What would you like to do with this email?"`,
                     this.showNotification('Playlist not found', 'error');
                     return;
                 }
+
+                let tracks = playlist.tracks || [];
+                if (typeof tracks === 'string') {
+                    try {
+                        tracks = JSON.parse(tracks);
+                    } catch (_) {
+                        tracks = [];
+                    }
+                }
+                if (!Array.isArray(tracks)) {
+                    tracks = [];
+                }
+
+                const normalizedTracks = tracks
+                    .map(t => ({
+                        title: t?.title || t?.name || t?.song || 'Unknown Title',
+                        artist: t?.artist || t?.creator || 'Unknown Artist',
+                        youtubeId: t?.youtubeId || t?.youtube_id || null
+                    }))
+                    .filter(t => t.title && t.artist);
                 
-                // Use the YouTube player to load the playlist
-                if (window.loadYouTubePlayer && playlist.tracks && playlist.tracks.length > 0) {
-                    // Convert tracks to YouTube format
-                    const ytTracks = playlist.tracks.map(t => ({
-                        title: t.title,
-                        artist: t.artist,
-                        youtubeId: t.youtubeId || null
-                    }));
-                    window.loadYouTubePlayer(ytTracks, playlistId, playlist.name);
-                    this.showNotification(`Playing playlist: ${playlist.name} (${playlist.tracks.length} tracks)`, 'info');
-                } else {
+                if (normalizedTracks.length === 0) {
                     this.showNotification('No tracks in playlist', 'warning');
+                    return;
+                }
+
+                // Primary path: populate the modern queue in dashboard_modern.html.
+                if (window.musicPlayer && typeof window.musicPlayer.setPlaylist === 'function') {
+                    window.musicPlayer.setPlaylist(normalizedTracks, playlistId, playlist.name || 'Playlist');
+                    this.showNotification(`Loaded playlist: ${playlist.name} (${normalizedTracks.length} tracks)`, 'success');
+                    return;
+                }
+
+                // Compatibility fallback for legacy YouTube queue implementation.
+                if (window.loadYouTubePlayer) {
+                    window.loadYouTubePlayer(normalizedTracks, playlistId, playlist.name || 'Playlist');
+                    this.showNotification(`Loaded playlist: ${playlist.name} (${normalizedTracks.length} tracks)`, 'success');
+                } else {
+                    this.showNotification('Music player is not ready yet. Please try again.', 'warning');
                 }
             })
             .catch(err => {
@@ -6302,7 +6400,7 @@ Then ask me: "What would you like to do with this email?"`,
                     
                     <div class="border-t border-gray-700 pt-4">
                         <h4 class="text-lg font-semibold mb-3">Task Sync</h4>
-                        <p class="text-xs text-gray-400 mb-3">Sync tasks with external services</p>
+                        <p class="text-xs text-gray-400 mb-3">Sync tasks with external services. TickTick is primary by default, with Apple Reminders second.</p>
                         <label class="flex items-center gap-2 mb-3">
                             <input type="checkbox" 
                                    ${this.taskSyncEnabled ? 'checked' : ''}
@@ -6314,6 +6412,7 @@ Then ask me: "What would you like to do with this email?"`,
                                 class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
                                 ${!this.taskSyncEnabled ? 'disabled' : ''}>
                             <option value="ticktick" ${this.taskSyncService === 'ticktick' ? 'selected' : ''}>TickTick</option>
+                            <option value="apple_reminders" ${this.taskSyncService === 'apple_reminders' ? 'selected' : ''}>Apple Reminders</option>
                             <option value="todoist" ${this.taskSyncService === 'todoist' ? 'selected' : ''}>Todoist</option>
                         </select>
                     </div>
@@ -6413,10 +6512,14 @@ Then ask me: "What would you like to do with this email?"`,
     
     loadTaskSyncSettings() {
         const stored = localStorage.getItem('taskSyncSettings');
+        const allowedServices = ['ticktick', 'apple_reminders', 'todoist'];
         if (stored) {
             const settings = JSON.parse(stored);
             this.taskSyncEnabled = settings.enabled || false;
-            this.taskSyncService = settings.service || 'ticktick';
+            this.taskSyncService = allowedServices.includes(settings.service) ? settings.service : 'ticktick';
+        } else {
+            this.taskSyncEnabled = true;
+            this.taskSyncService = 'ticktick';
         }
     }
     
@@ -8753,10 +8856,18 @@ function renderSuggestedTodos(suggestions) {
 
 async function bulkProcessSuggestedTodos(action) {
     try {
+        const allowedServices = ['ticktick', 'apple_reminders', 'todoist'];
+        const stored = JSON.parse(localStorage.getItem('taskSyncSettings') || '{}');
+        const service = allowedServices.includes(stored.service) ? stored.service : 'ticktick';
         const response = await fetch('/api/suggested-todos/bulk', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action })
+            body: JSON.stringify({
+                action,
+                sync_to_tasks: action === 'approve' && Boolean(stored.enabled),
+                task_sync_provider: service,
+                task_sync_provider_order: [service, ...allowedServices.filter(item => item !== service)],
+            })
         });
 
         const result = await response.json();
@@ -8786,8 +8897,17 @@ async function rejectAllSuggestedTodos() {
 
 window.approveSuggestedTodo = async function approveSuggestedTodo(suggestionId) {
     try {
+        const allowedServices = ['ticktick', 'apple_reminders', 'todoist'];
+        const stored = JSON.parse(localStorage.getItem('taskSyncSettings') || '{}');
+        const service = allowedServices.includes(stored.service) ? stored.service : 'ticktick';
         const response = await fetch(`/api/suggested-todos/${suggestionId}/approve`, {
-            method: 'POST'
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                sync_to_tasks: Boolean(stored.enabled),
+                task_sync_provider: service,
+                task_sync_provider_order: [service, ...allowedServices.filter(item => item !== service)],
+            })
         });
         
         const result = await response.json();
@@ -8923,6 +9043,94 @@ if (typeof window.showSection !== 'function') {
 
         if (dataLoader && typeof dataLoader.refreshSectionData === 'function') {
             dataLoader.refreshSectionData(sectionName);
+        }
+
+        // Ensure custom module sections still load when this compatibility shim is active.
+        if (sectionName === 'vanity' && dataLoader && typeof dataLoader.loadVanityAlerts === 'function') {
+            dataLoader.loadVanityAlerts();
+        }
+    };
+}
+
+// Compatibility shims for inline profile handlers in template markup.
+if (typeof window.loadUserProfile !== 'function') {
+    window.loadUserProfile = async function() {
+        try {
+            const response = await fetch('/api/user/profile');
+            const data = await response.json();
+            const profile = data && data.profile ? data.profile : data;
+
+            const setValue = (id, value) => {
+                const el = document.getElementById(id);
+                if (el) el.value = value || '';
+            };
+
+            setValue('profile-full-name', profile.full_name);
+            setValue('profile-company', profile.company);
+            setValue('profile-github-username', profile.github_username);
+            setValue('profile-book-title', profile.book_title);
+            setValue('profile-artist-name', profile.music_artist_name);
+            setValue('profile-label-name', profile.music_label_name);
+            setValue('profile-soundcloud-url', profile.soundcloud_url);
+            setValue('profile-bandcamp-url', profile.bandcamp_url);
+        } catch (error) {
+            console.error('Error loading user profile:', error);
+            if (window.dataLoader && typeof window.dataLoader.showNotification === 'function') {
+                window.dataLoader.showNotification('Failed to load profile', 'error');
+            }
+        }
+    };
+}
+
+if (typeof window.saveUserProfile !== 'function') {
+    window.saveUserProfile = async function() {
+        const messageEl = document.getElementById('profile-message');
+        const profile = {
+            full_name: (document.getElementById('profile-full-name')?.value || '').trim(),
+            company: (document.getElementById('profile-company')?.value || '').trim(),
+            github_username: (document.getElementById('profile-github-username')?.value || '').trim(),
+            book_title: (document.getElementById('profile-book-title')?.value || '').trim(),
+            music_artist_name: (document.getElementById('profile-artist-name')?.value || '').trim(),
+            music_label_name: (document.getElementById('profile-label-name')?.value || '').trim(),
+            soundcloud_url: (document.getElementById('profile-soundcloud-url')?.value || '').trim(),
+            bandcamp_url: (document.getElementById('profile-bandcamp-url')?.value || '').trim()
+        };
+
+        try {
+            const response = await fetch('/api/user/profile', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(profile)
+            });
+
+            const data = await response.json();
+            if (!response.ok || data.success === false) {
+                throw new Error(data.error || 'Failed to save profile');
+            }
+
+            if (window.dataLoader) {
+                window.dataLoader.userProfile = profile;
+                if (typeof window.dataLoader.showNotification === 'function') {
+                    window.dataLoader.showNotification('Profile saved successfully!', 'success');
+                }
+            }
+
+            if (messageEl) {
+                messageEl.className = 'mt-4 p-3 rounded-lg bg-green-900/20 border border-green-700 text-green-400';
+                messageEl.textContent = '✓ Profile saved successfully!';
+                messageEl.classList.remove('hidden');
+                setTimeout(() => messageEl.classList.add('hidden'), 5000);
+            }
+        } catch (error) {
+            console.error('Error saving user profile:', error);
+            if (messageEl) {
+                messageEl.className = 'mt-4 p-3 rounded-lg bg-red-900/20 border border-red-700 text-red-400';
+                messageEl.textContent = `✗ Error: ${error.message}`;
+                messageEl.classList.remove('hidden');
+            }
+            if (window.dataLoader && typeof window.dataLoader.showNotification === 'function') {
+                window.dataLoader.showNotification('Failed to save profile', 'error');
+            }
         }
     };
 }

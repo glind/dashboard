@@ -25,6 +25,16 @@ google:
 apple:
   reminders_export_path: "data/apple_reminders.csv"
 
+# Task sync settings
+task_sync:
+  enabled: true
+  default_provider: "ticktick"
+  provider_order:
+    - "ticktick"
+    - "apple_reminders"
+    - "todoist"
+  apple_reminders_list: "Inbox"
+
 # Notes settings
 notes:
   obsidian:

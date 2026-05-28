@@ -8,6 +8,7 @@ All documentation is now organized in the `devdocs/` directory:
 - **`README.md`** - Main architecture and overview
 - **`code-organization.md`** - Detailed project structure and file organization  
 - **`CLEANUP_SUMMARY.md`** - Recent codebase cleanup and organization changes
+- **`LOCAL_APP_COMPANION_BLUEPRINT.md`** - Standalone Buildly Launchpad branding and repo blueprint
 
 ### Setup & Installation
 - **`setup/installation.md`** - Complete installation guide

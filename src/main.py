@@ -24,6 +24,8 @@ import threading
 import asyncio
 import time
 import secrets
+import hashlib
+import re
 from typing import Dict, Any, Optional, List
 
 # Add the src directory and project root to path for imports
@@ -37,6 +39,44 @@ from database import db
 
 # Configure logging
 logger = logging.getLogger(__name__)
+
+# Lightweight performance metrics store for before/after comparisons.
+PERF_LOCK = threading.Lock()
+PERF_MAX_SAMPLES = 200
+PERF_METRICS: Dict[str, Dict[str, List[float]]] = {
+    'endpoints': {},
+    'background_collectors': {}
+}
+
+
+def _record_perf(namespace: str, metric_name: str, duration_ms: float):
+    """Record a timing sample for basic endpoint/collector benchmarking."""
+    with PERF_LOCK:
+        bucket = PERF_METRICS.setdefault(namespace, {})
+        series = bucket.setdefault(metric_name, [])
+        series.append(float(duration_ms))
+        if len(series) > PERF_MAX_SAMPLES:
+            del series[:-PERF_MAX_SAMPLES]
+
+
+def _summarize_perf(namespace: str) -> Dict[str, Any]:
+    """Return avg/p95 style summaries for a namespace."""
+    with PERF_LOCK:
+        source = PERF_METRICS.get(namespace, {})
+        summary: Dict[str, Any] = {}
+        for key, values in source.items():
+            if not values:
+                continue
+            ordered = sorted(values)
+            p95_index = max(0, int(len(ordered) * 0.95) - 1)
+            summary[key] = {
+                'samples': len(values),
+                'last_ms': round(values[-1], 2),
+                'avg_ms': round(sum(values) / len(values), 2),
+                'p95_ms': round(ordered[p95_index], 2),
+                'max_ms': round(max(values), 2),
+            }
+        return summary
 
 GOOGLE_GMAIL_READ_SCOPES = [
     'https://www.googleapis.com/auth/gmail.readonly',
@@ -278,6 +318,8 @@ class BackgroundDataManager:
         self.cache_timestamps: Dict[str, datetime] = {}
         self.cache_duration = timedelta(minutes=10)  # Cache for 10 minutes
         self.background_tasks: Dict[str, threading.Thread] = {}
+        self._cache_lock = threading.Lock()
+        self._max_cache_entries = 16
         self.running = True
         
         # Start background collection threads
@@ -287,7 +329,7 @@ class BackgroundDataManager:
         """Start background data collection threads."""
         endpoints = [
             'calendar', 'email', 'github', 'news', 
-            'music', 'vanity', 'weather', 'jokes'
+            'music', 'vanity', 'weather', 'jokes', 'participant_enrichment'
         ]
         
         for endpoint in endpoints:
@@ -312,7 +354,8 @@ class BackgroundDataManager:
             'music': self._collect_music,
             'vanity': self._collect_vanity,
             'weather': self._collect_weather,
-            'jokes': self._collect_jokes
+            'jokes': self._collect_jokes,
+            'participant_enrichment': self._collect_participant_enrichment
         }
         
         collect_func = collection_functions.get(endpoint)
@@ -322,49 +365,210 @@ class BackgroundDataManager:
         
         # Initial delay to stagger startup
         time.sleep(hash(endpoint) % 30)  # 0-30 second delay based on endpoint name
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
         
-        while self.running:
+        try:
+            while self.running:
+                try:
+                    logger.info(f"Background collecting {endpoint} data...")
+                    perf_start = time.perf_counter()
+                    data = loop.run_until_complete(collect_func())
+                    with self._cache_lock:
+                        self.cache[endpoint] = data
+                        self.cache_timestamps[endpoint] = datetime.now()
+                        self._trim_cache_if_needed()
+                    duration_ms = (time.perf_counter() - perf_start) * 1000
+                    _record_perf('background_collectors', endpoint, duration_ms)
+                    logger.info(f"Successfully cached {endpoint} data")
+                    
+                    # Sleep for different intervals based on data type
+                    sleep_intervals = {
+                        'calendar': 300,  # 5 minutes
+                        'email': 180,     # 3 minutes
+                        'github': 600,    # 10 minutes
+                        'news': 900,      # 15 minutes
+                        'music': 1800,    # 30 minutes
+                        'vanity': 1800,   # 30 minutes
+                        'weather': 900,   # 15 minutes
+                        'jokes': 3600,    # 1 hour
+                        'participant_enrichment': 2700  # 45 minutes
+                    }
+                    sleep_time = sleep_intervals.get(endpoint, 600)
+                    time.sleep(sleep_time)
+                    
+                except Exception as e:
+                    logger.error(f"Error in background collection for {endpoint}: {e}")
+                    # Wait 5 minutes before retrying on error
+                    time.sleep(300)
+        finally:
             try:
-                logger.info(f"Background collecting {endpoint} data...")
-                data = asyncio.run(collect_func())
-                self.cache[endpoint] = data
-                self.cache_timestamps[endpoint] = datetime.now()
-                logger.info(f"Successfully cached {endpoint} data")
-                
-                # Sleep for different intervals based on data type
-                sleep_intervals = {
-                    'calendar': 300,  # 5 minutes
-                    'email': 180,     # 3 minutes
-                    'github': 600,    # 10 minutes
-                    'news': 900,      # 15 minutes
-                    'music': 1800,    # 30 minutes
-                    'vanity': 1800,   # 30 minutes
-                    'weather': 900,   # 15 minutes
-                    'jokes': 3600     # 1 hour
-                }
-                sleep_time = sleep_intervals.get(endpoint, 600)
-                time.sleep(sleep_time)
-                
-            except Exception as e:
-                logger.error(f"Error in background collection for {endpoint}: {e}")
-                # Wait 5 minutes before retrying on error
-                time.sleep(300)
+                loop.close()
+            except Exception:
+                pass
+
+    def _trim_cache_if_needed(self):
+        """Trim cache to prevent unbounded growth if new endpoint keys are added."""
+        if len(self.cache_timestamps) <= self._max_cache_entries:
+            return
+
+        sorted_keys = sorted(self.cache_timestamps.items(), key=lambda item: item[1])
+        keys_to_remove = [key for key, _ in sorted_keys[:-self._max_cache_entries]]
+        for key in keys_to_remove:
+            self.cache.pop(key, None)
+            self.cache_timestamps.pop(key, None)
+
+    async def _collect_calendar(self):
+        try:
+            settings = Settings()
+            collector = CalendarCollector(settings)
+            start_date = datetime.now()
+            end_date = start_date + timedelta(days=7)
+            events_data = await collector.collect_events(start_date, end_date)
+            formatted_events = []
+            for event in (events_data or [])[:10]:
+                start_time = event.get('start_time')
+                end_time = event.get('end_time')
+                formatted_events.append({
+                    "title": event.get('summary', 'Untitled Event'),
+                    "summary": event.get('summary', 'Untitled Event'),
+                    "time": start_time.strftime("%I:%M %p") if hasattr(start_time, 'strftime') else 'All day',
+                    "description": event.get('description', ''),
+                    "location": event.get('location', ''),
+                    "organizer": event.get('organizer', ''),
+                    "attendees": event.get('attendees', []) or [],
+                    "start": {"dateTime": start_time.isoformat()} if hasattr(start_time, 'isoformat') else None,
+                    "end": {"dateTime": end_time.isoformat()} if hasattr(end_time, 'isoformat') else None,
+                    "event_id": event.get('id', ''),
+                    "calendar_url": f"https://calendar.google.com/calendar/event?eid={event.get('id', '')}" if event.get('id') else "https://calendar.google.com/calendar",
+                    "is_all_day": event.get('is_all_day', False),
+                    "status": event.get('status', ''),
+                    "created": event.get('created', ''),
+                    "updated": event.get('updated', ''),
+                    "html_link": event.get('html_link', '')
+                })
+            return {"events": formatted_events}
+        except Exception as e:
+            logger.error(f"Calendar collection error: {e}")
+            return {"error": str(e), "events": []}
+
+    async def _collect_email(self):
+        try:
+            tokens_file = project_root / "tokens" / "google_credentials.json"
+            if not tokens_file.exists():
+                return {"emails": [], "total_count": 0, "unread_count": 0, "authenticated": False, "error": "Not authenticated with Google"}
+            account_config = {
+                'name': 'primary',
+                'credentials_file': str(tokens_file),
+                'scopes': [
+                    'https://www.googleapis.com/auth/gmail.readonly',
+                    'https://www.googleapis.com/auth/calendar.readonly'
+                ]
+            }
+            collector = GmailCollector(account_config)
+            return await collector.collect_data()
+        except Exception as e:
+            logger.error(f"Email collection error: {e}")
+            return {"error": str(e), "emails": []}
+
+    async def _collect_github(self):
+        try:
+            from database import get_credentials
+            github_creds = get_credentials('github')
+            if not (github_creds and github_creds.get('token')):
+                return {"data": [], "total": 0, "error": "No GitHub credentials"}
+
+            username = github_creds.get('username') or (db.get_user_profile() or {}).get('github_username', 'unknown')
+            token = github_creds.get('token')
+            headers = {'Authorization': f'token {token}', 'Accept': 'application/vnd.github.v3+json'}
+
+            github_items = []
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                review_response = await client.get(f'https://api.github.com/search/issues?q=review-requested:{username}+is:open+is:pr', headers=headers)
+                if review_response.status_code == 200:
+                    github_items.extend(review_response.json().get('items', [])[:3])
+
+                issues_response = await client.get(f'https://api.github.com/search/issues?q=assignee:{username}+is:issue+is:open', headers=headers)
+                if issues_response.status_code == 200:
+                    github_items.extend(issues_response.json().get('items', [])[:3])
+
+            return {"data": github_items, "total": len(github_items)}
+        except Exception as e:
+            logger.error(f"GitHub collection error: {e}")
+            return {"error": str(e), "data": []}
+
+    async def _collect_news(self):
+        try:
+            from collectors.news_collector import NewsCollector
+            return await NewsCollector().collect_data()
+        except Exception as e:
+            logger.error(f"News collection error: {e}")
+            return {"error": str(e), "articles": []}
+
+    async def _collect_music(self):
+        try:
+            from collectors.music_collector import MusicCollector
+            return await MusicCollector().collect_data()
+        except Exception as e:
+            logger.error(f"Music collection error: {e}")
+            return {"error": str(e), "data": []}
+
+    async def _collect_vanity(self):
+        try:
+            from collectors.vanity_alerts_collector import VanityAlertsCollector
+            return await VanityAlertsCollector().collect_data()
+        except Exception as e:
+            logger.error(f"Vanity collection error: {e}")
+            return {"error": str(e), "alerts": []}
+
+    async def _collect_weather(self):
+        try:
+            settings = Settings()
+            return await WeatherCollector(settings).collect_data()
+        except Exception as e:
+            logger.error(f"Weather collection error: {e}")
+            return {"error": str(e), "current": {}}
+
+    async def _collect_jokes(self):
+        try:
+            settings = Settings()
+            return await JokesCollector(settings).collect_data()
+        except Exception as e:
+            logger.error(f"Jokes collection error: {e}")
+            return {"error": str(e), "joke": "Failed to load joke"}
+
+    async def _collect_participant_enrichment(self):
+        """Warm participant enrichment cache for repeat attendees."""
+        try:
+            result = await _run_participant_enrichment_warmup(max_participants=16)
+            return {
+                "success": True,
+                "warmed": result.get('warmed', 0),
+                "participants": result.get('participants', []),
+                "timestamp": datetime.now().isoformat()
+            }
+        except Exception as e:
+            logger.error(f"Participant enrichment warmup error: {e}")
+            return {"success": False, "error": str(e), "warmed": 0}
     
     def get_cached_data(self, endpoint: str) -> Optional[Dict[str, Any]]:
         """Get cached data for an endpoint if available and fresh."""
-        if endpoint not in self.cache:
-            return None
-            
-        timestamp = self.cache_timestamps.get(endpoint)
-        if not timestamp:
-            return None
-            
-        # Check if cache is still fresh
-        if datetime.now() - timestamp > self.cache_duration:
-            logger.info(f"Cache for {endpoint} is stale")
-            return None
-            
-        return self.cache[endpoint]
+        with self._cache_lock:
+            if endpoint not in self.cache:
+                return None
+
+            timestamp = self.cache_timestamps.get(endpoint)
+            if not timestamp:
+                return None
+
+            # Check if cache is still fresh
+            if datetime.now() - timestamp > self.cache_duration:
+                logger.info(f"Cache for {endpoint} is stale")
+                self.cache.pop(endpoint, None)
+                self.cache_timestamps.pop(endpoint, None)
+                return None
+
+            return self.cache.get(endpoint)
     
     def stop(self):
         """Stop all background collection threads."""
@@ -372,6 +576,682 @@ class BackgroundDataManager:
         for thread in self.background_tasks.values():
             if thread.is_alive():
                 thread.join(timeout=5)
+
+
+PARTICIPANT_INTEL_CACHE_TTL = timedelta(minutes=10)
+PARTICIPANT_ENRICHMENT_REFRESH_INTERVAL = timedelta(hours=12)
+participant_intel_cache: Dict[str, Dict[str, Any]] = {}
+participant_intel_cache_lock = threading.Lock()
+participant_notes_cache: Dict[str, Any] = {
+    'timestamp': None,
+    'notes': [],
+    'limit': 0
+}
+participant_calendar_cache: Dict[str, Any] = {
+    'timestamp': None,
+    'cache_key': '',
+    'events': []
+}
+self_identity_cache: Dict[str, Any] = {
+    'timestamp': None,
+    'emails': []
+}
+
+
+def _normalize_email(value: str) -> str:
+    """Normalize attendee email-like values from UI/API payloads."""
+    if not value:
+        return ""
+    value = str(value).strip().lower()
+    # Handle values like "Name <email@example.com>"
+    match = re.search(r'<([^>]+)>', value)
+    if match:
+        value = match.group(1).strip().lower()
+    return value
+
+
+def _display_name_for_email(email: str) -> str:
+    """Build a readable name from an email local part."""
+    local = (email.split('@')[0] if '@' in email else email).strip()
+    local = re.sub(r'[._\-]+', ' ', local)
+    local = re.sub(r'\s+', ' ', local).strip()
+    return local.title() if local else email
+
+
+def _extract_links(text: str) -> Dict[str, str]:
+    """Extract likely LinkedIn and GitHub profile links from free text."""
+    linkedin = ""
+    github = ""
+    if not text:
+        return {'linkedin': linkedin, 'github': github}
+
+    linkedin_match = re.search(r'https?://(?:www\.)?linkedin\.com/(?:in|company)/[^\s)\]"\']+', text, re.IGNORECASE)
+    github_match = re.search(r'https?://(?:www\.)?github\.com/[^\s)\]"\']+', text, re.IGNORECASE)
+    if linkedin_match:
+        linkedin = linkedin_match.group(0)
+    if github_match:
+        github = github_match.group(0)
+    return {'linkedin': linkedin, 'github': github}
+
+
+def _extract_github_username(github_url: str) -> str:
+    """Extract GitHub username from a profile URL."""
+    if not github_url:
+        return ''
+    normalized = str(github_url).strip()
+    match = re.search(r'github\.com/([A-Za-z0-9\-]+)', normalized, re.IGNORECASE)
+    if not match:
+        return ''
+    username = match.group(1).strip().strip('/')
+    # Ignore obvious non-profile routes.
+    if username.lower() in {'features', 'topics', 'collections', 'marketplace', 'orgs', 'organizations'}:
+        return ''
+    return username
+
+
+def _parse_timestamp(value: Any) -> Optional[datetime]:
+    """Best-effort timestamp parser for cached enrichment metadata."""
+    if not value:
+        return None
+    try:
+        text = str(value).strip()
+        if text.endswith('Z'):
+            text = text.replace('Z', '+00:00')
+        return datetime.fromisoformat(text)
+    except Exception:
+        return None
+
+
+async def _fetch_github_profile_stats(github_url: str) -> Dict[str, Any]:
+    """Fetch public GitHub profile stats for participant enrichment."""
+    username = _extract_github_username(github_url)
+    if not username:
+        return {}
+
+    api_url = f"https://api.github.com/users/{username}"
+    headers = {
+        'Accept': 'application/vnd.github+json',
+        'User-Agent': 'buildly-dashboard-participant-intel'
+    }
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            response = await client.get(api_url, headers=headers)
+            if response.status_code != 200:
+                return {}
+            payload = response.json() or {}
+            return {
+                'username': payload.get('login') or username,
+                'name': payload.get('name') or '',
+                'company': payload.get('company') or '',
+                'followers': int(payload.get('followers') or 0),
+                'following': int(payload.get('following') or 0),
+                'public_repos': int(payload.get('public_repos') or 0),
+                'public_gists': int(payload.get('public_gists') or 0),
+                'profile_url': payload.get('html_url') or github_url,
+                'avatar_url': payload.get('avatar_url') or '',
+                'bio': payload.get('bio') or '',
+                'updated_at': payload.get('updated_at') or ''
+            }
+    except Exception as github_error:
+        logger.warning(f"GitHub enrichment failed for {username}: {github_error}")
+        return {}
+
+
+async def _refresh_participant_enrichment_cache(
+    email: str,
+    contact_map: Dict[str, Any],
+    inferred_linkedin_url: str,
+    inferred_github_url: str
+) -> Dict[str, Any]:
+    """Refresh and persist participant profile enrichment for repeat attendees."""
+    safe_email = _normalize_email(email)
+    if not safe_email:
+        return contact_map or {}
+
+    contact_map = contact_map or {}
+    merged_github_url = contact_map.get('github_url') or inferred_github_url
+    merged_linkedin_url = contact_map.get('linkedin_url') or inferred_linkedin_url
+    github_stats = contact_map.get('github_stats') or {}
+    existing_avatar = contact_map.get('image_url') or contact_map.get('linkedin_image_url') or ''
+
+    refreshed_at = _parse_timestamp(contact_map.get('enrichment_refreshed_at'))
+    stale = not refreshed_at or (datetime.now() - refreshed_at) > PARTICIPANT_ENRICHMENT_REFRESH_INTERVAL
+    should_refresh_github = bool(merged_github_url) and (
+        stale or not github_stats or not existing_avatar
+    )
+
+    updates: Dict[str, Any] = {'email': safe_email}
+    if merged_linkedin_url and merged_linkedin_url != contact_map.get('linkedin_url'):
+        updates['linkedin_url'] = merged_linkedin_url
+    if merged_github_url and merged_github_url != contact_map.get('github_url'):
+        updates['github_url'] = merged_github_url
+
+    if should_refresh_github:
+        stats = await _fetch_github_profile_stats(merged_github_url)
+        if stats:
+            updates['github_stats'] = stats
+            updates['enrichment_source'] = 'github_api'
+            updates['enrichment_refreshed_at'] = datetime.now().isoformat()
+            if stats.get('profile_url'):
+                updates['github_url'] = stats.get('profile_url')
+            if stats.get('avatar_url') and not existing_avatar:
+                updates['image_url'] = stats.get('avatar_url')
+
+    if len(updates) > 1:
+        db.save_participant_contact(updates)
+        refreshed = db.get_participant_contact(safe_email)
+        if refreshed:
+            return refreshed
+
+    return contact_map
+
+
+def _collapse_double_letters(value: str) -> str:
+    """Normalize repeated letters (e.g. patriicia -> patricia)."""
+    if not value:
+        return ''
+    return re.sub(r'(.)\1+', r'\1', value.lower())
+
+
+def _text_mentions_person(text: str, email: str, name_hint: str) -> bool:
+    """Fast heuristic for matching notes/tasks to a participant."""
+    if not text:
+        return False
+    lowered = text.lower()
+    if email and email in lowered:
+        return True
+
+    local = email.split('@')[0] if '@' in email else ''
+    if local and local in lowered:
+        return True
+
+    first_name = (name_hint.split(' ')[0] if name_hint else '').strip().lower()
+    if first_name and len(first_name) > 2 and first_name in lowered:
+        return True
+
+    # Handle common misspellings with repeated characters (Patriicia vs Patricia).
+    collapsed_text = _collapse_double_letters(lowered)
+    collapsed_name = _collapse_double_letters(first_name)
+    if collapsed_name and len(collapsed_name) > 2 and collapsed_name in collapsed_text:
+        return True
+    return False
+
+
+async def _get_known_self_emails() -> List[str]:
+    """Resolve the signed-in user's email aliases for participant exclusion."""
+    now = datetime.now()
+    ts = self_identity_cache.get('timestamp')
+    if ts and (now - ts) < timedelta(minutes=30):
+        return list(self_identity_cache.get('emails', []))
+
+    emails = set()
+
+    try:
+        saved_self = db.get_setting('self_emails', [])
+        if isinstance(saved_self, str):
+            saved_self = [item.strip() for item in saved_self.split(',') if item.strip()]
+        for item in (saved_self or []):
+            normalized = _normalize_email(item)
+            if normalized and '@' in normalized:
+                emails.add(normalized)
+    except Exception:
+        pass
+
+    try:
+        profile = db.get_user_profile() or {}
+        for key in ('email', 'primary_email'):
+            normalized = _normalize_email(profile.get(key, ''))
+            if normalized and '@' in normalized:
+                emails.add(normalized)
+    except Exception:
+        pass
+
+    # Try to resolve primary Gmail account email if available.
+    try:
+        from google.oauth2.credentials import Credentials
+        from googleapiclient.discovery import build
+
+        tokens_file = project_root / "tokens" / "google_credentials.json"
+        if tokens_file.exists():
+            creds = Credentials.from_authorized_user_file(
+                str(tokens_file),
+                [
+                    'https://www.googleapis.com/auth/gmail.readonly',
+                    'https://www.googleapis.com/auth/userinfo.email'
+                ]
+            )
+            service = build('gmail', 'v1', credentials=creds)
+            profile_data = service.users().getProfile(userId='me').execute()
+            normalized = _normalize_email(profile_data.get('emailAddress', ''))
+            if normalized and '@' in normalized:
+                emails.add(normalized)
+    except Exception:
+        pass
+
+    self_identity_cache['timestamp'] = now
+    self_identity_cache['emails'] = sorted(emails)
+    return list(self_identity_cache['emails'])
+
+
+async def _get_notes_snapshot_for_participants(limit: int = 40) -> List[Dict[str, Any]]:
+    """Load notes context with TTL cache to avoid repeated expensive scans."""
+    now = datetime.now()
+    with participant_intel_cache_lock:
+        ts = participant_notes_cache.get('timestamp')
+        cached_limit = int(participant_notes_cache.get('limit') or 0)
+        if ts and (now - ts) < PARTICIPANT_INTEL_CACHE_TTL and cached_limit >= int(limit):
+            return participant_notes_cache.get('notes', [])
+
+    try:
+        from collectors.notes_collector import collect_all_notes
+
+        notes_config = db.get_credentials('notes') or {}
+        obsidian_path = (
+            os.getenv('OBSIDIAN_VAULT_PATH') or
+            db.get_setting('obsidian_vault_path') or
+            notes_config.get('obsidian_vault_path')
+        )
+        gdrive_folder_id = (
+            os.getenv('GOOGLE_DRIVE_NOTES_FOLDER_ID') or
+            db.get_setting('google_drive_notes_folder_id') or
+            notes_config.get('google_drive_folder_id')
+        )
+
+        # Keep this endpoint responsive: skip Apple Notes and cap timeout.
+        result = await asyncio.wait_for(
+            asyncio.to_thread(
+                collect_all_notes,
+                obsidian_path=obsidian_path,
+                gdrive_folder_id=gdrive_folder_id,
+                include_apple_notes=False,
+                limit=limit
+            ),
+            timeout=18.0
+        )
+        notes = result.get('notes', []) if isinstance(result, dict) else []
+    except Exception as note_error:
+        logger.warning(f"Participant intelligence notes fetch fallback: {note_error}")
+        notes = []
+
+    with participant_intel_cache_lock:
+        participant_notes_cache['timestamp'] = now
+        participant_notes_cache['notes'] = notes
+        participant_notes_cache['limit'] = int(limit)
+    return notes
+
+
+async def _get_calendar_snapshot_for_participants(
+    lookback_days: int = 365,
+    future_days: int = 30,
+    max_events: int = 500
+) -> List[Dict[str, Any]]:
+    """Load broader calendar context for participant intelligence with TTL cache."""
+    lookback_days = max(30, min(int(lookback_days), 3650))
+    future_days = max(0, min(int(future_days), 365))
+    max_events = max(50, min(int(max_events), 1500))
+    cache_key = f"{lookback_days}:{future_days}:{max_events}"
+    now = datetime.now()
+
+    with participant_intel_cache_lock:
+        ts = participant_calendar_cache.get('timestamp')
+        if (
+            ts and
+            (now - ts) < PARTICIPANT_INTEL_CACHE_TTL and
+            participant_calendar_cache.get('cache_key') == cache_key
+        ):
+            return participant_calendar_cache.get('events', [])
+
+    events_by_key: Dict[str, Dict[str, Any]] = {}
+
+    # Start with background cached calendar events.
+    cached_calendar = background_manager.get_cached_data('calendar') or {}
+    cached_events = cached_calendar.get('events') if isinstance(cached_calendar, dict) else []
+    for event in (cached_events or []):
+        marker = event.get('event_id') or f"{event.get('summary', '')}:{event.get('start', '')}"
+        if marker:
+            events_by_key[marker] = event
+
+    # Pull deeper history directly from Calendar API for richer participant context.
+    if COLLECTORS_AVAILABLE:
+        try:
+            settings = Settings()
+            collector = CalendarCollector(settings)
+            start_date = now - timedelta(days=lookback_days)
+            end_date = now + timedelta(days=future_days)
+            deep_events = await asyncio.wait_for(
+                collector.collect_events(start_date, end_date),
+                timeout=20.0
+            )
+
+            for event in (deep_events or []):
+                start_time = event.get('start_time')
+                end_time = event.get('end_time')
+                event_id = event.get('id', '')
+                formatted = {
+                    'event_id': event_id,
+                    'summary': event.get('summary', ''),
+                    'description': event.get('description', ''),
+                    'organizer': event.get('organizer', ''),
+                    'attendees': event.get('attendees', []) or [],
+                    'start': start_time.isoformat() if hasattr(start_time, 'isoformat') else str(start_time or ''),
+                    'end': end_time.isoformat() if hasattr(end_time, 'isoformat') else str(end_time or ''),
+                    'updated': event.get('updated', ''),
+                    'calendar_url': f"https://calendar.google.com/calendar/event?eid={event_id}" if event_id else ''
+                }
+                marker = formatted.get('event_id') or f"{formatted.get('summary', '')}:{formatted.get('start', '')}"
+                if marker:
+                    events_by_key[marker] = formatted
+        except Exception as calendar_error:
+            logger.warning(f"Participant intelligence deep calendar fallback: {calendar_error}")
+
+    merged_events = list(events_by_key.values())
+    merged_events.sort(key=lambda item: str(item.get('start', '')), reverse=True)
+    merged_events = merged_events[:max_events]
+
+    with participant_intel_cache_lock:
+        participant_calendar_cache['timestamp'] = now
+        participant_calendar_cache['cache_key'] = cache_key
+        participant_calendar_cache['events'] = merged_events
+
+    return merged_events
+
+
+async def _run_participant_enrichment_warmup(max_participants: int = 16) -> Dict[str, Any]:
+    """Preload participant intelligence for recurring attendees and persist enrichment cache."""
+    max_participants = max(4, min(int(max_participants), 40))
+
+    calendar_events = await _get_calendar_snapshot_for_participants(
+        lookback_days=365,
+        future_days=30,
+        max_events=700
+    )
+    if not calendar_events:
+        return {'warmed': 0, 'participants': []}
+
+    self_emails = set(await _get_known_self_emails())
+    counts: Dict[str, int] = {}
+    for event in calendar_events:
+        attendees = event.get('attendees') or []
+        organizer = event.get('organizer', '')
+        values = list(attendees)
+        if organizer:
+            values.append(organizer)
+        for value in values:
+            normalized = _normalize_email(value)
+            if not normalized or '@' not in normalized or normalized in self_emails:
+                continue
+            counts[normalized] = counts.get(normalized, 0) + 1
+
+    if not counts:
+        return {'warmed': 0, 'participants': []}
+
+    prioritized = [
+        email for email, _ in sorted(counts.items(), key=lambda item: item[1], reverse=True)[:max_participants]
+    ]
+
+    notes = await _get_notes_snapshot_for_participants(limit=180)
+    warmed: List[str] = []
+    for email in prioritized:
+        try:
+            await _build_participant_intelligence(
+                email=email,
+                notes=notes,
+                event_context={
+                    'event_id': 'participant-warmup',
+                    'title': 'Participant Warmup',
+                    'description': '',
+                    'organizer': '',
+                    'attendees': [email],
+                    'start': datetime.now().isoformat()
+                },
+                calendar_events=calendar_events,
+                recent_email_limit=15,
+                todo_limit=15
+            )
+            warmed.append(email)
+        except Exception as warm_error:
+            logger.warning(f"Participant warmup failed for {email}: {warm_error}")
+
+    return {
+        'warmed': len(warmed),
+        'participants': warmed
+    }
+
+
+async def _build_participant_intelligence(
+    email: str,
+    notes: List[Dict[str, Any]],
+    event_context: Dict[str, Any],
+    calendar_events: List[Dict[str, Any]],
+    recent_email_limit: int = 20,
+    todo_limit: int = 20
+) -> Dict[str, Any]:
+    """Aggregate participant context from emails, calendar, tasks, notes, and profile hints."""
+    safe_email = _normalize_email(email)
+    if not safe_email:
+        return {}
+
+    name_hint = _display_name_for_email(safe_email)
+    cache_key = f"{safe_email}:{event_context.get('event_id', '')}"
+
+    with participant_intel_cache_lock:
+        cached = participant_intel_cache.get(cache_key)
+        if cached and (datetime.now() - cached['timestamp']) < PARTICIPANT_INTEL_CACHE_TTL:
+            return cached['data']
+
+    email_pattern = f"%{safe_email}%"
+    contact_map = db.get_participant_contact(safe_email) or {}
+
+    with db.get_connection() as conn:
+        cursor = conn.cursor()
+
+        cursor.execute(
+            """
+            SELECT COUNT(*) AS total, MAX(received_date) AS last_date
+            FROM emails
+            WHERE LOWER(sender) LIKE ? OR LOWER(recipient) LIKE ?
+            """,
+            (email_pattern, email_pattern)
+        )
+        email_stats = cursor.fetchone() or {'total': 0, 'last_date': None}
+
+        cursor.execute(
+            """
+            SELECT id, subject, sender, recipient, received_date, body
+            FROM emails
+            WHERE LOWER(sender) LIKE ? OR LOWER(recipient) LIKE ?
+            ORDER BY received_date DESC
+            LIMIT ?
+            """,
+            (email_pattern, email_pattern, max(5, min(int(recent_email_limit), 100)))
+        )
+        recent_email_rows = cursor.fetchall() or []
+
+        todo_search = f"%{safe_email.split('@')[0]}%"
+        cursor.execute(
+            """
+            SELECT id, title, description, source, source_url, source_preview, status, due_date, created_at
+            FROM universal_todos
+            WHERE LOWER(title) LIKE ?
+               OR LOWER(COALESCE(description, '')) LIKE ?
+               OR LOWER(COALESCE(source_preview, '')) LIKE ?
+               OR LOWER(COALESCE(source_url, '')) LIKE ?
+            ORDER BY created_at DESC
+                LIMIT ?
+            """,
+                (email_pattern, email_pattern, todo_search, email_pattern, max(10, min(int(todo_limit), 100)))
+        )
+        todo_rows = cursor.fetchall() or []
+
+    participant_meetings = []
+    for event in calendar_events:
+        attendees = event.get('attendees') or []
+        attendees_norm = {_normalize_email(item) for item in attendees}
+        organizer_norm = _normalize_email(event.get('organizer', ''))
+        if safe_email in attendees_norm or safe_email == organizer_norm:
+            participant_meetings.append(event)
+
+    # Ensure current event context contributes to participant meeting count.
+    context_attendees = {_normalize_email(item) for item in (event_context.get('attendees') or [])}
+    context_organizer = _normalize_email(event_context.get('organizer', ''))
+    if safe_email in context_attendees or safe_email == context_organizer:
+        participant_meetings.append({
+            'event_id': event_context.get('event_id', ''),
+            'summary': event_context.get('title', ''),
+            'start': event_context.get('start', None)
+        })
+
+    unique_meeting_ids = set()
+    deduped_meetings = []
+    for meeting in participant_meetings:
+        marker = meeting.get('event_id') or f"{meeting.get('summary', '')}:{meeting.get('start', '')}"
+        if marker in unique_meeting_ids:
+            continue
+        unique_meeting_ids.add(marker)
+        deduped_meetings.append(meeting)
+
+    participant_notes = []
+    link_text_pool: List[str] = []
+    for note in notes:
+        title = str(note.get('title') or '')
+        preview = str(note.get('preview') or '')
+        content_blob = f"{title}\n{preview}"
+        if _text_mentions_person(content_blob, safe_email, name_hint):
+            participant_notes.append({
+                'title': title,
+                'preview': preview[:280],
+                'source': note.get('source', ''),
+                'modified_at': note.get('modified_at', ''),
+                'url': note.get('url', ''),
+                'path': note.get('relative_path', '')
+            })
+            link_text_pool.append(content_blob)
+
+    # Add meeting description snippets as note-like context for recent events.
+    for meeting in deduped_meetings:
+        meeting_description = str(meeting.get('description') or event_context.get('description') or '')
+        if not meeting_description:
+            continue
+        if _text_mentions_person(meeting_description, safe_email, name_hint):
+            participant_notes.append({
+                'title': meeting.get('summary') or event_context.get('title') or 'Meeting Note',
+                'preview': meeting_description[:280],
+                'source': 'calendar_event',
+                'modified_at': meeting.get('updated') or event_context.get('start') or datetime.now().isoformat(),
+                'url': meeting.get('calendar_url') or '',
+                'path': ''
+            })
+            link_text_pool.append(meeting_description)
+
+    for row in recent_email_rows:
+        link_text_pool.append(str(row['body'] or ''))
+    for row in todo_rows:
+        link_text_pool.append(str(row['description'] or ''))
+        link_text_pool.append(str(row['source_url'] or ''))
+
+    linkedin_url = ''
+    github_url = ''
+    for blob in link_text_pool:
+        links = _extract_links(blob)
+        if not linkedin_url and links['linkedin']:
+            linkedin_url = links['linkedin']
+        if not github_url and links['github']:
+            github_url = links['github']
+        if linkedin_url and github_url:
+            break
+
+    contact_map = await _refresh_participant_enrichment_cache(
+        safe_email,
+        contact_map,
+        linkedin_url,
+        github_url
+    )
+
+    relationship_signals = []
+    if email_stats['total']:
+        relationship_signals.append(f"{email_stats['total']} emails exchanged")
+    if deduped_meetings:
+        relationship_signals.append(f"{len(deduped_meetings)} calendar meetings")
+    if participant_notes:
+        relationship_signals.append(f"{len(participant_notes)} note mentions")
+    if todo_rows:
+        relationship_signals.append(f"{len(todo_rows)} related todos")
+
+    if relationship_signals:
+        how_known = "Known via " + ", ".join(relationship_signals)
+    else:
+        how_known = "No prior interactions found in local dashboard data"
+
+    if contact_map.get('relationship_notes'):
+        how_known = contact_map.get('relationship_notes')
+
+    avatar_hash = hashlib.md5(safe_email.encode('utf-8')).hexdigest()
+    avatar_url = f"https://www.gravatar.com/avatar/{avatar_hash}?d=identicon&s=160"
+
+    if contact_map.get('display_name'):
+        name_hint = contact_map.get('display_name')
+    if contact_map.get('linkedin_url'):
+        linkedin_url = contact_map.get('linkedin_url')
+    if contact_map.get('github_url'):
+        github_url = contact_map.get('github_url')
+    if contact_map.get('image_url'):
+        avatar_url = contact_map.get('image_url')
+    elif contact_map.get('linkedin_image_url'):
+        avatar_url = contact_map.get('linkedin_image_url')
+
+    github_stats = contact_map.get('github_stats') or {}
+
+    data = {
+        'email': safe_email,
+        'name': name_hint,
+        'how_known': how_known,
+        'emails_exchanged': int(email_stats['total'] or 0),
+        'last_email_at': email_stats['last_date'],
+        'meetings_count': len(deduped_meetings),
+        'latest_meeting_notes': sorted(
+            participant_notes,
+            key=lambda item: item.get('modified_at', ''),
+            reverse=True
+        )[:5],
+        'related_todos': [
+            {
+                'id': row['id'],
+                'title': row['title'],
+                'status': row['status'],
+                'source': row['source'],
+                'due_date': row['due_date'],
+                'created_at': row['created_at'],
+                'source_url': row['source_url']
+            }
+            for row in todo_rows
+        ],
+        'profiles': {
+            'linkedin': linkedin_url,
+            'github': github_url
+        },
+        'github_stats': github_stats,
+        'images': {
+            'avatar': avatar_url,
+            'linkedin_portrait': contact_map.get('linkedin_image_url') or ''
+        },
+        'contact_notes': contact_map.get('notes') or '',
+        'recent_emails': [
+            {
+                'id': row['id'],
+                'subject': row['subject'],
+                'sender': row['sender'],
+                'received_date': row['received_date']
+            }
+            for row in recent_email_rows
+        ][:10]
+    }
+
+    with participant_intel_cache_lock:
+        participant_intel_cache[cache_key] = {
+            'timestamp': datetime.now(),
+            'data': data
+        }
+    return data
     
     # Collection methods (these will be implemented to call the actual collectors)
     async def _collect_calendar(self):
@@ -590,6 +1470,20 @@ class BackgroundDataManager:
         except Exception as e:
             logger.error(f"Jokes collection error: {e}")
             return {"error": str(e), "joke": "Failed to load joke"}
+
+    async def _collect_participant_enrichment(self):
+        """Warm participant enrichment cache for repeat attendees."""
+        try:
+            result = await _run_participant_enrichment_warmup(max_participants=16)
+            return {
+                "success": True,
+                "warmed": result.get('warmed', 0),
+                "participants": result.get('participants', []),
+                "timestamp": datetime.now().isoformat()
+            }
+        except Exception as e:
+            logger.error(f"Participant enrichment warmup error: {e}")
+            return {"success": False, "error": str(e), "warmed": 0}
 
 
 # Initialize background data manager
@@ -1099,6 +1993,7 @@ async def dashboard(code: str = None, state: str = None, error: str = None):
 @app.get("/api/calendar")
 async def get_calendar():
     """Get calendar events from Google Calendar"""
+    perf_start = time.perf_counter()
     try:
         # Try to get cached data first
         cached_data = background_manager.get_cached_data('calendar')
@@ -1174,6 +2069,236 @@ async def get_calendar():
         return {"events": [{"title": "Team Meeting", "time": "9:00 AM - 10:00 AM"}]}
     except Exception as e:
         return {"error": str(e)}
+    finally:
+        _record_perf('endpoints', '/api/calendar', (time.perf_counter() - perf_start) * 1000)
+
+
+@app.post("/api/calendar/participants/intelligence")
+async def get_calendar_participants_intelligence(request: Request):
+    """Build participant intelligence for calendar attendees/organizer."""
+    perf_start = time.perf_counter()
+    try:
+        payload = await request.json()
+        raw_participants = payload.get('participants') or []
+        if isinstance(raw_participants, str):
+            raw_participants = [raw_participants]
+
+        normalized_participants = []
+        for value in raw_participants:
+            email = _normalize_email(value)
+            if email and '@' in email and email not in normalized_participants:
+                normalized_participants.append(email)
+
+        organizer = _normalize_email(payload.get('organizer', ''))
+        if organizer and '@' in organizer and organizer not in normalized_participants:
+            normalized_participants.append(organizer)
+
+        # Do not show participant cards for the signed-in user (Greg/self).
+        self_emails = set(await _get_known_self_emails())
+        normalized_participants = [
+            email for email in normalized_participants
+            if email not in self_emails
+        ]
+
+        normalized_participants = normalized_participants[:12]
+        if not normalized_participants:
+            return {'success': True, 'participants': [], 'excluded_self_emails': sorted(list(self_emails))}
+
+        event_context = {
+            'event_id': str(payload.get('event_id') or ''),
+            'title': str(payload.get('title') or ''),
+            'description': str(payload.get('description') or ''),
+            'organizer': organizer,
+            'attendees': payload.get('participants') or [],
+            'start': payload.get('start')
+        }
+
+        calendar_lookback_days = payload.get('calendar_lookback_days', 365)
+        calendar_future_days = payload.get('calendar_future_days', 30)
+        calendar_max_events = payload.get('calendar_max_events', 500)
+        notes_limit = payload.get('notes_limit', 120)
+        recent_email_limit = payload.get('email_limit', 20)
+        todo_limit = payload.get('todo_limit', 20)
+
+        calendar_events = await _get_calendar_snapshot_for_participants(
+            lookback_days=calendar_lookback_days,
+            future_days=calendar_future_days,
+            max_events=calendar_max_events
+        )
+        notes = await _get_notes_snapshot_for_participants(limit=max(40, min(int(notes_limit), 400)))
+
+        enriched = await asyncio.gather(*[
+            _build_participant_intelligence(
+                email,
+                notes,
+                event_context,
+                calendar_events,
+                recent_email_limit=recent_email_limit,
+                todo_limit=todo_limit
+            )
+            for email in normalized_participants
+        ])
+
+        return {
+            'success': True,
+            'participants': [item for item in enriched if item],
+            'count': len(enriched),
+            'event_id': event_context['event_id'],
+            'excluded_self_emails': sorted(list(self_emails))
+        }
+    except Exception as e:
+        logger.error(f"Error building participant intelligence: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        _record_perf('endpoints', '/api/calendar/participants/intelligence', (time.perf_counter() - perf_start) * 1000)
+
+
+@app.post('/api/calendar/participants/cache/clear')
+async def clear_participant_intelligence_cache(request: Request):
+    """Clear participant intelligence cache entries for manual refresh workflows."""
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+
+    participants = payload.get('participants') or []
+    participants = [_normalize_email(item) for item in participants if _normalize_email(item)]
+
+    cleared = 0
+    with participant_intel_cache_lock:
+        if participants:
+            keys = list(participant_intel_cache.keys())
+            for key in keys:
+                if any(email in key for email in participants):
+                    participant_intel_cache.pop(key, None)
+                    cleared += 1
+        else:
+            cleared = len(participant_intel_cache)
+            participant_intel_cache.clear()
+            participant_notes_cache['timestamp'] = None
+            participant_notes_cache['notes'] = []
+            participant_notes_cache['limit'] = 0
+            participant_calendar_cache['timestamp'] = None
+            participant_calendar_cache['cache_key'] = ''
+            participant_calendar_cache['events'] = []
+
+    return {'success': True, 'cleared': cleared, 'participants': participants}
+
+
+@app.get('/api/participants/contact')
+async def get_participant_contact(email: str):
+    """Get explicit participant mapping data by email."""
+    contact = db.get_participant_contact(email)
+    return {'success': True, 'contact': contact}
+
+
+@app.post('/api/participants/contact')
+async def save_participant_contact(request: Request):
+    """Save explicit participant mapping data (name, links, headshot, notes)."""
+    payload = await request.json()
+    payload['email'] = _normalize_email(payload.get('email', ''))
+    if not payload['email']:
+        raise HTTPException(status_code=400, detail='email is required')
+
+    ok = db.save_participant_contact(payload)
+    if not ok:
+        raise HTTPException(status_code=500, detail='Could not save participant contact')
+
+    # Keep derived caches coherent after manual updates.
+    with participant_intel_cache_lock:
+        keys = list(participant_intel_cache.keys())
+        for key in keys:
+            if payload['email'] in key:
+                participant_intel_cache.pop(key, None)
+
+    return {'success': True, 'contact': db.get_participant_contact(payload['email'])}
+
+
+@app.get('/api/participants/contacts')
+async def list_participant_contacts(limit: int = 200):
+    """List participant contact mappings."""
+    contacts = db.list_participant_contacts(limit=limit)
+    return {
+        'success': True,
+        'contacts': contacts,
+        'count': len(contacts)
+    }
+
+
+@app.get('/api/performance/metrics')
+async def get_performance_metrics():
+    """Expose in-memory timing summaries for major endpoints and collectors."""
+    return {
+        'success': True,
+        'timestamp': datetime.now().isoformat(),
+        'endpoints': _summarize_perf('endpoints'),
+        'background_collectors': _summarize_perf('background_collectors')
+    }
+
+
+@app.post('/api/performance/benchmark')
+async def run_performance_benchmark(request: Request):
+    """Run a lightweight benchmark sweep and return timing snapshots."""
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+
+    iterations = int(payload.get('iterations', 3))
+    iterations = max(1, min(iterations, 10))
+
+    durations = {
+        '/api/calendar': [],
+        '/api/tasks': [],
+        '/api/email': [],
+        '/api/calendar/participants/intelligence': []
+    }
+
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        for _ in range(iterations):
+            start = time.perf_counter()
+            await client.get('http://localhost:8008/api/calendar')
+            durations['/api/calendar'].append((time.perf_counter() - start) * 1000)
+
+            start = time.perf_counter()
+            await client.get('http://localhost:8008/api/tasks')
+            durations['/api/tasks'].append((time.perf_counter() - start) * 1000)
+
+            start = time.perf_counter()
+            await client.get('http://localhost:8008/api/email')
+            durations['/api/email'].append((time.perf_counter() - start) * 1000)
+
+            start = time.perf_counter()
+            await client.post(
+                'http://localhost:8008/api/calendar/participants/intelligence',
+                json={'participants': ['benchmark@example.com'], 'event_id': 'benchmark'}
+            )
+            durations['/api/calendar/participants/intelligence'].append((time.perf_counter() - start) * 1000)
+
+    for metric_name, values in durations.items():
+        for value in values:
+            _record_perf('endpoints', metric_name, value)
+
+    summary = {
+        name: {
+            'avg_ms': round(sum(values) / len(values), 2),
+            'min_ms': round(min(values), 2),
+            'max_ms': round(max(values), 2),
+            'samples': len(values)
+        }
+        for name, values in durations.items()
+    }
+
+    logger.info(f"Performance benchmark complete: {summary}")
+    return {
+        'success': True,
+        'iterations': iterations,
+        'results': summary,
+        'metrics_snapshot': {
+            'endpoints': _summarize_perf('endpoints'),
+            'background_collectors': _summarize_perf('background_collectors')
+        }
+    }
 
 
 @app.post("/api/notes/scan")
@@ -1206,7 +2331,12 @@ async def scan_notes():
         # Apple Notes setting (macOS only)
         include_apple_notes = (
             os.getenv('INCLUDE_APPLE_NOTES', 'true').lower() == 'true' and
-            db.get_setting('include_apple_notes', 'true').lower() != 'false'
+            str(
+                db.get_setting(
+                    'apple_notes_enabled',
+                    db.get_setting('include_apple_notes', 'true')
+                )
+            ).lower() != 'false'
         )
         
         # Google Keep settings
@@ -1491,7 +2621,12 @@ async def get_notes():
         # Apple Notes setting (macOS only)
         include_apple_notes = (
             os.getenv('INCLUDE_APPLE_NOTES', 'true').lower() == 'true' and
-            db.get_setting('include_apple_notes', 'true').lower() != 'false'
+            str(
+                db.get_setting(
+                    'apple_notes_enabled',
+                    db.get_setting('include_apple_notes', 'true')
+                )
+            ).lower() != 'false'
         )
         apple_notes_timeout = int(os.getenv('APPLE_NOTES_TIMEOUT', db.get_setting('apple_notes_timeout', 10)))
 
@@ -1744,6 +2879,11 @@ async def update_notes_settings(settings: Dict[str, Any]):
         if 'google_drive_notes_folder_id' in settings:
             db.save_setting('google_drive_notes_folder_id', settings['google_drive_notes_folder_id'])
             updated.append('google_drive_notes_folder_id')
+
+        if 'notes_limit' in settings:
+            notes_limit = max(1, min(int(settings['notes_limit']), 100))
+            db.save_setting('notes_limit', notes_limit)
+            updated.append('notes_limit')
         
         if 'auto_create_tasks' in settings:
             db.save_setting('auto_create_tasks', bool(settings['auto_create_tasks']))
@@ -1751,7 +2891,9 @@ async def update_notes_settings(settings: Dict[str, Any]):
         
         # Apple Notes settings
         if 'apple_notes_enabled' in settings:
-            db.save_setting('apple_notes_enabled', bool(settings['apple_notes_enabled']))
+            apple_enabled = bool(settings['apple_notes_enabled'])
+            db.save_setting('apple_notes_enabled', apple_enabled)
+            db.save_setting('include_apple_notes', 'true' if apple_enabled else 'false')
             updated.append('apple_notes_enabled')
         
         # Google Keep settings
@@ -1784,6 +2926,25 @@ async def save_user_profile(request: Request):
     """Save user profile settings."""
     try:
         profile_data = await request.json()
+
+        primary_email = _normalize_email(profile_data.get('email') or profile_data.get('primary_email') or '')
+        explicit_self_emails = profile_data.get('self_emails') or []
+        if isinstance(explicit_self_emails, str):
+            explicit_self_emails = [item.strip() for item in explicit_self_emails.split(',') if item.strip()]
+        normalized_self_emails = []
+        for item in explicit_self_emails:
+            normalized = _normalize_email(item)
+            if normalized and '@' in normalized and normalized not in normalized_self_emails:
+                normalized_self_emails.append(normalized)
+        if primary_email and primary_email not in normalized_self_emails:
+            normalized_self_emails.append(primary_email)
+
+        if primary_email:
+            db.save_setting('primary_email', primary_email)
+        if normalized_self_emails:
+            db.save_setting('self_emails', normalized_self_emails)
+            self_identity_cache['timestamp'] = None
+            self_identity_cache['emails'] = []
         
         success = db.save_user_profile(profile_data)
         
@@ -2306,11 +3467,23 @@ async def test_gdrive_connection(request: Dict[str, Any]):
 
 
 @app.get("/api/email") 
-async def get_email():
-    """Get email summary from Gmail - always fetch fresh data"""
+async def get_email(refresh: bool = False, timeout_seconds: int = 12):
+    """Get email summary from Gmail with cache fallback to avoid frontend timeouts."""
+    perf_start = time.perf_counter()
     try:
-        # ALWAYS fetch fresh data - no caching for emails
-        logger.info("Fetching fresh email data from Gmail")
+        timeout_seconds = max(6, min(timeout_seconds, 30))
+
+        # Fast path: serve background cached snapshot unless caller explicitly refreshes.
+        cached_data = None
+        if not refresh:
+            cached_data = background_manager.get_cached_data('email')
+            if cached_data and isinstance(cached_data, dict) and cached_data.get('emails') is not None:
+                cached_data = dict(cached_data)
+                cached_data['cached'] = True
+                cached_data['stale'] = False
+                return cached_data
+
+        logger.info("Fetching email data from Gmail")
         if COLLECTORS_AVAILABLE:
             try:
                 # Create proper account config for GmailCollector
@@ -2334,13 +3507,45 @@ async def get_email():
                 }
                 
                 gmail_collector = GmailCollector(account_config)
-                data = await gmail_collector.collect_data()
+                data = await asyncio.wait_for(gmail_collector.collect_data(), timeout=float(timeout_seconds))
+
+                # Keep background cache warm for fast future reads.
+                with background_manager._cache_lock:
+                    background_manager.cache['email'] = data
+                    background_manager.cache_timestamps['email'] = datetime.now()
                 
                 logger.info(f"Retrieved {data.get('total_count', 0)} emails, {data.get('unread_count', 0)} unread")
                 return data
+            except asyncio.TimeoutError:
+                logger.warning(f"Email collection timed out after {timeout_seconds}s")
+
+                fallback = cached_data or background_manager.get_cached_data('email')
+                if fallback and isinstance(fallback, dict):
+                    fallback = dict(fallback)
+                    fallback['cached'] = True
+                    fallback['stale'] = True
+                    fallback['warning'] = f"Email refresh timed out after {timeout_seconds}s; serving cached results."
+                    return fallback
+
+                return {
+                    "emails": [],
+                    "total_count": 0,
+                    "unread_count": 0,
+                    "authenticated": True,
+                    "warning": f"Email refresh timed out after {timeout_seconds}s.",
+                    "timeout": True
+                }
                 
             except Exception as e:
                 logger.error(f"Error collecting email data: {e}")
+                fallback = cached_data or background_manager.get_cached_data('email')
+                if fallback and isinstance(fallback, dict):
+                    fallback = dict(fallback)
+                    fallback['cached'] = True
+                    fallback['stale'] = True
+                    fallback['warning'] = "Email refresh failed; serving cached results."
+                    return fallback
+
                 raise HTTPException(status_code=500, detail=f"Error collecting emails: {str(e)}")
         else:
             raise HTTPException(status_code=500, detail="Email collector not available")
@@ -2348,6 +3553,8 @@ async def get_email():
     except Exception as e:
         logger.error(f"Error in email API: {e}")
         return {"error": str(e), "emails": [], "total_count": 0, "unread_count": 0}
+    finally:
+        _record_perf('endpoints', '/api/email', (time.perf_counter() - perf_start) * 1000)
 
 @app.get("/api/github")
 async def get_github():
@@ -3492,6 +4699,7 @@ async def apply_email_label(request: Request):
 @app.get("/api/tasks")
 async def get_tasks(include_completed: bool = False, priority: str = None, status: str = None, category: str = None):
     """Get all tasks from database with optional filtering."""
+    perf_start = time.perf_counter()
     try:
         from database import DatabaseManager
 
@@ -3607,6 +4815,8 @@ async def get_tasks(include_completed: bool = False, priority: str = None, statu
     except Exception as e:
         logger.error(f"Error getting tasks: {e}")
         return {"error": str(e), "success": False}
+    finally:
+        _record_perf('endpoints', '/api/tasks', (time.perf_counter() - perf_start) * 1000)
 
 @app.post("/api/tasks")
 async def create_task(request: Request):
@@ -3772,6 +4982,155 @@ async def sync_tasks_with_ticktick(request: Request):
     except Exception as e:
         logger.error(f"Error syncing tasks with TickTick: {e}")
         return {"error": str(e), "success": False}
+
+
+@app.get("/api/task-sync/providers/status")
+async def get_task_sync_provider_status():
+    """Get task sync provider connection status for settings UI."""
+    try:
+        from database import get_auth_token, get_credentials
+        from services.task_sync_service import TaskSyncService
+
+        settings = Settings()
+        sync_service = TaskSyncService(settings)
+
+        ticktick_token = get_auth_token('ticktick') or {}
+        ticktick_creds = get_credentials('ticktick') or {}
+        ticktick_has_setup = bool(ticktick_token.get('access_token') or ticktick_creds.get('api_token'))
+        ticktick_connected = False
+        ticktick_error = None
+        if ticktick_has_setup and COLLECTORS_AVAILABLE:
+            try:
+                collector = TickTickCollector(settings)
+                ticktick_connected = bool(await collector.is_authenticated())
+            except Exception as ticktick_exc:
+                ticktick_error = str(ticktick_exc)
+
+        todoist_token = sync_service._get_todoist_token()
+        apple_creds = get_credentials('apple') or {}
+        reminders_list = apple_creds.get('reminders_list') or apple_creds.get('list') or ''
+
+        return {
+            "success": True,
+            "providers": {
+                "ticktick": {
+                    "connected": ticktick_connected,
+                    "configured": ticktick_has_setup,
+                    "auth_url": "/auth/ticktick",
+                    "mode": "oauth",
+                    "error": ticktick_error,
+                },
+                "todoist": {
+                    "connected": bool(todoist_token),
+                    "configured": bool(todoist_token),
+                    "mode": "token",
+                    "has_token": bool(todoist_token),
+                },
+                "apple_reminders": {
+                    "connected": bool(reminders_list),
+                    "configured": bool(reminders_list),
+                    "mode": "local",
+                    "supported": sys.platform == "darwin",
+                    "list_name": reminders_list,
+                },
+            },
+        }
+    except Exception as e:
+        logger.error(f"Error loading task sync provider status: {e}")
+        return {"success": False, "error": str(e), "providers": {}}
+
+
+@app.post("/api/task-sync/providers/todoist/connect")
+async def connect_todoist_provider(request: Request):
+    """Save Todoist token for task sync."""
+    try:
+        from database import get_credentials, save_credentials
+
+        payload = await request.json()
+        api_token = str(payload.get('api_token') or '').strip()
+        if not api_token:
+            raise HTTPException(status_code=400, detail="Todoist API token is required")
+
+        existing = get_credentials('todoist') or {}
+        existing['api_token'] = api_token
+        save_credentials('todoist', existing)
+        return {"success": True, "provider": "todoist"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error saving Todoist credentials: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/task-sync/providers/apple_reminders/connect")
+async def connect_apple_reminders_provider(request: Request):
+    """Save Apple Reminders settings and trigger a lightweight permission check."""
+    try:
+        from database import get_credentials, save_credentials
+
+        if sys.platform != 'darwin':
+            raise HTTPException(status_code=400, detail="Apple Reminders is only available on macOS")
+
+        payload = await request.json()
+        list_name = str(payload.get('list_name') or '').strip()
+
+        script = 'tell application "Reminders" to get name of default list'
+        process = await asyncio.create_subprocess_exec(
+            'osascript', '-e', script,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await process.communicate()
+        if process.returncode != 0:
+            error_text = stderr.decode().strip() or stdout.decode().strip() or 'Apple Reminders permission check failed'
+            raise HTTPException(status_code=400, detail=error_text)
+
+        existing = get_credentials('apple') or {}
+        if list_name:
+            existing['reminders_list'] = list_name
+        save_credentials('apple', existing)
+
+        return {
+            "success": True,
+            "provider": "apple_reminders",
+            "default_list": stdout.decode().strip(),
+            "list_name": list_name or existing.get('reminders_list') or '',
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error connecting Apple Reminders: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/task-sync/providers/{provider}/disconnect")
+async def disconnect_task_sync_provider(provider: str):
+    """Disconnect a task sync provider by removing stored credentials/tokens."""
+    try:
+        normalized = str(provider or '').strip().lower()
+        provider_map = {
+            'ticktick': 'ticktick',
+            'todoist': 'todoist',
+            'apple_reminders': 'apple',
+            'apple': 'apple',
+        }
+        service_name = provider_map.get(normalized)
+        if not service_name:
+            raise HTTPException(status_code=404, detail='Unsupported provider')
+
+        with db.get_connection() as conn:
+            cursor = conn.cursor()
+            if normalized == 'ticktick':
+                cursor.execute("DELETE FROM auth_tokens WHERE service_name = ?", ('ticktick',))
+            cursor.execute("DELETE FROM credentials WHERE service_name = ?", (service_name,))
+            conn.commit()
+
+        return {"success": True, "provider": normalized}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error disconnecting task sync provider {provider}: {e}")
+        return {"success": False, "error": str(e)}
 
 
 @app.post("/api/tasks/generate")
@@ -7726,10 +9085,36 @@ async def get_user_profile():
     """Get user profile for AI personalization."""
     try:
         profile = db.get_user_profile()
-        return profile
+        primary_email = _normalize_email(db.get_setting('primary_email', ''))
+        self_emails = db.get_setting('self_emails', []) or []
+        if isinstance(self_emails, str):
+            self_emails = [item.strip() for item in self_emails.split(',') if item.strip()]
+
+        normalized_self_emails = []
+        for item in self_emails:
+            normalized = _normalize_email(item)
+            if normalized and '@' in normalized and normalized not in normalized_self_emails:
+                normalized_self_emails.append(normalized)
+        if primary_email and primary_email not in normalized_self_emails:
+            normalized_self_emails.append(primary_email)
+
+        enriched_profile = dict(profile or {})
+        if primary_email:
+            enriched_profile['primary_email'] = primary_email
+            if not enriched_profile.get('email'):
+                enriched_profile['email'] = primary_email
+        if normalized_self_emails:
+            enriched_profile['self_emails'] = normalized_self_emails
+
+        # Keep backward compatibility: return both wrapped and flat keys.
+        return {
+            "success": True,
+            "profile": enriched_profile,
+            **enriched_profile
+        }
     except Exception as e:
         logger.error(f"Error getting user profile: {e}")
-        return {"error": str(e)}
+        return {"success": False, "error": str(e), "profile": {}}
 
 
 @app.post("/api/user/profile")
@@ -7737,6 +9122,26 @@ async def save_user_profile(request: Request):
     """Save or update user profile."""
     try:
         profile = await request.json()
+
+        primary_email = _normalize_email(profile.get('email') or profile.get('primary_email') or '')
+        explicit_self_emails = profile.get('self_emails') or []
+        if isinstance(explicit_self_emails, str):
+            explicit_self_emails = [item.strip() for item in explicit_self_emails.split(',') if item.strip()]
+        normalized_self_emails = []
+        for item in explicit_self_emails:
+            normalized = _normalize_email(item)
+            if normalized and '@' in normalized and normalized not in normalized_self_emails:
+                normalized_self_emails.append(normalized)
+        if primary_email and primary_email not in normalized_self_emails:
+            normalized_self_emails.append(primary_email)
+
+        if primary_email:
+            db.save_setting('primary_email', primary_email)
+        if normalized_self_emails:
+            db.save_setting('self_emails', normalized_self_emails)
+            self_identity_cache['timestamp'] = None
+            self_identity_cache['emails'] = []
+
         success = db.save_user_profile(profile)
         
         if success:

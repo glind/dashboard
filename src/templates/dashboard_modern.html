@@ -1433,7 +1433,7 @@
                                         <select id="setting-ollama-model" class="flex-1 px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
                                             <option value="">Select a model...</option>
                                         </select>
-                                        <button onclick="refreshOllamaModels()" class="px-3 py-2 bg-gray-600 hover:bg-gray-500 rounded-lg transition-colors">
+                                        <button onclick="window.refreshOllamaModels && window.refreshOllamaModels()" class="px-3 py-2 bg-gray-600 hover:bg-gray-500 rounded-lg transition-colors">
                                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                                             </svg>
@@ -1444,14 +1444,14 @@
                                     <div class="flex gap-2">
                                         <input type="text" id="setting-ollama-pull-model" placeholder="e.g., llama3.2:3b, mistral, codellama" 
                                                class="flex-1 px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
-                                        <button onclick="pullOllamaModel(event)" class="px-4 py-2 bg-green-600 hover:bg-green-500 rounded-lg transition-colors">
+                                        <button onclick="window.pullOllamaModel && window.pullOllamaModel(event)" class="px-4 py-2 bg-green-600 hover:bg-green-500 rounded-lg transition-colors">
                                             Pull Model
                                         </button>
                                     </div>
                                     <p class="text-xs text-gray-500 mt-1">Download a new model from Ollama library</p>
                                 </div>
                                 
-                                <button onclick="testOllamaConnection()" 
+                                <button onclick="window.testOllamaConnection && window.testOllamaConnection()" 
                                         class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm">
                                     🔗 Test Connection
                                 </button>
@@ -1508,7 +1508,7 @@
                                     <p class="text-xs text-gray-500 mt-1">Choose the Gemini model to use</p>
                                 </div>
                                 
-                                <button onclick="testGeminiConnection()" 
+                                <button onclick="window.testGeminiConnection && window.testGeminiConnection()" 
                                         class="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-sm">
                                     🔗 Test Connection
                                 </button>
@@ -1516,11 +1516,11 @@
                         </div>
                         
                         <div class="flex gap-3 pt-4 mt-4 border-t border-gray-700">
-                            <button onclick="saveAiSettings()" 
+                            <button onclick="window.saveAiSettings && window.saveAiSettings()" 
                                     class="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all duration-200 font-medium">
                                 💾 Save AI Settings
                             </button>
-                            <button onclick="loadAiSettings()" 
+                            <button onclick="window.loadAiSettings && window.loadAiSettings()" 
                                     class="px-6 py-3 bg-gray-700 text-white rounded-lg hover:bg-gray-600 transition-all duration-200">
                                 🔄 Reset to Current
                             </button>
@@ -2350,7 +2350,7 @@
     </script>
     
     <!-- Scripts -->
-    <script src="/static/dashboard.js?v=22"></script>
+    <script src="/static/dashboard.js?v=31"></script>
     <script src="/static/leads_modern.js?v=6"></script>
     <script src="/static/trust_layer_ui.js?v=1"></script>
     
@@ -3644,7 +3644,7 @@ Use simple ASCII characters only - no special quotes or unicode.`;
                     
                     // Load available Ollama models if provider is Ollama
                     if (provider === 'ollama') {
-                        await refreshOllamaModels();
+                        await (window.refreshOllamaModels ? window.refreshOllamaModels() : Promise.resolve());
                         // Set model after dropdown is populated
                         setTimeout(() => {
                             const select = document.getElementById('setting-ollama-model');
@@ -3730,7 +3730,7 @@ Use simple ASCII characters only - no special quotes or unicode.`;
 
                 if (data.success) {
                     showNotification('success', `✓ Ollama connected at ${host}:${portNumber}`, 'ai-settings-message');
-                    await refreshOllamaModels();
+                    await (window.refreshOllamaModels ? window.refreshOllamaModels() : Promise.resolve());
                 } else {
                     showNotification('error', `✗ ${data.error || 'Ollama connection failed'}`, 'ai-settings-message');
                 }
@@ -3816,7 +3816,7 @@ Use simple ASCII characters only - no special quotes or unicode.`;
                     showNotification('success', data.message, 'ai-settings-message');
                     // Clear input and refresh model list
                     document.getElementById('setting-ollama-pull-model').value = '';
-                    await refreshOllamaModels();
+                    await (window.refreshOllamaModels ? window.refreshOllamaModels() : Promise.resolve());
                 } else {
                     showNotification('error', '✗ ' + data.error, 'ai-settings-message');
                 }
@@ -3878,6 +3878,15 @@ Use simple ASCII characters only - no special quotes or unicode.`;
                 showNotification('error', `✗ Error connecting to Gemini: ${error.message}`, 'ai-settings-message');
             }
         }
+
+        // Expose AI settings handlers for inline onclick calls and scope-safe access.
+        window.loadAiSettings = loadAiSettings;
+        window.saveAiSettings = saveAiSettings;
+        window.testOllamaConnection = testOllamaConnection;
+        window.refreshOllamaModels = refreshOllamaModels;
+        window.pullOllamaModel = pullOllamaModel;
+        window.testOpenaiConnection = testOpenaiConnection;
+        window.testGeminiConnection = testGeminiConnection;
         
         async function loadNotesSettings() {
             try {
@@ -4503,6 +4512,13 @@ ${stackTrace}
     
     // Task Collection Function with UI Feedback
     async function collectTasks() {
+        const allowedServices = ['ticktick', 'apple_reminders', 'todoist'];
+        const storedSyncSettings = JSON.parse(localStorage.getItem('taskSyncSettings') || '{}');
+        const taskSyncEnabled = Boolean(storedSyncSettings.enabled);
+        const taskSyncService = allowedServices.includes(storedSyncSettings.service)
+            ? storedSyncSettings.service
+            : 'ticktick';
+
         try {
             const btn = document.getElementById('collect-tasks-btn');
             const icon = document.getElementById('collect-tasks-icon');
@@ -4518,14 +4534,45 @@ ${stackTrace}
             
             // Show starting notification
             showNotification('info', '🔍 Searching emails, calendar, notes, and GitHub for tasks...', 'tasks-notification');
-            
-            const response = await fetch('/api/tasks/collect?days_back=30&sources=email,calendar,notes,github', {
-                method: 'POST'
-            });
+
+            let response = null;
+            let lastError = null;
+            for (let attempt = 1; attempt <= 2; attempt += 1) {
+                try {
+                    response = await fetch('/api/tasks/collect?days_back=30&sources=email,calendar,notes,github', {
+                        method: 'POST',
+                        headers: {
+                            'Accept': 'application/json',
+                            'Cache-Control': 'no-cache'
+                        },
+                        cache: 'no-store'
+                    });
+                    lastError = null;
+                    break;
+                } catch (fetchError) {
+                    lastError = fetchError;
+                    console.warn(`Task collection request failed on attempt ${attempt}:`, fetchError);
+                    if (attempt < 2) {
+                        showNotification('warning', '⚠️ Task collection request was interrupted. Retrying...', 'tasks-notification');
+                    }
+                }
+            }
+
+            if (!response) {
+                throw lastError || new Error('Unable to reach task collection endpoint');
+            }
+
+            const rawResponse = await response.text();
+            let data = {};
+            if (rawResponse) {
+                try {
+                    data = JSON.parse(rawResponse);
+                } catch (parseError) {
+                    throw new Error(`Unexpected task collection response: ${rawResponse.slice(0, 160)}`);
+                }
+            }
             
             if (response.ok) {
-                const data = await response.json();
-                
                 // Update last collection time
                 const now = new Date();
                 localStorage.setItem('lastTaskCollection', now.toISOString());
@@ -4559,12 +4606,57 @@ ${stackTrace}
                 showNotification('success', message, 'tasks-notification');
                 
                 // Reload tasks section if dataLoader is available
-                if (typeof dataLoader !== 'undefined' && dataLoader.refreshTodos) {
-                    await dataLoader.refreshTodos();
+                if (typeof dataLoader !== 'undefined') {
+                    if (typeof dataLoader.loadTodos === 'function') {
+                        await dataLoader.loadTodos();
+                    } else if (typeof dataLoader.refreshSectionData === 'function') {
+                        await dataLoader.refreshSectionData('todos');
+                    }
+                }
+
+                if (taskSyncEnabled && taskSyncService === 'ticktick') {
+                    showNotification('info', '🔄 Syncing collected tasks to TickTick...', 'tasks-notification');
+                    const syncResponse = await fetch('/api/tasks/sync', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Accept': 'application/json'
+                        },
+                        body: JSON.stringify({ direction: 'to_ticktick' })
+                    });
+
+                    const syncRaw = await syncResponse.text();
+                    let syncData = {};
+                    if (syncRaw) {
+                        try {
+                            syncData = JSON.parse(syncRaw);
+                        } catch (parseError) {
+                            throw new Error(`Unexpected TickTick sync response: ${syncRaw.slice(0, 160)}`);
+                        }
+                    }
+
+                    if (syncResponse.ok && syncData.success) {
+                        showNotification(
+                            'success',
+                            `✅ TickTick sync complete. Pushed ${syncData.tasks_pushed_to_ticktick || 0} tasks.`,
+                            'tasks-notification'
+                        );
+                    } else if (syncData.auth_url) {
+                        showNotification(
+                            'warning',
+                            '⚠️ TickTick sync is enabled, but TickTick is not authenticated yet. Connect TickTick and run collection again.',
+                            'tasks-notification'
+                        );
+                    } else {
+                        showNotification(
+                            'warning',
+                            `⚠️ Tasks were collected, but TickTick sync failed: ${syncData.error || 'Unknown error'}`,
+                            'tasks-notification'
+                        );
+                    }
                 }
             } else {
-                const error = await response.json();
-                showNotification('error', '❌ Failed to collect tasks: ' + (error.detail || 'Unknown error'), 'tasks-notification');
+                showNotification('error', '❌ Failed to collect tasks: ' + (data.detail || data.error || 'Unknown error'), 'tasks-notification');
             }
             
             // Restore button

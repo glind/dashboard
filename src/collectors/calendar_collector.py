@@ -30,6 +30,15 @@ logger = logging.getLogger(__name__)
 
 class CalendarCollector:
     """Collects calendar events from Google Calendar."""
+
+    TODO_PATTERNS = [
+        re.compile(r'- \[ \]\s+(.+)', re.IGNORECASE | re.MULTILINE),
+        re.compile(r'TODO:\s+(.+)', re.IGNORECASE | re.MULTILINE),
+        re.compile(r'@todo\s+(.+)', re.IGNORECASE | re.MULTILINE),
+        re.compile(r'Action\s*Item:\s+(.+)', re.IGNORECASE | re.MULTILINE),
+        re.compile(r'Action:\s+(.+)', re.IGNORECASE | re.MULTILINE),
+        re.compile(r'Follow\s*up:\s+(.+)', re.IGNORECASE | re.MULTILINE),
+    ]
     
     def __init__(self, settings):
         """Initialize Calendar collector with settings."""
@@ -63,9 +72,10 @@ class CalendarCollector:
                 calendarId='primary',
                 timeMin=start_time,
                 timeMax=end_time,
-                maxResults=500,
+                maxResults=200,
                 singleEvents=True,
-                orderBy='startTime'
+                orderBy='startTime',
+                fields='items(id,summary,description,start,end,location,attendees(email),creator(email),organizer(email),status,htmlLink,created,updated)'
             ).execute()
             
             events = events_result.get('items', [])
@@ -250,19 +260,12 @@ class CalendarCollector:
         
         if not description:
             return todos
-        
-        # Match various TODO patterns
-        patterns = [
-            r'- \[ \]\s+(.+)',  # - [ ] Task
-            r'TODO:\s+(.+)',     # TODO: Task
-            r'@todo\s+(.+)',     # @todo Task
-            r'Action\s*Item:\s+(.+)',   # Action Item: Task
-            r'Action:\s+(.+)',   # Action: Task
-            r'Follow\s*up:\s+(.+)',  # Follow up: Task
-        ]
-        
-        for pattern in patterns:
-            matches = re.finditer(pattern, description, re.IGNORECASE | re.MULTILINE)
+
+        # Keep regex scans bounded for very long event descriptions.
+        description = description[:4000]
+
+        for pattern in self.TODO_PATTERNS:
+            matches = pattern.finditer(description)
             for match in matches:
                 task_text = match.group(1).strip()
                 
@@ -274,7 +277,7 @@ class CalendarCollector:
                 todos.append({
                     'text': task_text,
                     'context': context,
-                    'pattern': pattern,
+                    'pattern': pattern.pattern,
                     'event_id': event.get('id'),
                     'event_summary': event.get('summary', 'No Title')
                 })

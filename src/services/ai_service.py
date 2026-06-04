@@ -9,6 +9,7 @@ import hashlib
 import logging
 import re
 import os
+import sys
 import httpx
 from collections import OrderedDict
 from datetime import datetime, timedelta
@@ -47,6 +48,27 @@ class AIService:
         if self._provider is None:
             self._initialize_provider()
         return self._provider
+
+    def _get_background_manager(self):
+        """Resolve the live app background manager without importing a second main module."""
+        for module_name in ('__main__', 'main', 'src.main'):
+            module = sys.modules.get(module_name)
+            manager = getattr(module, 'background_manager', None) if module else None
+            if manager is not None:
+                return manager
+        return None
+
+    def _get_cached_background_data(self, cache_key: str) -> Dict[str, Any]:
+        """Read current in-process cached dashboard data when available."""
+        manager = self._get_background_manager()
+        if not manager or not hasattr(manager, 'get_cached_data'):
+            return {}
+        try:
+            data = manager.get_cached_data(cache_key)
+            return data if isinstance(data, dict) else {}
+        except Exception as e:
+            logger.warning(f"Failed to read {cache_key} cache from background manager: {e}")
+            return {}
     
     def reset_provider(self):
         """Reset the provider (called when settings change)."""
@@ -836,11 +858,39 @@ class AIService:
             # 4. Today's Calendar Events
             context_parts.append(f"\n=== TODAY'S SCHEDULE ===")
             try:
-                # Import the background manager to get cached data directly
-                from main import background_manager
-                cached_calendar = background_manager.get_cached_data('calendar')
+                cached_calendar = self._get_cached_background_data('calendar')
+                events = []
                 if cached_calendar and cached_calendar.get('events'):
                     events = cached_calendar['events']
+                else:
+                    try:
+                        from collectors.calendar_collector import CalendarCollector
+                        from config.settings import Settings
+
+                        collector = CalendarCollector(Settings())
+                        start_date = datetime.now()
+                        end_date = start_date + timedelta(days=7)
+                        raw_events = await collector.collect_events(start_date, end_date)
+                        for event in (raw_events or [])[:10]:
+                            start_time = event.get('start_time')
+                            end_time = event.get('end_time')
+                            events.append({
+                                'title': event.get('summary', 'Untitled Event'),
+                                'summary': event.get('summary', 'Untitled Event'),
+                                'time': start_time.strftime("%I:%M %p") if hasattr(start_time, 'strftime') else 'All day',
+                                'description': event.get('description', ''),
+                                'location': event.get('location', ''),
+                                'organizer': event.get('organizer', ''),
+                                'attendees': event.get('attendees', []) or [],
+                                'start': {'dateTime': start_time.isoformat()} if hasattr(start_time, 'isoformat') else None,
+                                'end': {'dateTime': end_time.isoformat()} if hasattr(end_time, 'isoformat') else None,
+                                'event_id': event.get('id', ''),
+                                'is_all_day': event.get('is_all_day', False),
+                            })
+                    except Exception as calendar_refresh_error:
+                        logger.warning(f"Failed direct calendar fetch for AI context: {calendar_refresh_error}")
+
+                if events:
                     context_parts.append(f"You have {len(events)} upcoming events:")
                     for event in events[:10]:
                         time_str = event.get('time', 'All day')
@@ -860,10 +910,14 @@ class AIService:
             # 5. Recent Emails (compact summary)
             context_parts.append(f"\n=== RECENT EMAILS ===")
             try:
-                from main import background_manager
-                cached_email = background_manager.get_cached_data('email')
+                cached_email = self._get_cached_background_data('email')
+                emails = []
                 if cached_email and cached_email.get('emails'):
                     emails = cached_email['emails']
+                else:
+                    emails = self.db.get_emails_by_priority()[:8]
+
+                if emails:
                     context_parts.append(f"{len(emails)} emails in inbox. Recent:")
                     for email in emails[:8]:  # Reduced from 15
                         sender = email.get('sender') or email.get('from', 'Unknown')
@@ -881,8 +935,7 @@ class AIService:
             # 6. GitHub Activity
             context_parts.append(f"\n=== GITHUB ACTIVITY ===")
             try:
-                from main import background_manager
-                cached_github = background_manager.get_cached_data('github')
+                cached_github = self._get_cached_background_data('github')
                 if cached_github and cached_github.get('issues'):
                     issues = cached_github['issues']
                     open_issues = [i for i in issues if i.get('state') == 'open']
@@ -903,8 +956,7 @@ class AIService:
             # 7. Recent News (compact)
             context_parts.append(f"\n=== RECENT NEWS ===")
             try:
-                from main import background_manager
-                cached_news = background_manager.get_cached_data('news')
+                cached_news = self._get_cached_background_data('news')
                 if cached_news and cached_news.get('articles'):
                     articles = cached_news['articles']
                     context_parts.append(f"{len(articles)} articles. Top 3:")

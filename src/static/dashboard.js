@@ -1,3 +1,220 @@
+// Global modal fallback for cases where inline template helpers have not loaded yet.
+if (typeof globalThis.showModal !== 'function') {
+    globalThis.showModal = function(title, content, actions = []) {
+        const container = document.getElementById('modal-container') || document.body;
+        const modal = document.createElement('div');
+        modal.className = 'modal-backdrop fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4';
+
+        const actionsHTML = (actions || []).map(action => {
+            const className = action.class || 'bg-blue-600 hover:bg-blue-700';
+            const label = action.label || 'OK';
+            const onclick = action.onclick || 'closeModal()';
+            return `<button onclick="${onclick}" class="${className} px-6 py-2 rounded-lg font-semibold">${label}</button>`;
+        }).join('');
+
+        modal.innerHTML = `
+            <div class="modal-content bg-gray-800 rounded-xl max-w-4xl w-full max-h-[90vh] overflow-hidden border border-gray-700 shadow-2xl">
+                <div class="flex justify-between items-center p-6 border-b border-gray-700">
+                    <h3 class="text-2xl font-bold">${title || ''}</h3>
+                    <button onclick="closeModal()" class="text-gray-400 hover:text-white text-3xl leading-none">&times;</button>
+                </div>
+                <div class="p-6 overflow-y-auto max-h-[calc(90vh-180px)]">
+                    ${content || ''}
+                </div>
+                ${actionsHTML ? `<div class="flex gap-3 justify-end p-6 border-t border-gray-700">${actionsHTML}</div>` : ''}
+            </div>
+        `;
+
+        container.appendChild(modal);
+        modal.addEventListener('click', (event) => {
+            if (event.target === modal) {
+                modal.remove();
+            }
+        });
+    };
+}
+
+if (typeof globalThis.closeModal !== 'function') {
+    globalThis.closeModal = function() {
+        const modal = document.querySelector('.modal-backdrop');
+        if (modal) {
+            modal.remove();
+        }
+    };
+}
+
+if (typeof globalThis.saveNotesSettings !== 'function') {
+    globalThis.saveNotesSettings = async function() {
+        if (window.dataLoader && typeof window.dataLoader.saveNotesSettings === 'function') {
+            return window.dataLoader.saveNotesSettings();
+        }
+        throw new Error('Notes settings handler is not available yet.');
+    };
+}
+
+if (typeof globalThis.loadNotesSettings !== 'function') {
+    globalThis.loadNotesSettings = async function() {
+        if (window.dataLoader && typeof window.dataLoader.loadNotesSettings === 'function') {
+            return window.dataLoader.loadNotesSettings();
+        }
+        throw new Error('Notes settings loader is not available yet.');
+    };
+}
+
+if (typeof globalThis.refreshGoogleDriveAccess !== 'function') {
+    globalThis.refreshGoogleDriveAccess = async function() {
+        if (!confirm('This will redirect you to Google to re-authorize access including Google Drive. Continue?')) {
+            return;
+        }
+        try {
+            await fetch('/api/auth/google/disconnect', { method: 'POST' });
+            window.location.href = '/auth/google/connect';
+        } catch (error) {
+            console.error('Error refreshing Google Drive access:', error);
+        }
+    };
+}
+
+function __aiSettingsNotify(level, message) {
+    const box = document.getElementById('ai-settings-message');
+    if (!box) {
+        console.log(`[ai-settings:${level}] ${message}`);
+        return;
+    }
+
+    const styles = {
+        success: 'mt-4 p-3 rounded-lg bg-green-900/20 border border-green-700 text-green-400',
+        error: 'mt-4 p-3 rounded-lg bg-red-900/20 border border-red-700 text-red-400',
+        warning: 'mt-4 p-3 rounded-lg bg-yellow-900/20 border border-yellow-700 text-yellow-300',
+        info: 'mt-4 p-3 rounded-lg bg-blue-900/20 border border-blue-700 text-blue-300'
+    };
+
+    box.className = styles[level] || styles.info;
+    box.textContent = message;
+    box.classList.remove('hidden');
+}
+
+function __normalizeOllamaHostFallback(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return 'localhost';
+    return raw
+        .replace(/^https?:\/\//i, '')
+        .replace(/\/.*/, '')
+        .replace(/:\d+$/, '')
+        .trim() || 'localhost';
+}
+
+if (typeof globalThis.refreshOllamaModels !== 'function') {
+    globalThis.refreshOllamaModels = async function() {
+        try {
+            const host = __normalizeOllamaHostFallback(document.getElementById('setting-ollama-host')?.value);
+            const port = parseInt(document.getElementById('setting-ollama-port')?.value || '11434', 10);
+            const response = await fetch(`/api/ollama/models?host=${encodeURIComponent(host)}&port=${encodeURIComponent(port)}`);
+            const data = await response.json();
+
+            const select = document.getElementById('setting-ollama-model');
+            if (!select) {
+                __aiSettingsNotify('error', 'Ollama model selector is not available.');
+                return;
+            }
+
+            const currentValue = select.value;
+            select.innerHTML = '<option value="">Select a model...</option>';
+
+            if (data.success && Array.isArray(data.models) && data.models.length > 0) {
+                data.models.forEach(model => {
+                    const option = document.createElement('option');
+                    option.value = model.name;
+                    let sizeStr = '';
+                    if (model.size) {
+                        sizeStr = ` (${(model.size / (1024 * 1024 * 1024)).toFixed(2)} GB)`;
+                    }
+                    option.textContent = `${model.name}${sizeStr}`;
+                    select.appendChild(option);
+                });
+
+                if (currentValue && Array.from(select.options).some(opt => opt.value === currentValue)) {
+                    select.value = currentValue;
+                }
+
+                __aiSettingsNotify('success', `✓ Found ${data.models.length} models on ${data.server || `${host}:${port}`}`);
+            } else {
+                __aiSettingsNotify('warning', data.error || 'No models found. Try pulling a model first.');
+            }
+        } catch (error) {
+            console.error('Error refreshing Ollama models:', error);
+            __aiSettingsNotify('error', `✗ Failed to fetch models: ${error.message}`);
+        }
+    };
+}
+
+if (typeof globalThis.testOllamaConnection !== 'function') {
+    globalThis.testOllamaConnection = async function() {
+        const host = __normalizeOllamaHostFallback(document.getElementById('setting-ollama-host')?.value);
+        const port = parseInt(document.getElementById('setting-ollama-port')?.value || '11434', 10);
+        try {
+            const response = await fetch('/api/settings/ai/test', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ provider: 'ollama', host, port })
+            });
+            const data = await response.json();
+            if (data.success) {
+                __aiSettingsNotify('success', `✓ Ollama connected at ${host}:${port}`);
+                await globalThis.refreshOllamaModels();
+            } else {
+                __aiSettingsNotify('error', `✗ ${data.error || 'Ollama connection failed'}`);
+            }
+        } catch (error) {
+            __aiSettingsNotify('error', `✗ Cannot connect to Ollama at ${host}:${port}`);
+        }
+    };
+}
+
+if (typeof globalThis.pullOllamaModel !== 'function') {
+    globalThis.pullOllamaModel = async function(evt) {
+        const modelName = String(document.getElementById('setting-ollama-pull-model')?.value || '').trim();
+        const host = __normalizeOllamaHostFallback(document.getElementById('setting-ollama-host')?.value);
+        const port = parseInt(document.getElementById('setting-ollama-port')?.value || '11434', 10);
+
+        if (!modelName) {
+            __aiSettingsNotify('warning', 'Please enter a model name');
+            return;
+        }
+
+        const button = evt?.target;
+        if (button) {
+            button.disabled = true;
+            button.textContent = 'Pulling...';
+        }
+
+        try {
+            __aiSettingsNotify('info', `⏳ Pulling model ${modelName}... This may take several minutes.`);
+            const response = await fetch('/api/ollama/pull', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ model: modelName, host, port })
+            });
+            const data = await response.json();
+            if (!data.success) {
+                throw new Error(data.error || 'Failed to pull model');
+            }
+            const input = document.getElementById('setting-ollama-pull-model');
+            if (input) input.value = '';
+            __aiSettingsNotify('success', data.message || `✓ Pulled model ${modelName}`);
+            await globalThis.refreshOllamaModels();
+        } catch (error) {
+            console.error('Error pulling Ollama model:', error);
+            __aiSettingsNotify('error', `✗ Failed to pull model: ${error.message}`);
+        } finally {
+            if (button) {
+                button.disabled = false;
+                button.textContent = 'Pull Model';
+            }
+        }
+    };
+}
+
 // --- YouTube Music Player Logic ---
 (function() {
     const ytPlayerState = {
@@ -239,6 +456,7 @@ try {
         this.vanityAlerts = [];
         this.musicNews = [];
         this.upcomingEventTimer = null;
+        this.clockTimer = null;
         this.voiceRecognition = null;
         this.speechSynthesis = window.speechSynthesis;
         this.alertedEvents = new Set();
@@ -271,6 +489,8 @@ try {
         this.overviewSummary = null; // 5-minute overview summary for AI Assistant
         this.personalizedSuggestion = null; // Random personalized suggestion
         this.showReadArticles = false; // Show read articles in news section
+        this.participantIntelCache = {};
+        this.currentParticipantEventId = null;
         this.sectionLoadState = {
             todos: { lastLoadedAt: 0, inFlight: false, ttlMs: 60000 },
             calendar: { lastLoadedAt: 0, inFlight: false, ttlMs: 120000 },
@@ -302,6 +522,8 @@ try {
             this.loadAutoRefreshSettings();
             this.loadBackgroundSettings();
             this.loadTaskSyncSettings();
+            window.saveNotesSettings = this.saveNotesSettings.bind(this);
+            window.loadNotesSettings = this.loadNotesSettings.bind(this);
             this.loadVoiceSettings();
             this.loadUserProfile();
             this.loadAIAssistants();
@@ -965,6 +1187,8 @@ try {
                 <div class="space-y-2">
                     ${events.map(event => {
                         const meetingLink = this.extractMeetingLink(event);
+                        const participantPreviewId = this.getParticipantPreviewElementId(event);
+                        const hasParticipants = this.getEventParticipantEmails(event).length > 0;
                         return `
                         <div class="bg-gray-800 rounded-lg p-4 border border-gray-700 cursor-pointer hover:border-gray-600"
                              onclick="dataLoader.showEventDetail('${this.escapeHtml(event.event_id)}')">
@@ -994,6 +1218,11 @@ try {
                                             🤖 AI
                                         </button>
                                     </div>
+                                    ${hasParticipants ? `
+                                        <div id="${this.escapeHtml(participantPreviewId)}" class="mt-3" onclick="event.stopPropagation()">
+                                            ${this.renderEventParticipantPreviewFromCache(event)}
+                                        </div>
+                                    ` : ''}
                                 </div>
                                 <span class="text-sm text-blue-400">${this.formatEventTime(event)}</span>
                             </div>
@@ -1003,9 +1232,91 @@ try {
                 </div>
             </div>
         `).join('');
+
+        this.prefetchParticipantIntelligenceForCalendarEvents();
         
         // Update current time every second
         this.startClockUpdate();
+    }
+
+    getEventParticipantEmails(event) {
+        const participants = [];
+        if (event && event.organizer) participants.push(event.organizer);
+        if (event && Array.isArray(event.attendees)) {
+            event.attendees.forEach(email => participants.push(email));
+        }
+        return [...new Set(
+            participants
+                .filter(Boolean)
+                .map(p => String(p).trim().toLowerCase())
+        )];
+    }
+
+    buildParticipantCacheKey(event, dedupedParticipants = null) {
+        const people = dedupedParticipants || this.getEventParticipantEmails(event);
+        return `${event.event_id || event.title || 'event'}::${people.join(',')}`;
+    }
+
+    getParticipantPreviewElementId(event) {
+        const raw = String((event && (event.event_id || event.title)) || 'event');
+        const safe = raw.replace(/[^a-zA-Z0-9_-]/g, '-').slice(0, 96) || 'event';
+        return `event-participants-${safe}`;
+    }
+
+    renderEventParticipantPreviewFromCache(event) {
+        const deduped = this.getEventParticipantEmails(event);
+        if (deduped.length === 0) {
+            return '<p class="text-xs text-gray-500">No participants found.</p>';
+        }
+
+        const cacheKey = this.buildParticipantCacheKey(event, deduped);
+        const participantData = this.participantIntelCache[cacheKey];
+        if (!participantData) {
+            return '<p class="text-xs text-gray-500">Loading participant context...</p>';
+        }
+
+        if (!Array.isArray(participantData) || participantData.length === 0) {
+            return '<p class="text-xs text-gray-500">No participant intelligence available yet.</p>';
+        }
+
+        const chips = participantData.slice(0, 3).map(person => {
+            const avatar = (person.images && person.images.avatar) ? person.images.avatar : '';
+            const stats = person.github_stats || {};
+            const repoCount = Number(stats.public_repos || 0);
+            return `
+                <div class="inline-flex items-center gap-2 bg-gray-700/70 border border-gray-600 rounded-full px-2 py-1 text-xs">
+                    ${avatar ? `<img src="${this.escapeHtml(avatar)}" alt="${this.escapeHtml(person.name || person.email || 'participant')}" class="w-5 h-5 rounded-full object-cover"/>` : ''}
+                    <span class="text-gray-200">${this.escapeHtml(person.name || person.email || 'Participant')}</span>
+                    ${repoCount > 0 ? `<span class="text-green-300">Repos: ${repoCount}</span>` : ''}
+                </div>
+            `;
+        }).join('');
+
+        return `
+            <div class="space-y-1">
+                <p class="text-[11px] uppercase tracking-wide text-gray-500">Participants</p>
+                <div class="flex flex-wrap gap-1">${chips}</div>
+            </div>
+        `;
+    }
+
+    updateEventParticipantPreview(event) {
+        const previewId = this.getParticipantPreviewElementId(event);
+        const node = document.getElementById(previewId);
+        if (!node) return;
+        node.innerHTML = this.renderEventParticipantPreviewFromCache(event);
+    }
+
+    async prefetchParticipantIntelligenceForCalendarEvents() {
+        const candidates = (this.calendar || []).filter(event => this.getEventParticipantEmails(event).length > 0).slice(0, 10);
+        for (const event of candidates) {
+            try {
+                await this.fetchParticipantIntelligence(event, false);
+                this.updateEventParticipantPreview(event);
+            } catch (error) {
+                console.warn('Participant prefetch failed for event:', event && (event.event_id || event.title), error);
+            }
+        }
     }
     
     renderOverviewCalendar() {
@@ -1047,9 +1358,9 @@ try {
         try {
             // Add cache-busting parameter if force refresh
             const url = forceRefresh 
-                ? `/api/email?refresh=${Date.now()}` 
+                ? `/api/email?refresh=true&_=${Date.now()}` 
                 : '/api/email';
-            const response = await this.fetchJsonWithTimeout(url, {}, 15000);
+            const response = await this.fetchJsonWithTimeout(url, {}, 22000);
             if (response.ok) {
                 const data = await response.json();
                 // Filter out noreply and no-reply emails
@@ -1073,6 +1384,13 @@ try {
             if (this.isTimeoutAbort(error) && retryCount < 2) {
                 console.warn(`Email load timed out, retrying (${retryCount + 1}/2)...`);
                 setTimeout(() => this.loadEmails(forceRefresh, retryCount + 1, options), 1200);
+                return;
+            }
+
+            // Keep current list visible if refresh timed out.
+            if (this.isTimeoutAbort(error) && this.emails && this.emails.length > 0) {
+                console.warn('Email refresh timed out, keeping existing email list visible.');
+                this.renderEmails();
                 return;
             }
             console.error('Error loading emails:', error);
@@ -2657,6 +2975,106 @@ try {
             this.showNotification('⚠️ Error deleting news source');
         }
     }
+
+    async loadNotesSettings() {
+        try {
+            const response = await fetch('/api/settings/notes');
+            const data = await response.json();
+            if (!data.success || !data.settings) return;
+
+            const settings = data.settings;
+            const getValue = (key, fallback = '') => {
+                const raw = settings[key];
+                if (raw && typeof raw === 'object' && Object.prototype.hasOwnProperty.call(raw, 'value')) {
+                    return raw.value;
+                }
+                return raw !== undefined && raw !== null ? raw : fallback;
+            };
+
+            const obsidianPath = String(getValue('obsidian_vault_path', ''));
+            const gdriveFolderId = String(getValue('google_drive_notes_folder_id', ''));
+            const notesLimit = Number(getValue('notes_limit', 10)) || 10;
+            const autoCreate = Boolean(getValue('auto_create_tasks', false));
+            const appleNotesEnabled = Boolean(getValue('apple_notes_enabled', false));
+            const googleKeepEmail = String(getValue('google_keep_email', ''));
+            const googleKeepToken = String(getValue('google_keep_token', ''));
+            const googleKeepLabels = String(getValue('google_keep_labels', ''));
+
+            const setValue = (id, value) => {
+                const el = document.getElementById(id);
+                if (el) el.value = value;
+            };
+            const setChecked = (id, value) => {
+                const el = document.getElementById(id);
+                if (el) el.checked = value;
+            };
+
+            setValue('setting-obsidian-path', obsidianPath);
+            setValue('setting-gdrive-folder', gdriveFolderId);
+            setValue('setting-notes-limit', notesLimit);
+            setChecked('setting-auto-create', autoCreate);
+            setChecked('setting-apple-notes-enabled', appleNotesEnabled);
+            setValue('setting-google-keep-email', googleKeepEmail);
+            setValue('setting-google-keep-token', googleKeepToken);
+            setValue('setting-google-keep-labels', googleKeepLabels);
+        } catch (error) {
+            console.error('Error loading notes settings:', error);
+        }
+    }
+
+    async saveNotesSettings() {
+        const messageEl = document.getElementById('settings-message');
+        try {
+            const valueOf = (id) => {
+                const el = document.getElementById(id);
+                return el ? String(el.value || '').trim() : '';
+            };
+            const checkedOf = (id) => {
+                const el = document.getElementById(id);
+                return Boolean(el && el.checked);
+            };
+
+            const payload = {
+                obsidian_vault_path: valueOf('setting-obsidian-path'),
+                google_drive_notes_folder_id: valueOf('setting-gdrive-folder'),
+                notes_limit: Number(valueOf('setting-notes-limit')) || 10,
+                auto_create_tasks: checkedOf('setting-auto-create'),
+                apple_notes_enabled: checkedOf('setting-apple-notes-enabled'),
+                google_keep_email: valueOf('setting-google-keep-email'),
+                google_keep_token: valueOf('setting-google-keep-token'),
+                google_keep_labels: valueOf('setting-google-keep-labels')
+            };
+
+            const response = await fetch('/api/settings/notes', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const data = await response.json();
+            if (!data.success) {
+                throw new Error(data.error || 'Failed to save notes settings');
+            }
+
+            if (messageEl) {
+                messageEl.className = 'mt-4 p-3 rounded-lg bg-green-900/20 border border-green-700 text-green-400';
+                messageEl.textContent = `✓ Settings saved successfully! Updated: ${(data.updated || []).join(', ')}`;
+                messageEl.classList.remove('hidden');
+                setTimeout(() => messageEl.classList.add('hidden'), 5000);
+            }
+
+            if (typeof this.refreshNotes === 'function') {
+                this.refreshNotes();
+            }
+        } catch (error) {
+            console.error('Error saving notes settings:', error);
+            if (messageEl) {
+                messageEl.className = 'mt-4 p-3 rounded-lg bg-red-900/20 border border-red-700 text-red-400';
+                messageEl.textContent = `✗ Error: ${error.message}`;
+                messageEl.classList.remove('hidden');
+                setTimeout(() => messageEl.classList.add('hidden'), 5000);
+            }
+        }
+    }
     
     // WEATHER
     async loadWeather(retryCount = 0, options = {}) {
@@ -3179,7 +3597,11 @@ try {
     }
     
     startClockUpdate() {
-        setInterval(() => {
+        if (this.clockTimer) {
+            clearInterval(this.clockTimer);
+        }
+
+        this.clockTimer = setInterval(() => {
             const clockEl = document.getElementById('current-time');
             if (clockEl) {
                 clockEl.textContent = this.formatCurrentTime();
@@ -3558,9 +3980,10 @@ try {
         showModal('Task Details', content);
     }
     
-    showEventDetail(id) {
+    async showEventDetail(id) {
         const event = this.calendar.find(e => e.event_id === id);
         if (!event) return;
+        this.currentParticipantEventId = id;
         
         const start = event.start && event.start.dateTime ? event.start.dateTime : event.start;
         
@@ -3572,11 +3995,167 @@ try {
                 ${event.description ? `<p class="text-gray-300">${this.escapeHtml(event.description)}</p>` : ''}
                 ${event.organizer ? `<p class="text-gray-400 text-sm">Organizer: ${this.escapeHtml(event.organizer)}</p>` : ''}
                 ${event.attendees && event.attendees.length > 0 ? `<p class="text-gray-400 text-sm">Attendees: ${event.attendees.length}</p>` : ''}
+                <div class="flex justify-end">
+                    <button onclick="window.dataLoader && dataLoader.refreshParticipantIntelligence()"
+                            class="text-xs bg-gray-700 hover:bg-gray-600 text-gray-200 px-3 py-1 rounded">
+                        Refresh Participant Data
+                    </button>
+                </div>
+                <div id="participant-intelligence" class="mt-4 border-t border-gray-700 pt-4">
+                    <p class="text-gray-400 text-sm">Loading participant context...</p>
+                </div>
                 ${event.calendar_url ? `<a href="${event.calendar_url}" target="_blank" class="text-blue-400 hover:underline text-sm">View in Google Calendar →</a>` : ''}
             </div>
         `;
         
         showModal('Event Details', content);
+
+        try {
+            await this.loadParticipantIntelligence(event);
+        } catch (error) {
+            console.error('Failed loading participant intelligence:', error);
+            const container = document.getElementById('participant-intelligence');
+            if (container) {
+                container.innerHTML = '<p class="text-red-400 text-sm">Participant context is unavailable right now.</p>';
+            }
+        }
+    }
+
+    async loadParticipantIntelligence(event, forceRefresh = false) {
+        const container = document.getElementById('participant-intelligence');
+        if (!container) return;
+
+        const deduped = this.getEventParticipantEmails(event);
+        if (deduped.length === 0) {
+            container.innerHTML = '<p class="text-gray-500 text-sm">No participant emails found for this event.</p>';
+            return;
+        }
+
+        const participantData = await this.fetchParticipantIntelligence(event, forceRefresh);
+        this.renderParticipantIntelligenceCards(container, participantData);
+        this.updateEventParticipantPreview(event);
+    }
+
+    async fetchParticipantIntelligence(event, forceRefresh = false) {
+        const deduped = this.getEventParticipantEmails(event);
+        const cacheKey = this.buildParticipantCacheKey(event, deduped);
+
+        if (!forceRefresh && this.participantIntelCache[cacheKey]) {
+            return this.participantIntelCache[cacheKey];
+        }
+
+        if (forceRefresh) {
+            delete this.participantIntelCache[cacheKey];
+            try {
+                await fetch('/api/calendar/participants/cache/clear', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ participants: deduped })
+                });
+            } catch (refreshError) {
+                console.warn('Could not clear participant cache on server:', refreshError);
+            }
+        }
+
+        const response = await fetch('/api/calendar/participants/intelligence', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                event_id: event.event_id,
+                title: event.summary || event.title,
+                description: event.description || '',
+                start: event.start && event.start.dateTime ? event.start.dateTime : event.start,
+                organizer: event.organizer || '',
+                participants: deduped
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error(`Participant intelligence failed with status ${response.status}`);
+        }
+
+        const data = await response.json();
+        const participantData = data && Array.isArray(data.participants) ? data.participants : [];
+        this.participantIntelCache[cacheKey] = participantData;
+        return participantData;
+    }
+
+    async refreshParticipantIntelligence() {
+        if (!this.currentParticipantEventId) return;
+        const event = this.calendar.find(e => e.event_id === this.currentParticipantEventId);
+        if (!event) return;
+
+        const container = document.getElementById('participant-intelligence');
+        if (container) {
+            container.innerHTML = '<p class="text-gray-400 text-sm">Refreshing participant context...</p>';
+        }
+        await this.loadParticipantIntelligence(event, true);
+        this.updateEventParticipantPreview(event);
+    }
+
+    renderParticipantIntelligenceCards(container, participants) {
+        if (!participants || participants.length === 0) {
+            container.innerHTML = '<p class="text-gray-500 text-sm">No participant intelligence available yet.</p>';
+            return;
+        }
+
+        container.innerHTML = `
+            <h3 class="text-lg font-semibold mb-3">Participant Intelligence</h3>
+            <div class="space-y-3">
+                ${participants.map(person => {
+                    const notes = Array.isArray(person.latest_meeting_notes) ? person.latest_meeting_notes : [];
+                    const todos = Array.isArray(person.related_todos) ? person.related_todos : [];
+                    const profiles = person.profiles || {};
+                    const githubStats = person.github_stats || {};
+                    const avatar = person.images && person.images.avatar ? person.images.avatar : '';
+                    return `
+                        <div class="bg-gray-800 border border-gray-700 rounded-lg p-4">
+                            <div class="flex items-start gap-3">
+                                ${avatar ? `<img src="${this.escapeHtml(avatar)}" alt="${this.escapeHtml(person.name || person.email)}" class="w-12 h-12 rounded-full border border-gray-600 object-cover"/>` : ''}
+                                <div class="flex-1">
+                                    <p class="text-white font-semibold">${this.escapeHtml(person.name || person.email)}</p>
+                                    <p class="text-gray-400 text-xs">${this.escapeHtml(person.email || '')}</p>
+                                    <p class="text-gray-300 text-sm mt-1">${this.escapeHtml(person.how_known || 'No relationship summary available.')}</p>
+                                    <div class="mt-2 text-xs text-gray-400 space-y-1">
+                                        <p>Emails exchanged: <span class="text-gray-200">${Number(person.emails_exchanged || 0)}</span></p>
+                                        <p>Meetings: <span class="text-gray-200">${Number(person.meetings_count || 0)}</span></p>
+                                    </div>
+                                    ${person.contact_notes ? `<p class="text-xs text-gray-500 mt-2">${this.escapeHtml(person.contact_notes)}</p>` : ''}
+                                    ${(profiles.linkedin || profiles.github) ? `
+                                        <div class="mt-2 flex flex-wrap gap-2 text-xs">
+                                            ${profiles.linkedin ? `<a class="text-blue-400 hover:underline" target="_blank" href="${this.escapeHtml(profiles.linkedin)}">LinkedIn</a>` : ''}
+                                            ${profiles.github ? `<a class="text-green-400 hover:underline" target="_blank" href="${this.escapeHtml(profiles.github)}">GitHub</a>` : ''}
+                                        </div>
+                                    ` : ''}
+                                    ${Number(githubStats.public_repos || 0) > 0 || Number(githubStats.followers || 0) > 0 ? `
+                                        <div class="mt-2 text-xs text-gray-300 bg-gray-700/60 border border-gray-600 rounded p-2">
+                                            <p>GitHub Repos: <span class="text-gray-100">${Number(githubStats.public_repos || 0)}</span></p>
+                                            <p>GitHub Followers: <span class="text-gray-100">${Number(githubStats.followers || 0)}</span></p>
+                                        </div>
+                                    ` : ''}
+                                    ${notes.length > 0 ? `
+                                        <div class="mt-3">
+                                            <p class="text-xs text-gray-400 uppercase mb-1">Latest Meeting Notes</p>
+                                            <ul class="space-y-1">
+                                                ${notes.slice(0, 3).map(note => `<li class="text-sm text-gray-300">• ${this.escapeHtml(note.title || note.preview || 'Untitled note')}</li>`).join('')}
+                                            </ul>
+                                        </div>
+                                    ` : ''}
+                                    ${todos.length > 0 ? `
+                                        <div class="mt-3">
+                                            <p class="text-xs text-gray-400 uppercase mb-1">Related Todos</p>
+                                            <ul class="space-y-1">
+                                                ${todos.slice(0, 3).map(todo => `<li class="text-sm text-gray-300">• ${this.escapeHtml(todo.title || 'Untitled task')}</li>`).join('')}
+                                            </ul>
+                                        </div>
+                                    ` : ''}
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }).join('')}
+            </div>
+        `;
     }
     
     showEmailDetail(id) {
@@ -4618,7 +5197,9 @@ Then ask me: "What would you like to do with this email?"`,
             const result = await response.json();
             if (!result.success) {
                 console.error('Voice system error:', result.error);
+                this.showNotification('Rogr voice unavailable, using browser voice fallback.', 'warning');
                 this.hideAudioControlPanel();
+                this.speakTextBrowser(text);
             } else {
                 // Voice was sent to PersonaPlex - hide after estimated time
                 // Rough estimate: 100ms per character
@@ -4628,6 +5209,8 @@ Then ask me: "What would you like to do with this email?"`,
         } catch (error) {
             console.error('Failed to speak with Rogr:', error);
             this.hideAudioControlPanel();
+            this.showNotification('Rogr voice unavailable, using browser voice fallback.', 'warning');
+            this.speakTextBrowser(text);
         }
     }
     
@@ -5044,7 +5627,8 @@ Then ask me: "What would you like to do with this email?"`,
         try {
             const response = await fetch('/api/user/profile');
             if (response.ok) {
-                this.userProfile = await response.json();
+                const payload = await response.json();
+                this.userProfile = payload && payload.profile ? payload.profile : payload;
                 console.log('User profile loaded:', this.userProfile);
             }
         } catch (error) {
@@ -5061,7 +5645,8 @@ Then ask me: "What would you like to do with this email?"`,
             });
             
             if (response.ok) {
-                this.userProfile = profile;
+                const payload = await response.json();
+                this.userProfile = payload && payload.profile ? payload.profile : { ...this.userProfile, ...profile };
                 this.showNotification('Profile saved successfully!', 'success');
             }
         } catch (error) {
@@ -5366,10 +5951,90 @@ Then ask me: "What would you like to do with this email?"`,
         }
     }
 
-    testAIAssistantVoice() {
+    async testAIAssistantVoice() {
         const assistant = this.getActiveAssistant();
-        const phrase = assistant?.tagline || 'Voice check complete.';
-        this.speakText(phrase, !!assistant?.signature_enabled);
+        const phrase = assistant?.tagline || 'Voice check complete. Browser voice preview is active.';
+        await this.playBrowserVoiceTest(phrase);
+    }
+
+    async playBrowserVoiceTest(text) {
+        if (!this.speechSynthesis || !('SpeechSynthesisUtterance' in window)) {
+            this.showNotification('Browser text-to-speech is not available in this browser.', 'error');
+            return;
+        }
+
+        if (this.globalMuted) {
+            this.globalMuted = false;
+            localStorage.setItem('globalMuted', 'false');
+            this.showNotification('Voice alerts were muted. Unmuted for test playback.', 'info');
+        }
+
+        this.loadAvailableVoices();
+
+        if (!this.availableVoices || this.availableVoices.length === 0) {
+            await new Promise((resolve) => {
+                let settled = false;
+                const done = () => {
+                    if (!settled) {
+                        settled = true;
+                        resolve();
+                    }
+                };
+                const timeoutId = setTimeout(done, 1200);
+                if (this.speechSynthesis) {
+                    this.speechSynthesis.onvoiceschanged = () => {
+                        clearTimeout(timeoutId);
+                        this.loadAvailableVoices();
+                        this.populateVoiceOptions();
+                        done();
+                    };
+                }
+            });
+        }
+
+        this.loadAvailableVoices();
+
+        if (!this.availableVoices || this.availableVoices.length === 0) {
+            this.showNotification('No browser voices available yet. Try again in a moment.', 'warning');
+            return;
+        }
+
+        const cleanedText = this.sanitizeTextForSpeech(text);
+        if (!cleanedText || cleanedText.length < 2) {
+            this.showNotification('Nothing to speak for voice test.', 'warning');
+            return;
+        }
+
+        const utterance = new SpeechSynthesisUtterance(cleanedText);
+        const assistant = this.getActiveAssistant();
+        const preferredName = assistant?.browser_voice && assistant.browser_voice !== 'rogr'
+            ? assistant.browser_voice
+            : (this.selectedVoice && this.selectedVoice !== 'rogr' ? this.selectedVoice : null);
+
+        const selected = preferredName
+            ? this.availableVoices.find(v => v.name === preferredName)
+            : (this.availableVoices.find(v => v.lang && v.lang.startsWith('en')) || this.availableVoices[0]);
+
+        if (selected) {
+            utterance.voice = selected;
+            this.selectedVoice = selected.name;
+            localStorage.setItem('selectedVoice', selected.name);
+        }
+
+        utterance.rate = Math.max(0.5, Math.min(1.8, Number(assistant?.voice_speed ?? 0.95)));
+        utterance.pitch = Math.max(0.5, Math.min(1.8, Number(assistant?.voice_pitch ?? 1.0)));
+        utterance.volume = this.audioState?.isMuted ? 0 : (this.audioState?.volume ?? 0.9);
+
+        this.showAudioControlPanel('speech', 'Testing voice...');
+        utterance.onend = () => this.hideAudioControlPanel();
+        utterance.onerror = (event) => {
+            console.error('Voice test playback failed:', event);
+            this.hideAudioControlPanel();
+            this.showNotification('Voice test blocked by browser audio settings.', 'error');
+        };
+
+        this.speechSynthesis.cancel();
+        this.speechSynthesis.speak(utterance);
     }
     
     showUserProfileModal() {
@@ -6415,6 +7080,9 @@ Then ask me: "What would you like to do with this email?"`,
                             <option value="apple_reminders" ${this.taskSyncService === 'apple_reminders' ? 'selected' : ''}>Apple Reminders</option>
                             <option value="todoist" ${this.taskSyncService === 'todoist' ? 'selected' : ''}>Todoist</option>
                         </select>
+                        <div id="task-sync-provider-status" class="mt-4 space-y-3">
+                            <div class="text-xs text-gray-500">Loading connection status...</div>
+                        </div>
                     </div>
                     
                     <div class="border-t border-gray-700 pt-4">
@@ -6458,6 +7126,7 @@ Then ask me: "What would you like to do with this email?"`,
         
         // Populate voice options
         this.populateVoiceOptions();
+        this.refreshTaskSyncProviderStatus();
     }
     
     hideEditPanel() {
@@ -6508,6 +7177,209 @@ Then ask me: "What would you like to do with this email?"`,
             enabled: this.taskSyncEnabled,
             service: this.taskSyncService
         }));
+    }
+
+    getTaskSyncProviderLabel(provider) {
+        const labels = {
+            ticktick: 'TickTick',
+            todoist: 'Todoist',
+            apple_reminders: 'Apple Reminders'
+        };
+        return labels[provider] || provider;
+    }
+
+    renderTaskSyncProviderCard(provider, status = {}) {
+        const label = this.getTaskSyncProviderLabel(provider);
+        const connected = Boolean(status.connected);
+        const configured = Boolean(status.configured);
+        const statusLabel = connected
+            ? 'Connected'
+            : (configured ? 'Configured' : 'Not connected');
+        const badgeClass = connected
+            ? 'bg-green-900/40 text-green-300 border-green-700'
+            : (configured ? 'bg-yellow-900/40 text-yellow-300 border-yellow-700' : 'bg-gray-800 text-gray-300 border-gray-600');
+
+        let helperText = '';
+        if (provider === 'ticktick') {
+            helperText = connected
+                ? 'OAuth connection is ready for task sync.'
+                : 'Use OAuth to connect your TickTick account.';
+        } else if (provider === 'todoist') {
+            helperText = connected
+                ? 'API token is saved for Todoist sync.'
+                : 'Add a Todoist API token to enable sync.';
+        } else if (provider === 'apple_reminders') {
+            helperText = status.supported
+                ? (connected
+                    ? `Using Reminders list: ${status.list_name || 'default list'}`
+                    : 'Authorize Reminders access and optionally choose a list.')
+                : 'Apple Reminders sync is only available on macOS.';
+        }
+
+        const connectLabel = provider === 'todoist'
+            ? (connected ? 'Update Token' : 'Connect')
+            : provider === 'apple_reminders'
+                ? (connected ? 'Update List' : 'Connect')
+                : 'Connect';
+
+        return `
+            <div class="rounded-lg border border-gray-700 bg-gray-800/60 p-3">
+                <div class="flex items-start justify-between gap-3">
+                    <div>
+                        <div class="flex items-center gap-2">
+                            <h5 class="font-semibold text-white">${label}</h5>
+                            <span class="text-[11px] px-2 py-1 rounded border ${badgeClass}">${statusLabel}</span>
+                        </div>
+                        <p class="mt-1 text-xs text-gray-400">${helperText}</p>
+                        ${status.error ? `<p class="mt-1 text-xs text-red-300">${this.escapeHtml(status.error)}</p>` : ''}
+                    </div>
+                    <div class="flex gap-2">
+                        ${provider === 'apple_reminders' && !status.supported ? '' : `
+                            <button onclick="dataLoader.connectTaskSyncProvider('${provider}')"
+                                    class="px-3 py-2 rounded bg-blue-600 hover:bg-blue-700 text-sm text-white">
+                                ${connectLabel}
+                            </button>
+                        `}
+                        ${(connected || configured) ? `
+                            <button onclick="dataLoader.disconnectTaskSyncProvider('${provider}')"
+                                    class="px-3 py-2 rounded bg-gray-700 hover:bg-gray-600 text-sm text-white">
+                                Disconnect
+                            </button>
+                        ` : ''}
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    async refreshTaskSyncProviderStatus() {
+        const container = document.getElementById('task-sync-provider-status');
+        if (!container) return;
+
+        container.innerHTML = '<div class="text-xs text-gray-500">Loading connection status...</div>';
+        try {
+            const response = await fetch('/api/task-sync/providers/status', { cache: 'no-store' });
+            const data = await response.json();
+            if (!response.ok || !data.success) {
+                throw new Error(data.error || 'Failed to load task provider status');
+            }
+
+            const providers = data.providers || {};
+            container.innerHTML = ['ticktick', 'todoist', 'apple_reminders']
+                .map(provider => this.renderTaskSyncProviderCard(provider, providers[provider] || {}))
+                .join('');
+        } catch (error) {
+            console.error('Error loading task sync provider status:', error);
+            container.innerHTML = `<div class="text-xs text-red-300">${this.escapeHtml(error.message || 'Failed to load task provider status')}</div>`;
+        }
+    }
+
+    connectTaskSyncProvider(provider) {
+        if (provider === 'ticktick') {
+            window.open('/auth/ticktick', 'TickTickAuth', 'width=700,height=800');
+            this.showNotification('TickTick authorization opened in a new window.', 'info');
+            setTimeout(() => this.refreshTaskSyncProviderStatus(), 3000);
+            return;
+        }
+
+        if (provider === 'todoist') {
+            showModal('Connect Todoist', `
+                <div class="space-y-4">
+                    <p class="text-sm text-gray-300">Paste your Todoist API token to enable task sync.</p>
+                    <input id="todoist-api-token-input" type="password" placeholder="Todoist API token"
+                           class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white">
+                    <p class="text-xs text-gray-500">You can generate this token from Todoist integrations settings.</p>
+                </div>
+            `, [
+                { label: 'Cancel', onclick: 'closeModal()', class: 'bg-gray-600 hover:bg-gray-700' },
+                { label: 'Save Token', onclick: 'dataLoader.saveTodoistConnection()', class: 'bg-blue-600 hover:bg-blue-700' }
+            ]);
+            return;
+        }
+
+        if (provider === 'apple_reminders') {
+            showModal('Connect Apple Reminders', `
+                <div class="space-y-4">
+                    <p class="text-sm text-gray-300">Authorize Apple Reminders access on this Mac and optionally choose a target list.</p>
+                    <input id="apple-reminders-list-input" type="text" placeholder="Optional list name (defaults to default list)"
+                           class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white">
+                    <p class="text-xs text-gray-500">macOS may prompt for Reminders access the first time you connect.</p>
+                </div>
+            `, [
+                { label: 'Cancel', onclick: 'closeModal()', class: 'bg-gray-600 hover:bg-gray-700' },
+                { label: 'Connect', onclick: 'dataLoader.saveAppleRemindersConnection()', class: 'bg-blue-600 hover:bg-blue-700' }
+            ]);
+        }
+    }
+
+    async saveTodoistConnection() {
+        const input = document.getElementById('todoist-api-token-input');
+        const apiToken = input ? input.value.trim() : '';
+        if (!apiToken) {
+            this.showNotification('Todoist API token is required.', 'error');
+            return;
+        }
+
+        try {
+            const response = await fetch('/api/task-sync/providers/todoist/connect', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ api_token: apiToken })
+            });
+            const data = await response.json();
+            if (!response.ok || !data.success) {
+                throw new Error(data.detail || data.error || 'Failed to save Todoist token');
+            }
+            closeModal();
+            this.showNotification('Todoist token saved.', 'success');
+            await this.refreshTaskSyncProviderStatus();
+        } catch (error) {
+            console.error('Error saving Todoist token:', error);
+            this.showNotification(error.message || 'Failed to save Todoist token.', 'error');
+        }
+    }
+
+    async saveAppleRemindersConnection() {
+        const input = document.getElementById('apple-reminders-list-input');
+        const listName = input ? input.value.trim() : '';
+        try {
+            const response = await fetch('/api/task-sync/providers/apple_reminders/connect', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ list_name: listName })
+            });
+            const data = await response.json();
+            if (!response.ok || !data.success) {
+                throw new Error(data.detail || data.error || 'Failed to connect Apple Reminders');
+            }
+            closeModal();
+            this.showNotification('Apple Reminders connected.', 'success');
+            await this.refreshTaskSyncProviderStatus();
+        } catch (error) {
+            console.error('Error connecting Apple Reminders:', error);
+            this.showNotification(error.message || 'Failed to connect Apple Reminders.', 'error');
+        }
+    }
+
+    async disconnectTaskSyncProvider(provider) {
+        if (!confirm(`Disconnect ${this.getTaskSyncProviderLabel(provider)}?`)) {
+            return;
+        }
+
+        try {
+            const response = await fetch(`/api/task-sync/providers/${encodeURIComponent(provider)}/disconnect`, {
+                method: 'POST'
+            });
+            const data = await response.json();
+            if (!response.ok || !data.success) {
+                throw new Error(data.detail || data.error || 'Failed to disconnect provider');
+            }
+            this.showNotification(`${this.getTaskSyncProviderLabel(provider)} disconnected.`, 'success');
+            await this.refreshTaskSyncProviderStatus();
+        } catch (error) {
+            console.error(`Error disconnecting ${provider}:`, error);
+            this.showNotification(error.message || `Failed to disconnect ${provider}.`, 'error');
+        }
     }
     
     loadTaskSyncSettings() {
@@ -6666,14 +7538,10 @@ Then ask me: "What would you like to do with this email?"`,
         console.log(`Voice signature ${enabled ? 'enabled' : 'disabled'}`);
     }
     
-    testAIVoice() {
+    async testAIVoice() {
         const assistant = this.getActiveAssistant();
         const testLine = assistant?.tagline || 'Voice system operational. All systems ready.';
-        if (this.selectedVoice === 'rogr' || !this.selectedVoice) {
-            this.speakText(testLine, !!assistant?.signature_enabled);
-        } else {
-            this.speakText(`Hello, this is ${assistant?.name || 'your AI assistant'}. ${testLine}`);
-        }
+        await this.playBrowserVoiceTest(`Hello, this is ${assistant?.name || 'your AI assistant'}. ${testLine}`);
     }
     
     updateNavVisibility() {
@@ -8993,6 +9861,12 @@ function escapeHtml(unsafe) {
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', async () => {
     await updateGoogleAuthButton();
+    if (window.dataLoader && typeof window.dataLoader.loadUserProfile === 'function') {
+        await window.dataLoader.loadUserProfile();
+    }
+    if (typeof window.loadUserProfile === 'function') {
+        await window.loadUserProfile();
+    }
     await loadSuggestedTodos();
 });
 } catch (error) {
@@ -9108,11 +9982,17 @@ if (typeof window.saveUserProfile !== 'function') {
                 throw new Error(data.error || 'Failed to save profile');
             }
 
+            const savedProfile = data && data.profile ? data.profile : profile;
+
             if (window.dataLoader) {
-                window.dataLoader.userProfile = profile;
+                window.dataLoader.userProfile = savedProfile;
                 if (typeof window.dataLoader.showNotification === 'function') {
                     window.dataLoader.showNotification('Profile saved successfully!', 'success');
                 }
+            }
+
+            if (typeof window.loadUserProfile === 'function') {
+                await window.loadUserProfile();
             }
 
             if (messageEl) {

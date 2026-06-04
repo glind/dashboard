@@ -37,6 +37,17 @@ class DatabaseManager:
         """Initialize database manager."""
         self.db_path = db_path
         self.init_database()
+
+    def _apply_connection_pragmas(self, conn: sqlite3.Connection):
+        """Apply pragmatic SQLite settings for dashboard read/write workloads."""
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA synchronous=NORMAL")
+            conn.execute("PRAGMA temp_store=MEMORY")
+            conn.execute("PRAGMA cache_size=-8000")
+            conn.execute("PRAGMA busy_timeout=5000")
+        except Exception as e:
+            logger.warning(f"Could not apply SQLite pragmas: {e}")
     
     def init_database(self):
         """Initialize database tables."""
@@ -47,6 +58,7 @@ class DatabaseManager:
             
             conn = sqlite3.connect(self.db_path)
             conn.row_factory = sqlite3.Row
+            self._apply_connection_pragmas(conn)
             cursor = conn.cursor()
             
             # Credentials table
@@ -328,6 +340,39 @@ class DatabaseManager:
                 )
             """)
 
+            # Participant contact intelligence mapping table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS participant_contacts (
+                    email TEXT PRIMARY KEY,
+                    display_name TEXT,
+                    company TEXT,
+                    linkedin_url TEXT,
+                    linkedin_image_url TEXT,
+                    github_url TEXT,
+                    github_stats_json TEXT,
+                    enrichment_source TEXT,
+                    enrichment_refreshed_at TIMESTAMP,
+                    image_url TEXT,
+                    relationship_notes TEXT,
+                    notes TEXT,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            # Migration: enrich participant contact cache fields when upgrading existing DBs.
+            participant_contact_migrations = [
+                ("linkedin_image_url", "TEXT"),
+                ("github_stats_json", "TEXT"),
+                ("enrichment_source", "TEXT"),
+                ("enrichment_refreshed_at", "TIMESTAMP"),
+            ]
+            for column_name, column_type in participant_contact_migrations:
+                try:
+                    cursor.execute(f"ALTER TABLE participant_contacts ADD COLUMN {column_name} {column_type}")
+                except sqlite3.OperationalError:
+                    pass
+
             # Jokes table
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS jokes (
@@ -376,6 +421,8 @@ class DatabaseManager:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_deleted_tasks_source ON deleted_tasks(source)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_deleted_tasks_source_id ON deleted_tasks(source_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_deleted_tasks_deleted_at ON deleted_tasks(deleted_at)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_participant_contacts_company ON participant_contacts(company)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_participant_contacts_updated_at ON participant_contacts(updated_at)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_news_articles_liked ON news_articles(is_liked)")
             
             # Migration: Add is_read column to news_articles if it doesn't exist
@@ -868,6 +915,7 @@ class DatabaseManager:
         """Get database connection with automatic cleanup."""
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row  # Enable column access by name
+        self._apply_connection_pragmas(conn)
         try:
             yield conn
         finally:
@@ -3514,6 +3562,10 @@ class DatabaseManager:
     def save_user_profile(self, profile: Dict[str, Any]) -> bool:
         """Save or update user profile."""
         try:
+            # Preserve unspecified fields so partial profile saves do not erase related data.
+            existing_profile = self.get_user_profile() or {}
+            merged_profile = {**existing_profile, **(profile or {})}
+
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
@@ -3528,26 +3580,26 @@ class DatabaseManager:
                 ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP,
                           ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
-                profile.get('full_name'),
-                profile.get('preferred_name'),
-                profile.get('occupation'),
-                profile.get('company'),
-                profile.get('role'),
-                profile.get('work_focus'),
-                profile.get('interests'),
-                profile.get('communication_style'),
-                profile.get('timezone'),
-                profile.get('work_hours'),
-                profile.get('priorities'),
-                profile.get('bio'),
-                profile.get('github_username'),
-                profile.get('soundcloud_url'),
-                profile.get('bandcamp_url'),
-                profile.get('music_artist_name'),
-                profile.get('music_label_name'),
-                profile.get('book_title'),
-                profile.get('project_paths'),
-                profile.get('vanity_search_terms')
+                merged_profile.get('full_name'),
+                merged_profile.get('preferred_name'),
+                merged_profile.get('occupation'),
+                merged_profile.get('company'),
+                merged_profile.get('role'),
+                merged_profile.get('work_focus'),
+                merged_profile.get('interests'),
+                merged_profile.get('communication_style'),
+                merged_profile.get('timezone'),
+                merged_profile.get('work_hours'),
+                merged_profile.get('priorities'),
+                merged_profile.get('bio'),
+                merged_profile.get('github_username'),
+                merged_profile.get('soundcloud_url'),
+                merged_profile.get('bandcamp_url'),
+                merged_profile.get('music_artist_name'),
+                merged_profile.get('music_label_name'),
+                merged_profile.get('book_title'),
+                merged_profile.get('project_paths'),
+                merged_profile.get('vanity_search_terms')
             ))
             
             conn.commit()
@@ -3558,6 +3610,132 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Error saving user profile: {e}")
             return False
+
+    def get_participant_contact(self, email: str) -> Optional[Dict[str, Any]]:
+        """Return a participant contact mapping by email."""
+        if not email:
+            return None
+        try:
+            normalized_email = email.strip().lower()
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    SELECT email, display_name, company, linkedin_url, linkedin_image_url,
+                           github_url, github_stats_json, enrichment_source, enrichment_refreshed_at,
+                           image_url, relationship_notes, notes, updated_at, created_at
+                    FROM participant_contacts
+                    WHERE email = ?
+                    """,
+                    (normalized_email,)
+                )
+                row = cursor.fetchone()
+                if not row:
+                    return None
+                contact = dict(row)
+                stats_raw = contact.get('github_stats_json')
+                if isinstance(stats_raw, str) and stats_raw.strip():
+                    try:
+                        contact['github_stats'] = json.loads(stats_raw)
+                    except Exception:
+                        contact['github_stats'] = {}
+                elif isinstance(stats_raw, dict):
+                    contact['github_stats'] = stats_raw
+                else:
+                    contact['github_stats'] = {}
+                return contact
+        except Exception as e:
+            logger.error(f"Error getting participant contact {email}: {e}")
+            return None
+
+    def save_participant_contact(self, contact: Dict[str, Any]) -> bool:
+        """Create or update a participant contact mapping."""
+        try:
+            email = str(contact.get('email') or '').strip().lower()
+            if not email:
+                return False
+
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    INSERT INTO participant_contacts (
+                        email, display_name, company, linkedin_url, linkedin_image_url,
+                        github_url, github_stats_json, enrichment_source, enrichment_refreshed_at,
+                        image_url, relationship_notes, notes, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    ON CONFLICT(email) DO UPDATE SET
+                        display_name = COALESCE(excluded.display_name, participant_contacts.display_name),
+                        company = COALESCE(excluded.company, participant_contacts.company),
+                        linkedin_url = COALESCE(excluded.linkedin_url, participant_contacts.linkedin_url),
+                        linkedin_image_url = COALESCE(excluded.linkedin_image_url, participant_contacts.linkedin_image_url),
+                        github_url = COALESCE(excluded.github_url, participant_contacts.github_url),
+                        github_stats_json = COALESCE(excluded.github_stats_json, participant_contacts.github_stats_json),
+                        enrichment_source = COALESCE(excluded.enrichment_source, participant_contacts.enrichment_source),
+                        enrichment_refreshed_at = COALESCE(excluded.enrichment_refreshed_at, participant_contacts.enrichment_refreshed_at),
+                        image_url = COALESCE(excluded.image_url, participant_contacts.image_url),
+                        relationship_notes = COALESCE(excluded.relationship_notes, participant_contacts.relationship_notes),
+                        notes = COALESCE(excluded.notes, participant_contacts.notes),
+                        updated_at = CURRENT_TIMESTAMP
+                    """,
+                    (
+                        email,
+                        contact.get('display_name'),
+                        contact.get('company'),
+                        contact.get('linkedin_url'),
+                        contact.get('linkedin_image_url'),
+                        contact.get('github_url'),
+                        json.dumps(contact.get('github_stats') or contact.get('github_stats_json') or {}) if (
+                            contact.get('github_stats') is not None or contact.get('github_stats_json') is not None
+                        ) else None,
+                        contact.get('enrichment_source'),
+                        contact.get('enrichment_refreshed_at'),
+                        contact.get('image_url'),
+                        contact.get('relationship_notes'),
+                        contact.get('notes'),
+                    )
+                )
+                conn.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Error saving participant contact: {e}")
+            return False
+
+    def list_participant_contacts(self, limit: int = 200) -> List[Dict[str, Any]]:
+        """List mapped participant contacts for review and management."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    SELECT email, display_name, company, linkedin_url, linkedin_image_url,
+                           github_url, github_stats_json, enrichment_source, enrichment_refreshed_at,
+                           image_url, relationship_notes, notes, updated_at, created_at
+                    FROM participant_contacts
+                    ORDER BY updated_at DESC
+                    LIMIT ?
+                    """,
+                    (int(max(1, min(limit, 1000))),)
+                )
+                rows = cursor.fetchall()
+                contacts: List[Dict[str, Any]] = []
+                for row in rows:
+                    contact = dict(row)
+                    stats_raw = contact.get('github_stats_json')
+                    if isinstance(stats_raw, str) and stats_raw.strip():
+                        try:
+                            contact['github_stats'] = json.loads(stats_raw)
+                        except Exception:
+                            contact['github_stats'] = {}
+                    elif isinstance(stats_raw, dict):
+                        contact['github_stats'] = stats_raw
+                    else:
+                        contact['github_stats'] = {}
+                    contacts.append(contact)
+                return contacts
+        except Exception as e:
+            logger.error(f"Error listing participant contacts: {e}")
+            return []
     
     def save_ai_message_feedback(self, message_id: str, conversation_id: str, 
                                   feedback_type: str, rating: int = None, 

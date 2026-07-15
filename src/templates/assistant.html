@@ -300,7 +300,9 @@
             document.getElementById('typing-indicator').classList.remove('hidden');
 
             try {
-                // Call the AI endpoint
+                // Call the AI endpoint with timeout and robust parsing
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 20000); // 20s client-side timeout
                 const response = await fetch('/api/ai/chat', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -308,15 +310,35 @@
                         message: message,
                         history: conversationHistory.slice(-10),  // Last 10 messages for context
                         persona: currentSkin?.name || 'roger'
-                    })
+                    }),
+                    signal: controller.signal
                 });
+                clearTimeout(timeoutId);
 
-                const data = await response.json();
+                const contentType = response.headers.get('content-type') || '';
+                let data = null;
+                if (response.ok && contentType.includes('application/json')) {
+                    data = await response.json();
+                } else if (response.ok) {
+                    // Non-JSON successful response (unexpected); treat as text
+                    const text = await response.text();
+                    data = { response: text };
+                } else {
+                    // Error response; try to parse JSON error, else use text
+                    let errorText = 'Error contacting AI service';
+                    try {
+                        const errJson = contentType.includes('application/json') ? await response.json() : null;
+                        errorText = errJson?.error || errorText;
+                    } catch {
+                        try { errorText = await response.text(); } catch {}
+                    }
+                    throw new Error(errorText);
+                }
                 
                 // Hide typing indicator
                 document.getElementById('typing-indicator').classList.add('hidden');
 
-                if (data.response) {
+                if (data && data.response) {
                     addMessageToUI('assistant', data.response);
                     conversationHistory.push({ role: 'assistant', content: data.response });
                     saveConversation();
@@ -362,35 +384,36 @@
             sendMessage(new Event('submit'));
         }
 
-        // Speak response using voice API
+        // Speak response using voice API (client-side playback)
         async function speakResponse(text) {
+            const stopBtn = document.getElementById('stop-voice-btn');
             try {
                 const style = currentSkin?.voice?.style || 'droid';
-                // Show stop button
-                document.getElementById('stop-voice-btn').classList.remove('hidden');
-                
-                // Play signature sample first if available
-                if (currentSkin?.voice?.signature_phrase) {
-                    await fetch('/api/voice/test', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ signature: true, style: style })
-                    });
-                    await new Promise(r => setTimeout(r, 300));
-                }
-                
-                await fetch('/api/voice/test', {
+                stopBtn.classList.remove('hidden');
+
+                const resp = await fetch('/api/voice/speak', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ message: text, style: style, signature: false })
+                    body: JSON.stringify({ text, style })
                 });
-                // Hide stop button after speech completes
-                setTimeout(() => {
-                    document.getElementById('stop-voice-btn').classList.add('hidden');
-                }, 500);
+
+                if (!resp.ok) throw new Error('Voice request failed');
+
+                const blob = await resp.blob();
+                const url = URL.createObjectURL(blob);
+                const audio = new Audio(url);
+                audio.onended = () => {
+                    URL.revokeObjectURL(url);
+                    stopBtn.classList.add('hidden');
+                };
+                audio.onerror = () => {
+                    URL.revokeObjectURL(url);
+                    stopBtn.classList.add('hidden');
+                };
+                await audio.play();
             } catch (e) {
                 console.error('Voice error:', e);
-                document.getElementById('stop-voice-btn').classList.add('hidden');
+                stopBtn.classList.add('hidden');
             }
         }
 
@@ -542,21 +565,6 @@
                 }
             } catch (e) {
                 console.error('Test voice error:', e);
-            }
-        }
-
-        async function speakResponse(text) {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ 
-                        message: testMessage,
-                        style: style,
-                        signature: false,
-                        settings: settings
-                    })
-                });
-            } catch (e) {
-                alert('Voice test failed: ' + e.message);
             }
         }
 

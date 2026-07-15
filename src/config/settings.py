@@ -10,6 +10,23 @@ from pydantic import Field
 import yaml
 
 
+class VoiceSettings(BaseSettings):
+    """Voice system configuration for AI assistant."""
+    model_config = {'protected_namespaces': ()}
+    
+    model: str = Field(default="en_US-ryan-high", description="Voice model name (without extension)")
+    model_path: Optional[str] = Field(default=None, description="Path or directory to Piper voice model. Can be a directory or full file path.")
+    default_style: str = Field(default="droid", description="Default voice style/effect")
+    speed: float = Field(default=0.75, description="Voice speed adjustment")
+    pitch: float = Field(default=0.85, description="Voice pitch adjustment")
+    enabled: bool = Field(default=True, description="Enable voice system")
+    announce_on_startup: bool = Field(default=True, description="Announce on startup")
+    announce_on_collection: bool = Field(default=True, description="Announce on data collection")
+    announce_on_error: bool = Field(default=False, description="Announce on error")
+    wake_words: list = Field(default_factory=lambda: ["rogr", "roger"], description="Wake words for voice commands")
+    signature_phrase: str = Field(default="roger, roger", description="Signature phrase for announcements")
+
+
 class OllamaSettings(BaseSettings):
     """Ollama server configuration."""
     host: str = Field(default="pop-os.local", description="Ollama server host")
@@ -148,6 +165,7 @@ class Settings(BaseSettings):
     weather: WeatherSettings = Field(default_factory=WeatherSettings)
     music: MusicSettings = Field(default_factory=MusicSettings)
     dashboard: DashboardSettings = Field(default_factory=DashboardSettings)
+    voice: VoiceSettings = Field(default_factory=VoiceSettings)
     
     # Music OAuth shortcuts for easier access
     @property

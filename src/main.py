@@ -46,6 +46,68 @@ COMIC_RSS_FEEDS = {
     "peanuts": "https://www.comicsrss.com/rss/peanuts.rss",
 }
 
+# Local archive helper for comics
+def _load_archive_comic(comic_id: str, date: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """Load a comic entry from a local archive JSON or images directory.
+
+    - Looks in data/{comic_id}_archive.json (expects an object with `comics` list or a list).
+    - If `date` provided, returns matching entry; otherwise returns most recent entry.
+    - Normalizes image_url to be served via /api/comics/archive/{comic_id}/{filename} when local.
+    """
+    try:
+        archive_file = project_root / "data" / f"{comic_id}_archive.json"
+        comics: List[Dict[str, Any]] = []
+        if archive_file.exists():
+            with open(archive_file, 'r') as f:
+                payload = json.load(f)
+                if isinstance(payload, dict) and 'comics' in payload:
+                    comics = payload.get('comics', []) or []
+                elif isinstance(payload, list):
+                    comics = payload
+        # Fallback to local image directory listing
+        img_dir = project_root / "data" / "comics" / comic_id
+        if not comics and img_dir.exists():
+            for fp in sorted(img_dir.glob("*"), reverse=True):
+                if fp.is_file():
+                    comics.append({
+                        "date": fp.stem,
+                        "image_url": f"/api/comics/archive/{comic_id}/{fp.name}",
+                        "page_url": "",
+                        "title": f"{comic_id.title()}"
+                    })
+
+        if not comics:
+            return None
+
+        # Pick by date if requested
+        selected = None
+        if date:
+            for c in comics:
+                if str(c.get('date')) == date:
+                    selected = c
+                    break
+        if selected is None:
+            selected = comics[0]
+
+        image_url = selected.get('image_url', '')
+        # Normalize local path to served endpoint
+        if image_url.startswith('/data/comics/'):
+            filename = Path(image_url).name
+            image_url = f"/api/comics/archive/{comic_id}/{filename}"
+
+        return {
+            "series": comic_id,
+            "id": selected.get('id') or selected.get('date', datetime.utcnow().strftime('%Y-%m-%d')),
+            "title": selected.get('title') or f"{comic_id.title()}",
+            "date": selected.get('date', ''),
+            "image_url": image_url,
+            "link": selected.get('link') or selected.get('page_url') or '',
+            "attribution": selected.get('attribution', '')
+        }
+    except Exception as e:
+        logger.warning(f"Archive load failed for {comic_id}: {e}")
+        return None
+
 # Feeds known to return takedown/placeholder messages; keep catalogued but hide from UI lists
 COMIC_RSS_HIDDEN = {
     "calvin",
@@ -156,6 +218,58 @@ except ImportError as e:
 logging.basicConfig(level=logging.INFO)
 
 app = FastAPI(title="Simple Personal Dashboard")
+
+# ================= AI Voice Settings API =================
+from database import DatabaseManager
+from config.settings import Settings
+from fastapi import Body
+
+@app.get("/api/settings/voice")
+async def get_voice_settings():
+    """Get AI voice configuration settings."""
+    db = DatabaseManager()
+    settings = Settings()
+    # Get from DB, fallback to settings
+    model_path = db.get_setting('voice_model_path', None)
+    model = settings.voice.model
+    default_style = settings.voice.default_style
+    speed = settings.voice.speed
+    pitch = settings.voice.pitch
+    enabled = settings.voice.enabled
+    return {
+        "model": model,
+        "model_path": model_path,
+        "default_style": default_style,
+        "speed": speed,
+        "pitch": pitch,
+        "enabled": enabled
+    }
+
+@app.post("/api/settings/voice")
+async def update_voice_settings(
+    model: str = Body(None, embed=True, description="Voice model name (without extension)"),
+    model_path: str = Body(None, embed=True, description="Path or directory to Piper voice model")
+):
+    """Update AI voice model name and/or path setting."""
+    db = DatabaseManager()
+    result = {}
+    if model is not None:
+        db.save_setting('voice_model', model)
+        result['voice_model'] = model
+    if model_path is not None:
+        db.save_setting('voice_model_path', model_path)
+        result['voice_model_path'] = model_path
+    if not result:
+        return {"success": False, "error": "No model or model_path provided."}
+    return {"success": True, **result}
+
+@app.delete("/api/settings/voice")
+async def delete_voice_settings():
+    """Delete AI voice model and model_path settings from the database."""
+    db = DatabaseManager()
+    db.delete_setting('voice_model')
+    db.delete_setting('voice_model_path')
+    return {"success": True, "message": "Voice model and model_path deleted."}
 
 # Register custom module routers
 try:
@@ -592,6 +706,10 @@ async def get_comic_by_rss(series: str):
             "link": link,
             "attribution": "© comicsrss feed"
         }
+        if not image_url:
+            fallback = _load_archive_comic(series_key)
+            if fallback:
+                return {"success": True, "comic": fallback}
         return {"success": True, "comic": comic}
     except Exception as e:
         logger.error(f"Comic RSS error for {series_key}: {e}")
@@ -4510,11 +4628,13 @@ async def update_voice_settings(request: Request):
             if 'pitch' in current:
                 voice_module._voice.pitch = current['pitch']
             if 'default_style' in current:
-                voice_module._voice.style = current['default_style']
+                voice_module._voice.default_style = current['default_style']
+            if 'volume' in current:
+                voice_module._voice.volume = current['volume']
             
             # Clear cache so new settings take effect
             voice_module._voice.clear_cache()
-            logger.info(f"Voice settings updated: speed={voice_module._voice.speed}, pitch={voice_module._voice.pitch}, style={voice_module._voice.style}")
+            logger.info(f"Voice settings updated: speed={voice_module._voice.speed}, pitch={voice_module._voice.pitch}, style={voice_module._voice.default_style}, volume={voice_module._voice.volume}")
     except Exception as e:
         logger.warning(f"Could not update voice instance: {e}")
     
@@ -5970,11 +6090,19 @@ async def chat_with_ai(request: Request):
         
         # Use centralized AI service
         ai_service = get_ai_service(db, settings)
-        result = await ai_service.chat(
-            message=message,
-            conversation_id=conversation_id,
-            include_context=True
-        )
+        import asyncio as _asyncio
+        try:
+            result = await _asyncio.wait_for(
+                ai_service.chat(
+                    message=message,
+                    conversation_id=conversation_id,
+                    include_context=True
+                ),
+                timeout=20.0
+            )
+        except _asyncio.TimeoutError:
+            logger.warning("AI chat timed out")
+            return {"error": "AI response timed out", "success": False}
         
         if not result.get('success'):
             return {"error": result.get('error', 'Unknown error')}
@@ -8254,7 +8382,7 @@ async def monitor_all_dashboards(dashboard_name: str):
     """Monitor all dashboards from primary dashboard"""
     try:
         # Get all dashboards from database
-        dashboards = get_dashboard_projects()
+        dashboards = db.get_dashboard_projects(active_only=False)
         monitored_dashboards = []
         
         for dashboard in dashboards:
@@ -8526,18 +8654,38 @@ async def speak_text(request: Request):
         if not text:
             return {"success": False, "error": "No text provided"}
         
+        logger.info(f"Voice speak request: text={text[:50]}..., style={style}")
+        
         # Get voice style from skin if not provided
         if not style:
             from config.skin_loader import get_active_skin
             skin = get_active_skin()
-            style = skin.voice.get('style', 'droid') if hasattr(skin, 'voice') else 'droid'
+            # Handle both dict and VoiceSettings object
+            if hasattr(skin, 'voice'):
+                voice_config = skin.voice
+                if hasattr(voice_config, 'style'):
+                    style = voice_config.style
+                elif isinstance(voice_config, dict):
+                    style = voice_config.get('style', 'droid')
+                else:
+                    style = 'droid'
+            else:
+                style = 'droid'
+        
+        logger.info(f"Voice style resolved to: {style}")
         
         # Use voice system to generate audio
         import voice as voice_module
+        logger.info(f"Voice module loaded, _voice exists: {voice_module._voice is not None}")
+        
         if voice_module._voice:
+            logger.info(f"Generating voice with style={style}")
             # Generate the audio file
             wav_path = voice_module._voice.generate(text, style=style)
+            logger.info(f"Generation result: {wav_path}")
+            
             if wav_path and wav_path.exists():
+                logger.info(f"Returning audio file: {wav_path}")
                 # Return the audio file
                 from fastapi.responses import FileResponse
                 return FileResponse(
@@ -8545,11 +8693,36 @@ async def speak_text(request: Request):
                     media_type="audio/wav",
                     filename="speech.wav"
                 )
+            else:
+                logger.error(f"Generated path does not exist or is None: {wav_path}")
+        else:
+            logger.error("Voice module _voice is None")
         
         return {"success": False, "error": "Voice generation failed"}
-        
     except Exception as e:
-        logger.error(f"Voice speak error: {e}")
+        logger.error(f"Voice speak error: {e}", exc_info=True)
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/voice/cache/clear")
+async def clear_voice_cache():
+    """Clear all cached voice WAV files to free disk space."""
+    try:
+        import voice as voice_module
+        v = voice_module.get_voice()
+        v.clear_cache()
+        # Also clear legacy cache location at repo root if different
+        from pathlib import Path
+        try:
+            repo_root = Path(__file__).resolve().parent.parent
+            legacy_cache = repo_root / "data" / "voice_cache"
+            for f in legacy_cache.glob("*.wav"):
+                f.unlink(missing_ok=True)
+        except Exception:
+            pass
+        return {"success": True}
+    except Exception as e:
+        logger.error(f"Clear voice cache error: {e}")
         return {"success": False, "error": str(e)}
 
 
@@ -9229,10 +9402,22 @@ async def get_comic_daily(comic_id: str):
             return await get_peanuts()
         elif comic_id in ["bloomcounty", "bloom-county"]:
             # Try RSS feed for Bloom County
-            return await get_comic_by_rss("bloom-county")
+            res = await get_comic_by_rss("bloom-county")
+            if res.get("success") and res.get("comic", {}).get("image_url"):
+                return res
+            fallback = _load_archive_comic("bloomcounty")
+            if fallback:
+                return {"success": True, "comic": fallback}
+            return res
         else:
             # Try RSS feed with comic ID
-            return await get_comic_by_rss(comic_id)
+            res = await get_comic_by_rss(comic_id)
+            if res.get("success") and res.get("comic", {}).get("image_url"):
+                return res
+            fallback = _load_archive_comic(comic_id)
+            if fallback:
+                return {"success": True, "comic": fallback}
+            return res
             
     except Exception as e:
         logger.error(f"Comic daily error for {comic_id}: {e}")
@@ -9308,6 +9493,10 @@ async def get_calvin_daily():
             "link": link,
             "attribution": "© Andrews McMeel / comicsrss.com"
         }
+        if not image_url:
+            fallback = _load_archive_comic("calvin")
+            if fallback:
+                return {"success": True, "comic": fallback}
         return {"success": True, "comic": comic}
     except Exception as e:
         logger.error(f"Calvin daily error: {e}")
@@ -9327,10 +9516,24 @@ async def get_peanuts(date: Optional[str] = None, save: bool = False):
                 dt = None
         collector = PeanutsCollector()
         res = await collector.get_comic(date=dt, save=save)
+        if res.get("success") and res.get("comic", {}).get("image_url"):
+            return res
+        fallback = _load_archive_comic("peanuts")
+        if fallback:
+            return {"success": True, "comic": fallback}
         return res
     except Exception as e:
         logger.error(f"Peanuts error: {e}")
         return {"success": False, "error": str(e)}
+
+
+@app.get("/api/comics/archive/{comic_id}/{filename}")
+async def serve_archive_comic_image(comic_id: str, filename: str):
+    """Serve cached archive images for non-Garfield comics."""
+    path = project_root / "data" / "comics" / comic_id / filename
+    if not path.exists() or not path.is_file():
+        raise HTTPException(status_code=404, detail="Comic image not found")
+    return FileResponse(path)
 
 @app.get("/api/comics/favorites")
 async def get_comic_favorites():
@@ -9463,6 +9666,18 @@ async def startup_event():
         
         # Load voice configuration from settings
         voice_config = getattr(settings, 'voice', {})
+        # Support both dict and Pydantic BaseSettings objects
+        if voice_config and not isinstance(voice_config, dict):
+            try:
+                if hasattr(voice_config, 'model_dump'):
+                    voice_config = voice_config.model_dump()
+                elif hasattr(voice_config, 'dict'):
+                    voice_config = voice_config.dict()
+                else:
+                    voice_config = {k: getattr(voice_config, k) for k in dir(voice_config) if not k.startswith('_')}
+            except Exception as conv_err:
+                logger.warning(f"Could not convert voice settings to dict: {conv_err}")
+                voice_config = {}
         if not voice_config:
             # Fallback to default config
             voice_config = {

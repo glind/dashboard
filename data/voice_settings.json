@@ -6,10 +6,15 @@
   "speaking_rate": 1.0,
   "auto_read_jokes": false,
   "default_style": "droid",
+<<<<<<< HEAD
   "speed": 0.75,
   "pitch": 0.85,
+=======
+  "speed": 0.85,
+  "pitch": 0.8,
+>>>>>>> origin/master
   "use_authentic_samples": true,
-  "sarcasm_enabled": true,
-  "sarcasm_chance": 0.5,
+  "sarcasm_enabled": false,
+  "sarcasm_chance": 0.4,
   "signature_chance": 0.3
 }

@@ -66,8 +66,8 @@ voice:
     highpass_freq: 100
     lowpass_freq: 8000
     echo_gain: 0.15
-    vibrato_freq: 0
-    vibrato_depth: 0.0
+    vibrato_freq: 2
+    vibrato_depth: 0.05
   use_authentic_samples: false
   samples_dir: "data/voice_models/alice"
 

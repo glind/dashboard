@@ -5,7 +5,7 @@
   "tts_style": "droid",
   "speaking_rate": 1.0,
   "auto_read_jokes": false,
-  "default_style": "droid",
+  "default_style": "demon",
   "speed": 0.85,
   "pitch": 0.8,
   "use_authentic_samples": true,

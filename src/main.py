@@ -249,6 +249,14 @@ try:
 except ImportError as e:
     logging.warning(f"Could not load tasks module: {e}")
 
+# Register the token-protected Assistant API (/api/v1/assistant)
+try:
+    from modules.assistant_api.endpoints import router as assistant_api_router
+    app.include_router(assistant_api_router)
+    logging.info("✅ Assistant API registered")
+except ImportError as e:
+    logging.warning(f"Could not load assistant API: {e}")
+
 # Register remaining custom module routers
 try:
     from modules.music_news.endpoints import router as music_news_router

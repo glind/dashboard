@@ -1,10 +1,43 @@
 # Optional voice system dependencies
 # These are NOT included in main requirements.txt because they require system packages
 
+# ============================================
 # Voice input (microphone/speech recognition)
-# Requires: sudo apt install portaudio19-dev
+# ============================================
+# Requires: sudo apt install portaudio19-dev (Linux) or brew install portaudio (macOS)
 SpeechRecognition==3.10.0
 PyAudio==0.2.14
 
-# Note: Voice output (TTS) works without these packages
+# ============================================
+# PersonaPlex (NVIDIA full-duplex voice AI)
+# ============================================
+# Requires:
+#   - sudo apt install libopus-dev (Linux) or brew install opus (macOS)
+#   - HuggingFace account with accepted model license
+#   - Run: ./scripts/setup_personaplex.sh
+#
+# PersonaPlex provides:
+#   - Real-time speech-to-speech conversation
+#   - Full duplex (can interrupt and respond naturally)
+#   - Voice conditioning (16 voice presets)
+#   - Persona control via text prompts
+#
+websockets>=11.0
+
+# Note: The personaplex moshi package is installed separately by setup_personaplex.sh
+# It requires NVIDIA GPU with 8GB+ VRAM (or use --cpu-offload for CPU)
+
+# ============================================
+# Enable voice system:
+#   export PERSONAPLEX_ENABLED=true
+#   export HF_TOKEN=your_huggingface_token
+# ============================================
+# Note: Piper TTS works without these packages as it's a separate binary
 # Only voice commands (listening) require PyAudio
+
+# ============================================
+# Optional Coqui TTS (offline Python engine)
+# ============================================
+# Install when using voice.engine=coqui in config.yaml
+# NOTE: This package is large and installs torch/audio dependencies.
+# coqui-tts==0.27.5

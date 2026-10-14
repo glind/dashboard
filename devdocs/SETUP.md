@@ -165,7 +165,7 @@ pip install -r requirements.txt --upgrade
 ### Database Errors
 ```bash
 # Reinitialize database
-rm data/dashboard.db
+rm dashboard.db
 python3 -c "from src.database import db; db.init_db()"
 ```
 

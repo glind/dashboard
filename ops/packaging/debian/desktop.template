@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name={{DISPLAY_NAME}}
+Comment=Launch Personal Dashboard desktop app
+Exec={{PACKAGE_NAME}}
+Icon={{PACKAGE_NAME}}
+Terminal=false
+Categories=Office;Productivity;
+StartupNotify=true

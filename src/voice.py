@@ -12,10 +12,30 @@ from typing import Optional, Literal
 import hashlib
 import logging
 import sys
+import os
 import time
 from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
+
+# Text sanitizers shared with the PersonaPlex backend (strip markdown, URLs, hashes, ...)
+try:
+    from voice_personaplex import strip_markdown, sanitize_text_for_speech
+except ImportError:  # pragma: no cover - imported as src.voice
+    from src.voice_personaplex import strip_markdown, sanitize_text_for_speech
+
+
+def _personaplex_enabled() -> bool:
+    """PersonaPlex (NVIDIA full-duplex voice) is opt-in via PERSONAPLEX_ENABLED=true."""
+    return os.environ.get("PERSONAPLEX_ENABLED", "false").lower() == "true"
+
+
+def _personaplex_module():
+    try:
+        import voice_personaplex as _pp
+    except ImportError:  # pragma: no cover
+        from src import voice_personaplex as _pp
+    return _pp
 
 # Voice styles available
 VoiceStyle = Literal["clean", "droid", "radio", "pa_system", "demon", "gothic", "alice", "jedi"]
@@ -729,7 +749,10 @@ class VoiceSystem:
         )
         text = emoji_pattern.sub('', text)
         
-        # Remove markdown formatting
+        # Remove markdown, URLs, emails, hashes, UUIDs, paths, ... (shared sanitizer)
+        text = sanitize_text_for_speech(text)
+        
+        # Remove any leftover markdown formatting
         text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)  # bold
         text = re.sub(r'\*(.+?)\*', r'\1', text)      # italic
         text = re.sub(r'`(.+?)`', r'\1', text)        # code
@@ -1194,8 +1217,14 @@ class VoiceSystem:
 _voice: Optional[VoiceSystem] = None
 
 def get_voice() -> VoiceSystem:
-    """Get or create the global voice system instance"""
+    """Get or create the global voice system instance.
+
+    Uses the Piper "Roger" voice by default; when PERSONAPLEX_ENABLED=true the
+    PersonaPlex backend (voice_personaplex) is used instead.
+    """
     global _voice
+    if _personaplex_enabled():
+        return _personaplex_module().get_voice()
     if _voice is None:
         # Load model and model_path from database first
         try:
@@ -1267,6 +1296,40 @@ def say(text: str, **kwargs) -> bool:
 def announce(text: str, **kwargs) -> bool:
     """Convenience function: say with 'roger, roger' signature"""
     return get_voice().announce(text, **kwargs)
+
+
+async def init_voice(**kwargs) -> bool:
+    """Initialize the voice backend (PersonaPlex when enabled, otherwise Piper)."""
+    if _personaplex_enabled():
+        return await _personaplex_module().init_voice(**kwargs)
+    try:
+        return get_voice() is not None
+    except Exception as e:
+        logger.warning(f"Voice init failed: {e}")
+        return False
+
+
+async def shutdown_voice():
+    """Shutdown the voice backend."""
+    global _voice
+    if _personaplex_enabled():
+        await _personaplex_module().shutdown_voice()
+        return
+    _voice = None
+
+
+def _personaplex_attr(name, default):
+    try:
+        return getattr(_personaplex_module(), name)
+    except Exception:
+        return default
+
+
+# PersonaPlex configuration types/constants, re-exported for voice_helper / API callers
+VoiceConfig = _personaplex_attr("VoiceConfig", None)
+VoicePreset = _personaplex_attr("VoicePreset", str)
+PERSONA_PROMPTS = _personaplex_attr("PERSONA_PROMPTS", {})
+STYLE_TO_PRESET = _personaplex_attr("STYLE_TO_PRESET", {})
 
 
 # Example usage

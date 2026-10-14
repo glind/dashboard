@@ -13,7 +13,7 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
 import json
 import os
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urljoin
 import re
 from dataclasses import dataclass
 import sqlite3
@@ -29,6 +29,7 @@ class NewsArticle:
     source: str
     published_date: datetime
     topics: List[str]
+    image_url: Optional[str] = None
     relevance_score: float = 0.0
     user_feedback: Optional[str] = None  # 'positive', 'negative', None
 
@@ -283,6 +284,7 @@ class NewsCollector:
                         
                         # Determine relevant topics
                         article_topics = self._identify_topics(title + ' ' + snippet)
+                        image_url = self._extract_entry_image(entry, base_url=url)
                         
                         if title and url and article_topics:
                             article = NewsArticle(
@@ -291,7 +293,8 @@ class NewsCollector:
                                 snippet=snippet[:300] + '...' if len(snippet) > 300 else snippet,
                                 source=self._extract_domain(feed_url),
                                 published_date=published_date,
-                                topics=article_topics
+                                topics=article_topics,
+                                image_url=image_url
                             )
                             articles.append(article)
                             
@@ -345,6 +348,7 @@ class NewsCollector:
                                     
                                     # Identify topics
                                     article_topics = self._identify_topics(title + ' ' + description)
+                                    image_url = article_data.get('urlToImage')
                                     
                                     if title and url and article_topics:
                                         article = NewsArticle(
@@ -353,7 +357,8 @@ class NewsCollector:
                                             snippet=description[:300] + '...' if len(description) > 300 else description,
                                             source=source,
                                             published_date=published_date,
-                                            topics=article_topics
+                                            topics=article_topics,
+                                            image_url=image_url
                                         )
                                         articles.append(article)
                             
@@ -406,6 +411,7 @@ class NewsCollector:
                         # Check if article is relevant to our topics
                         content_text = title + ' ' + summary
                         relevant_topics = self._identify_topics(content_text)
+                        image_url = self._extract_entry_image(entry, base_url=url)
                         
                         if relevant_topics:  # Only include if relevant to our topics
                             # Parse date
@@ -426,7 +432,8 @@ class NewsCollector:
                                     snippet=summary[:300] + '...' if len(summary) > 300 else summary,
                                     source=source,
                                     published_date=published_date,
-                                    topics=relevant_topics
+                                    topics=relevant_topics,
+                                    image_url=image_url
                                 )
                                 articles.append(article)
                         
@@ -461,6 +468,7 @@ class NewsCollector:
                                     # Check relevance
                                     content_text = title + ' ' + summary
                                     relevant_topics = self._identify_topics(content_text)
+                                    image_url = self._extract_entry_image(entry, base_url=url)
                                     
                                     # Include if relevant or from topic-specific subreddit
                                     if relevant_topics or topic in ['oregon_state', 'portland_timbers', 'star_wars', 'star_trek']:
@@ -479,7 +487,8 @@ class NewsCollector:
                                                 snippet=summary[:300] + '...' if len(summary) > 300 else summary,
                                                 source=f"Reddit r/{subreddit}",
                                                 published_date=published_date,
-                                                topics=relevant_topics or [topic]
+                                                topics=relevant_topics or [topic],
+                                                image_url=image_url
                                             )
                                             articles.append(article)
                             
@@ -597,6 +606,91 @@ class NewsCollector:
         except:
             return 'Unknown'
 
+    def _extract_entry_image(self, entry: Any, base_url: str = "") -> Optional[str]:
+        """Extract best-available image URL from RSS/Atom entry metadata."""
+        candidates: List[str] = []
+
+        media_content = getattr(entry, 'media_content', None) or entry.get('media_content', [])
+        for media in media_content:
+            url = (media or {}).get('url')
+            if url:
+                candidates.append(url)
+
+        media_thumbnail = getattr(entry, 'media_thumbnail', None) or entry.get('media_thumbnail', [])
+        for media in media_thumbnail:
+            url = (media or {}).get('url')
+            if url:
+                candidates.append(url)
+
+        enclosures = getattr(entry, 'enclosures', None) or entry.get('enclosures', [])
+        for enclosure in enclosures:
+            mime_type = ((enclosure or {}).get('type') or '').lower()
+            href = (enclosure or {}).get('href') or (enclosure or {}).get('url')
+            if href and (not mime_type or mime_type.startswith('image/')):
+                candidates.append(href)
+
+        links = getattr(entry, 'links', None) or entry.get('links', [])
+        for link in links:
+            mime_type = ((link or {}).get('type') or '').lower()
+            href = (link or {}).get('href')
+            rel = ((link or {}).get('rel') or '').lower()
+            if href and (mime_type.startswith('image/') or rel == 'enclosure'):
+                candidates.append(href)
+
+        html_fields = [
+            getattr(entry, 'summary', None),
+            entry.get('summary'),
+            getattr(entry, 'description', None),
+            entry.get('description')
+        ]
+        content_blocks = getattr(entry, 'content', None) or entry.get('content', [])
+        for content_block in content_blocks:
+            html_fields.append((content_block or {}).get('value'))
+
+        for html_blob in html_fields:
+            image_from_html = self._extract_image_from_html(html_blob or '')
+            if image_from_html:
+                candidates.append(image_from_html)
+
+        for candidate in candidates:
+            if not candidate:
+                continue
+            candidate = candidate.strip()
+            if candidate.startswith('//'):
+                candidate = f"https:{candidate}"
+            if base_url:
+                candidate = urljoin(base_url, candidate)
+            if self._is_valid_image_url(candidate):
+                return candidate
+        return None
+
+    def _extract_image_from_html(self, html: str) -> Optional[str]:
+        """Extract first image URL from HTML content."""
+        if not html:
+            return None
+
+        match = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', html, re.IGNORECASE)
+        if match:
+            return match.group(1)
+
+        meta_match = re.search(r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']', html, re.IGNORECASE)
+        if meta_match:
+            return meta_match.group(1)
+
+        return None
+
+    def _is_valid_image_url(self, url: str) -> bool:
+        """Basic image URL validation to avoid non-image links."""
+        if not url or not url.startswith(('http://', 'https://')):
+            return False
+
+        lowered = url.lower()
+        if any(ext in lowered for ext in ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.avif']):
+            return True
+
+        # Allow image CDN/transformation URLs even without explicit file extension.
+        return any(hint in lowered for hint in ['/image', 'images.', 'img.', 'media.', 'photo', 'thumbnail'])
+
     async def collect_data(self) -> Dict[str, Any]:
         """Collect news data and save to database."""
         try:
@@ -628,6 +722,7 @@ class NewsCollector:
                     'url': article.url,
                     'snippet': article.snippet,
                     'source': article.source,
+                    'image_url': article.image_url,
                     'published_date': article.published_date.isoformat(),
                     'topics': article.topics,
                     'relevance_score': article.relevance_score,
@@ -646,6 +741,7 @@ class NewsCollector:
                         'url': article.url,
                         'snippet': article.snippet,
                         'source': article.source,
+                        'image_url': article.image_url,
                         'published_date': article.published_date.isoformat(),
                         'topics': article.topics,
                         'relevance_score': article.relevance_score,

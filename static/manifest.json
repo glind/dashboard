@@ -1,0 +1,21 @@
+{
+  "name": "Personal Dashboard",
+  "short_name": "Dashboard",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#18181b",
+  "theme_color": "#2563eb",
+  "description": "A personal dashboard for productivity, news, music, and more.",
+  "icons": [
+    {
+      "src": "/assets/images/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/assets/images/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

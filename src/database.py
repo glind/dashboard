@@ -42,6 +42,17 @@ class DatabaseManager:
         """Initialize database manager."""
         self.db_path = db_path
         self.init_database()
+
+    def _apply_connection_pragmas(self, conn: sqlite3.Connection):
+        """Apply pragmatic SQLite settings for dashboard read/write workloads."""
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA synchronous=NORMAL")
+            conn.execute("PRAGMA temp_store=MEMORY")
+            conn.execute("PRAGMA cache_size=-8000")
+            conn.execute("PRAGMA busy_timeout=5000")
+        except Exception as e:
+            logger.warning(f"Could not apply SQLite pragmas: {e}")
     
     def init_database(self):
         """Initialize database tables."""
@@ -52,6 +63,7 @@ class DatabaseManager:
             
             conn = sqlite3.connect(self.db_path)
             conn.row_factory = sqlite3.Row
+            self._apply_connection_pragmas(conn)
             cursor = conn.cursor()
             
             # Credentials table
@@ -139,6 +151,10 @@ class DatabaseManager:
                     category TEXT,
                     source TEXT NOT NULL,
                     source_id TEXT,
+                    source_title TEXT,
+                    source_url TEXT,
+                    source_preview TEXT,
+                    creation_reason TEXT,
                     status TEXT DEFAULT 'pending',
                     assigned_to_service TEXT,
                     requires_response INTEGER DEFAULT 0,
@@ -177,6 +193,7 @@ class DatabaseManager:
                     title TEXT NOT NULL,
                     url TEXT NOT NULL,
                     snippet TEXT,
+                    image_url TEXT,
                     source TEXT,
                     published_date TIMESTAMP,
                     topics TEXT,
@@ -313,6 +330,88 @@ class DatabaseManager:
                 )
             """)
             
+            # Music playlists table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS music_playlists (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    mood TEXT,
+                    artists TEXT,
+                    genres TEXT,
+                    tracks TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Liked songs table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS liked_songs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    artist TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    youtube_id TEXT,
+                    liked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(artist, title)
+                )
+            """)
+            
+            # Deleted tasks table - tracks tasks deleted by user to prevent re-import
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS deleted_tasks (
+                    id TEXT PRIMARY KEY,
+                    source TEXT NOT NULL,
+                    source_id TEXT,
+                    original_title TEXT,
+                    original_url TEXT,
+                    deleted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    reason TEXT DEFAULT 'user-deleted'
+                )
+            """)
+
+            # Participant contact intelligence mapping table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS participant_contacts (
+                    email TEXT PRIMARY KEY,
+                    display_name TEXT,
+                    company TEXT,
+                    linkedin_url TEXT,
+                    linkedin_image_url TEXT,
+                    github_url TEXT,
+                    github_stats_json TEXT,
+                    enrichment_source TEXT,
+                    enrichment_refreshed_at TIMESTAMP,
+                    image_url TEXT,
+                    relationship_notes TEXT,
+                    notes TEXT,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            # Migration: enrich participant contact cache fields when upgrading existing DBs.
+            participant_contact_migrations = [
+                ("linkedin_image_url", "TEXT"),
+                ("github_stats_json", "TEXT"),
+                ("enrichment_source", "TEXT"),
+                ("enrichment_refreshed_at", "TIMESTAMP"),
+            ]
+            for column_name, column_type in participant_contact_migrations:
+                try:
+                    cursor.execute(f"ALTER TABLE participant_contacts ADD COLUMN {column_name} {column_type}")
+                except sqlite3.OperationalError:
+                    pass
+
+            # Jokes table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS jokes (
+                    joke_id TEXT PRIMARY KEY,
+                    is_liked INTEGER DEFAULT 0,
+                    liked_at TIMESTAMP,
+                    fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
             # Add new columns if they don't exist (migration)
             try:
                 cursor.execute("ALTER TABLE dashboard_projects ADD COLUMN production_url TEXT")
@@ -323,6 +422,19 @@ class DatabaseManager:
                 cursor.execute("ALTER TABLE dashboard_projects ADD COLUMN api_url TEXT")
             except sqlite3.OperationalError:
                 pass  # Column already exists
+
+            # Migration: Ensure universal_todos has task provenance/detail fields
+            todo_migrations = [
+                ("source_title", "TEXT"),
+                ("source_url", "TEXT"),
+                ("source_preview", "TEXT"),
+                ("creation_reason", "TEXT"),
+            ]
+            for column_name, column_type in todo_migrations:
+                try:
+                    cursor.execute(f"ALTER TABLE universal_todos ADD COLUMN {column_name} {column_type}")
+                except sqlite3.OperationalError:
+                    pass
             
             # Create indexes for better performance
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_collected_data_service_date ON collected_data(service_name, collection_date)")
@@ -335,6 +447,11 @@ class DatabaseManager:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_todos_priority ON universal_todos(priority)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_todos_status ON universal_todos(status)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_todos_source ON universal_todos(source)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_deleted_tasks_source ON deleted_tasks(source)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_deleted_tasks_source_id ON deleted_tasks(source_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_deleted_tasks_deleted_at ON deleted_tasks(deleted_at)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_participant_contacts_company ON participant_contacts(company)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_participant_contacts_updated_at ON participant_contacts(updated_at)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_news_articles_liked ON news_articles(is_liked)")
             
             # Migration: Add is_read column to news_articles if it doesn't exist
@@ -343,6 +460,13 @@ class DatabaseManager:
             except sqlite3.OperationalError:
                 logger.info("Adding is_read column to news_articles table")
                 cursor.execute("ALTER TABLE news_articles ADD COLUMN is_read INTEGER DEFAULT 0")
+
+            # Migration: Add image_url column to news_articles if it doesn't exist
+            try:
+                cursor.execute("SELECT image_url FROM news_articles LIMIT 1")
+            except sqlite3.OperationalError:
+                logger.info("Adding image_url column to news_articles table")
+                cursor.execute("ALTER TABLE news_articles ADD COLUMN image_url TEXT")
             
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_news_articles_read ON news_articles(is_read)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_music_content_liked ON music_content(is_liked)")
@@ -357,6 +481,44 @@ class DatabaseManager:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_user_feedback_type ON user_feedback(feedback_type)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_user_feedback_item ON user_feedback(item_type, item_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_user_feedback_timestamp ON user_feedback(feedback_timestamp)")
+
+            # Migration: keep vanity_alerts schema compatible across old/new collectors
+            vanity_columns = set()
+            try:
+                cursor.execute("PRAGMA table_info(vanity_alerts)")
+                vanity_columns = {row[1] for row in cursor.fetchall()}
+            except Exception:
+                vanity_columns = set()
+
+            vanity_migrations = {
+                'content': "ALTER TABLE vanity_alerts ADD COLUMN content TEXT",
+                'sentiment': "ALTER TABLE vanity_alerts ADD COLUMN sentiment TEXT DEFAULT NULL",
+                'is_dismissed': "ALTER TABLE vanity_alerts ADD COLUMN is_dismissed INTEGER DEFAULT 0",
+            }
+            for column_name, alter_sql in vanity_migrations.items():
+                if column_name not in vanity_columns:
+                    try:
+                        cursor.execute(alter_sql)
+                    except sqlite3.OperationalError:
+                        pass
+            
+            # Scanned sources tracking table - prevents rescanning same items
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS scanned_sources (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    source_type TEXT NOT NULL,
+                    source_id TEXT NOT NULL,
+                    item_hash TEXT,
+                    scanned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    tasks_found INTEGER DEFAULT 0,
+                    tasks_created INTEGER DEFAULT 0,
+                    dismissed INTEGER DEFAULT 0,
+                    UNIQUE(source_type, source_id)
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_scanned_sources_type ON scanned_sources(source_type)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_scanned_sources_id ON scanned_sources(source_type, source_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_scanned_sources_dismissed ON scanned_sources(dismissed)")
             
             # AI Assistant tables
             cursor.execute("""
@@ -676,6 +838,92 @@ class DatabaseManager:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_app_config_category ON app_config(category)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_app_config_key ON app_config(config_key)")
 
+            # Focus Playlists - Mood Presets
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS mood_presets (
+                    id TEXT PRIMARY KEY,
+                    name TEXT UNIQUE NOT NULL,
+                    description TEXT,
+                    energy_level INTEGER DEFAULT 5,
+                    genres TEXT,
+                    tempo_range TEXT,
+                    instrumental_preference TEXT,
+                    default_duration_minutes INTEGER DEFAULT 60,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Focus Playlists - Main Playlist Table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS focus_playlists (
+                    id TEXT PRIMARY KEY,
+                    user_id TEXT DEFAULT 'default',
+                    title TEXT NOT NULL,
+                    mood TEXT,
+                    description TEXT,
+                    duration_minutes INTEGER,
+                    source TEXT DEFAULT 'buildly',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Focus Playlists - Tracks
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS focus_playlist_tracks (
+                    id TEXT PRIMARY KEY,
+                    playlist_id TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    artist TEXT NOT NULL,
+                    album TEXT,
+                    duration_seconds INTEGER,
+                    position INTEGER NOT NULL,
+                    youtube_video_id TEXT,
+                    spotify_track_id TEXT,
+                    apple_music_track_id TEXT,
+                    match_confidence REAL DEFAULT 0.0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (playlist_id) REFERENCES focus_playlists(id),
+                    UNIQUE(playlist_id, position)
+                )
+            """)
+            
+            # Focus Playlists - User Music Connections (OAuth Tokens)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS user_music_connections (
+                    id TEXT PRIMARY KEY,
+                    user_id TEXT DEFAULT 'default',
+                    provider TEXT NOT NULL,
+                    access_token TEXT,
+                    refresh_token TEXT,
+                    token_expires_at TIMESTAMP,
+                    provider_user_id TEXT,
+                    is_default INTEGER DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(user_id, provider)
+                )
+            """)
+            
+            # Focus Playlists - Sync Jobs
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS sync_jobs (
+                    id TEXT PRIMARY KEY,
+                    user_id TEXT DEFAULT 'default',
+                    playlist_id TEXT NOT NULL,
+                    provider TEXT NOT NULL,
+                    status TEXT DEFAULT 'pending',
+                    external_playlist_id TEXT,
+                    matched_tracks INTEGER DEFAULT 0,
+                    failed_tracks INTEGER DEFAULT 0,
+                    error_message TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (playlist_id) REFERENCES focus_playlists(id),
+                    UNIQUE(playlist_id, provider)
+                )
+            """)
+
             # AI Assistant indexes
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_ai_providers_active ON ai_providers(is_active)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_ai_providers_default ON ai_providers(is_default)")
@@ -721,6 +969,7 @@ class DatabaseManager:
         """Get database connection with automatic cleanup."""
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row  # Enable column access by name
+        self._apply_connection_pragmas(conn)
         try:
             yield conn
         finally:
@@ -1451,19 +1700,80 @@ class DatabaseManager:
             logger.error(f"Error saving email: {e}")
             return False
     
+    def is_task_deleted(self, task_id: str) -> bool:
+        """Check if a task has been deleted by the user."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT id FROM deleted_tasks WHERE id = ?", (task_id,))
+                return cursor.fetchone() is not None
+        except Exception as e:
+            logger.error(f"Error checking if task is deleted: {e}")
+            return False
+    
+    def record_task_deletion(self, task_id: str, source: str, source_id: str = None, 
+                           original_title: str = None, original_url: str = None) -> bool:
+        """Record a task deletion to prevent re-importing from sources."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT OR REPLACE INTO deleted_tasks 
+                    (id, source, source_id, original_title, original_url, deleted_at, reason)
+                    VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, 'user-deleted')
+                """, (task_id, source, source_id, original_title, original_url))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error recording task deletion: {e}")
+            return False
+    
+    def get_deleted_task_ids(self, source: str = None) -> List[str]:
+        """Get list of deleted task IDs to prevent re-import."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                if source:
+                    cursor.execute("SELECT id FROM deleted_tasks WHERE source = ?", (source,))
+                else:
+                    cursor.execute("SELECT id FROM deleted_tasks")
+                return [row[0] for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Error getting deleted task IDs: {e}")
+            return []
+    
+    def restore_deleted_task(self, task_id: str) -> bool:
+        """Remove a task from the deleted list (restore it)."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM deleted_tasks WHERE id = ?", (task_id,))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error restoring deleted task: {e}")
+            return False
+    
     def save_todo(self, todo_data: Dict[str, Any]) -> bool:
         """Save a todo item to the universal todos table."""
         try:
+            task_id = todo_data.get('id')
+            
+            # Skip saving if task was previously deleted by user
+            if self.is_task_deleted(task_id):
+                logger.info(f"Skipping import of previously deleted task: {task_id}")
+                return True  # Return True to indicate no error, just skipped
+            
             with self.get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
                     INSERT OR REPLACE INTO universal_todos 
                     (id, title, description, due_date, priority, category, 
-                     source, source_id, status, assigned_to_service, 
-                     requires_response, email_id)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     source, source_id, source_title, source_url, source_preview, creation_reason,
+                     status, assigned_to_service, requires_response, email_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
-                    todo_data.get('id'),
+                    task_id,
                     todo_data.get('title'),
                     todo_data.get('description'),
                     todo_data.get('due_date'),
@@ -1471,6 +1781,10 @@ class DatabaseManager:
                     todo_data.get('category'),
                     todo_data.get('source'),
                     todo_data.get('source_id'),
+                    todo_data.get('source_title'),
+                    todo_data.get('source_url'),
+                    todo_data.get('source_preview'),
+                    todo_data.get('creation_reason'),
                     todo_data.get('status', 'pending'),
                     todo_data.get('assigned_to_service'),
                     1 if todo_data.get('requires_response') else 0,
@@ -1561,6 +1875,8 @@ class DatabaseManager:
                         'source_id': row['source_id'],
                         'source_title': row['source_title'],
                         'source_url': row['source_url'],
+                        'source_preview': row['source_preview'],
+                        'creation_reason': row['creation_reason'],
                         'status': row['status'],
                         'assigned_to_service': row['assigned_to_service'],
                         'requires_response': bool(row['requires_response']),
@@ -1614,23 +1930,29 @@ class DatabaseManager:
                 
                 todos = []
                 for row in rows:
+                    row_keys = set(row.keys())
+                    def get_row_value(key: str, default=None):
+                        return row[key] if key in row_keys else default
+
                     todos.append({
-                        'id': row['id'],
-                        'title': row['title'],
-                        'description': row['description'],
-                        'due_date': row['due_date'],
-                        'priority': row['priority'],
-                        'category': row['category'],
-                        'source': row['source'],
-                        'source_id': row['source_id'],
-                        'source_title': row['source_title'],
-                        'source_url': row['source_url'],
-                        'status': row['status'],
-                        'assigned_to_service': row['assigned_to_service'],
-                        'requires_response': bool(row['requires_response']),
-                        'email_id': row['email_id'],
-                        'created_at': row['created_at'],
-                        'completed_at': row['completed_at']
+                        'id': get_row_value('id', ''),
+                        'title': get_row_value('title', ''),
+                        'description': get_row_value('description', ''),
+                        'due_date': get_row_value('due_date'),
+                        'priority': get_row_value('priority', 'medium'),
+                        'category': get_row_value('category', 'general'),
+                        'source': get_row_value('source', 'manual'),
+                        'source_id': get_row_value('source_id'),
+                        'source_title': get_row_value('source_title', ''),
+                        'source_url': get_row_value('source_url', ''),
+                        'source_preview': get_row_value('source_preview', ''),
+                        'creation_reason': get_row_value('creation_reason', ''),
+                        'status': get_row_value('status', 'pending'),
+                        'assigned_to_service': get_row_value('assigned_to_service'),
+                        'requires_response': bool(get_row_value('requires_response', 0)),
+                        'email_id': get_row_value('email_id'),
+                        'created_at': get_row_value('created_at'),
+                        'completed_at': get_row_value('completed_at')
                     })
                 
                 return todos
@@ -1666,16 +1988,87 @@ class DatabaseManager:
             logger.error(f"Error updating todo status: {e}")
             return False
 
+    def is_task_deleted(self, task_id: str) -> bool:
+        """Check if a task has been deleted by the user."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT id FROM deleted_tasks WHERE id = ?", (task_id,))
+                return cursor.fetchone() is not None
+        except Exception as e:
+            logger.error(f"Error checking if task is deleted: {e}")
+            return False
+    
+    def record_task_deletion(self, task_id: str, source: str, source_id: str = None, 
+                           original_title: str = None, original_url: str = None) -> bool:
+        """Record a task deletion to prevent re-importing from sources."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT OR REPLACE INTO deleted_tasks 
+                    (id, source, source_id, original_title, original_url, deleted_at, reason)
+                    VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, 'user-deleted')
+                """, (task_id, source, source_id, original_title, original_url))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error recording task deletion: {e}")
+            return False
+    
+    def get_deleted_task_ids(self, source: str = None) -> List[str]:
+        """Get list of deleted task IDs to prevent re-import."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                if source:
+                    cursor.execute("SELECT id FROM deleted_tasks WHERE source = ?", (source,))
+                else:
+                    cursor.execute("SELECT id FROM deleted_tasks")
+                return [row[0] for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Error getting deleted task IDs: {e}")
+            return []
+    
+    def restore_deleted_task(self, task_id: str) -> bool:
+        """Remove a task from the deleted list (restore it for re-import)."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM deleted_tasks WHERE id = ?", (task_id,))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error restoring deleted task: {e}")
+            return False
+    
     def delete_todo(self, todo_id: str) -> bool:
         """Mark a todo as deleted (soft delete) to prevent recreation."""
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
+                
+                # Get task details before deleting for deletion tracking
+                cursor.execute(
+                    "SELECT source, source_id, title FROM universal_todos WHERE id = ?",
+                    (todo_id,)
+                )
+                task_row = cursor.fetchone()
+                
+                # Update task status to deleted
                 cursor.execute("""
                     UPDATE universal_todos 
                     SET status = 'deleted', completed_at = CURRENT_TIMESTAMP
                     WHERE id = ?
                 """, (todo_id,))
+                
+                # Record deletion to prevent re-import from sources
+                if task_row:
+                    source = task_row[0] if task_row[0] else None
+                    source_id = task_row[1] if len(task_row) > 1 and task_row[1] else None
+                    title = task_row[2] if len(task_row) > 2 and task_row[2] else None
+                    self.record_task_deletion(todo_id, source, source_id, title)
+                
                 conn.commit()
                 return cursor.rowcount > 0
                 
@@ -1712,6 +2105,143 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Error updating todo source_id: {e}")
             return False
+
+    # Scanned sources tracking methods
+    
+    def mark_source_scanned(self, source_type: str, source_id: str, 
+                           tasks_found: int = 0, tasks_created: int = 0,
+                           item_hash: str = None, dismissed: bool = False) -> bool:
+        """Mark a source item (email, calendar event, note) as scanned.
+        
+        This prevents re-scanning the same item and re-creating deleted tasks.
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT INTO scanned_sources 
+                    (source_type, source_id, item_hash, tasks_found, tasks_created, dismissed)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(source_type, source_id) DO UPDATE SET
+                        scanned_at = CURRENT_TIMESTAMP,
+                        tasks_found = excluded.tasks_found,
+                        tasks_created = excluded.tasks_created,
+                        item_hash = COALESCE(excluded.item_hash, scanned_sources.item_hash),
+                        dismissed = CASE 
+                            WHEN excluded.dismissed = 1 THEN 1 
+                            ELSE scanned_sources.dismissed 
+                        END
+                """, (source_type, source_id, item_hash, tasks_found, tasks_created, 1 if dismissed else 0))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error marking source as scanned: {e}")
+            return False
+    
+    def is_source_scanned(self, source_type: str, source_id: str, check_dismissed: bool = True) -> bool:
+        """Check if a source has already been scanned.
+        
+        Args:
+            source_type: Type of source (email, calendar, obsidian, etc.)
+            source_id: Unique ID of the source item
+            check_dismissed: If True, also returns True for dismissed items
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                if check_dismissed:
+                    cursor.execute(
+                        "SELECT 1 FROM scanned_sources WHERE source_type = ? AND source_id = ?",
+                        (source_type, source_id)
+                    )
+                else:
+                    cursor.execute(
+                        "SELECT 1 FROM scanned_sources WHERE source_type = ? AND source_id = ? AND dismissed = 0",
+                        (source_type, source_id)
+                    )
+                
+                return cursor.fetchone() is not None
+        except Exception as e:
+            logger.error(f"Error checking if source is scanned: {e}")
+            return False
+    
+    def mark_source_dismissed(self, source_type: str, source_id: str) -> bool:
+        """Mark a source as dismissed (user deleted the task from it).
+        
+        This ensures the source won't generate new tasks unless force re-scanned.
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT INTO scanned_sources (source_type, source_id, dismissed, tasks_created)
+                    VALUES (?, ?, 1, 0)
+                    ON CONFLICT(source_type, source_id) DO UPDATE SET
+                        dismissed = 1,
+                        scanned_at = CURRENT_TIMESTAMP
+                """, (source_type, source_id))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error marking source as dismissed: {e}")
+            return False
+    
+    def get_scanned_sources(self, source_type: str = None, include_dismissed: bool = True) -> List[Dict[str, Any]]:
+        """Get list of scanned sources."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                query = "SELECT * FROM scanned_sources WHERE 1=1"
+                params = []
+                
+                if source_type:
+                    query += " AND source_type = ?"
+                    params.append(source_type)
+                
+                if not include_dismissed:
+                    query += " AND dismissed = 0"
+                
+                query += " ORDER BY scanned_at DESC"
+                cursor.execute(query, params)
+                
+                rows = cursor.fetchall()
+                return [dict(row) for row in rows]
+        except Exception as e:
+            logger.error(f"Error getting scanned sources: {e}")
+            return []
+    
+    def clear_scanned_sources(self, source_type: str = None, clear_dismissed: bool = False) -> int:
+        """Clear scanned sources to allow re-scanning.
+        
+        Args:
+            source_type: If provided, only clear this type
+            clear_dismissed: If True, also clear dismissed items (allows re-creating deleted tasks)
+        
+        Returns:
+            Number of records cleared
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                query = "DELETE FROM scanned_sources WHERE 1=1"
+                params = []
+                
+                if source_type:
+                    query += " AND source_type = ?"
+                    params.append(source_type)
+                
+                if not clear_dismissed:
+                    query += " AND dismissed = 0"
+                
+                cursor.execute(query, params)
+                conn.commit()
+                return cursor.rowcount
+        except Exception as e:
+            logger.error(f"Error clearing scanned sources: {e}")
+            return 0
 
     # Suggested todos methods
     
@@ -1846,7 +2376,10 @@ class DatabaseManager:
             logger.error(f"Error getting suggested todos by source: {e}")
             return []
 
-    def approve_suggested_todo(self, suggestion_id: str) -> bool:
+    def approve_suggested_todo(self, suggestion_id: str, sync_enabled: bool = False,
+                               preferred_provider: Optional[str] = None,
+                               provider_order: Optional[List[str]] = None,
+                               settings: Any = None) -> bool:
         """Approve a suggested todo and move it to the main todos list."""
         try:
             with self.get_connection() as conn:
@@ -1859,24 +2392,40 @@ class DatabaseManager:
                 if not row:
                     logger.error(f"Suggested todo {suggestion_id} not found")
                     return False
+
+                row_keys = set(row.keys())
+
+                def get_value(key: str, fallback=None):
+                    return row[key] if key in row_keys else fallback
+
+                source = get_value('source', 'unknown')
+                source_title = get_value('source_title') or get_value('title')
+                source_url = get_value('source_url')
+                context = get_value('context') or ''
+                source_content = get_value('source_content') or ''
+                preview = (context or source_content or get_value('description') or '')[:400]
+                reason = f"Created from suggested task extracted from {source.replace('_', ' ')}"
                 
                 # Create the actual todo
                 import uuid
                 todo_id = str(uuid.uuid4())
                 cursor.execute("""
                     INSERT INTO universal_todos 
-                    (id, title, description, source, source_id, source_title, source_url, priority, due_date, status)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+                    (id, title, description, source, source_id, source_title, source_url, source_preview,
+                     creation_reason, priority, due_date, status)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
                 """, (
                     todo_id,
-                    row[1],  # title
-                    row[2] or row[3],  # description or context
-                    row[4],  # source
-                    row[5],  # source_id
-                    row[6],  # source_title
-                    row[7],  # source_url
-                    row[8],  # priority
-                    row[9]   # due_date
+                    get_value('title', ''),
+                    get_value('description') or context,
+                    source,
+                    get_value('source_id'),
+                    source_title,
+                    source_url,
+                    preview,
+                    reason,
+                    get_value('priority', 'medium'),
+                    get_value('due_date')
                 ))
                 
                 # Mark suggestion as approved
@@ -1887,60 +2436,49 @@ class DatabaseManager:
                 """, (suggestion_id,))
                 
                 conn.commit()
-                
-                # Try to sync to TickTick (async, non-blocking)
-                try:
-                    import asyncio
-                    from collectors.ticktick_collector import TickTickCollector
-                    
-                    # Create sync task in background
-                    async def sync_to_ticktick():
-                        try:
-                            ticktick = TickTickCollector()
-                            
-                            # Map priority: 0=None, 1=Low, 3=Medium, 5=High
-                            priority_map = {'low': 1, 'medium': 3, 'high': 5}
-                            ticktick_priority = priority_map.get(row[8], 0) if row[8] else 0
-                            
-                            # Parse due date if present
-                            due_date = None
-                            if row[9]:  # due_date
-                                from datetime import datetime
-                                try:
-                                    due_date = datetime.fromisoformat(row[9])
-                                except:
-                                    pass
-                            
-                            # Create task in TickTick
-                            result = await ticktick.create_task(
-                                title=row[1],  # title
-                                content=row[2] or row[3] or "",  # description or context
-                                due_date=due_date,
-                                priority=ticktick_priority,
-                                tags=['dashboard']
-                            )
-                            
-                            if result:
-                                logger.info(f"Synced todo '{row[1]}' to TickTick")
-                            else:
-                                logger.warning(f"Failed to sync todo '{row[1]}' to TickTick")
-                                
-                        except Exception as e:
-                            logger.error(f"Error syncing to TickTick: {e}")
-                    
-                    # Run sync in background (don't wait)
+
+                if sync_enabled:
                     try:
-                        loop = asyncio.get_event_loop()
-                        if loop.is_running():
-                            asyncio.create_task(sync_to_ticktick())
-                        else:
-                            asyncio.run(sync_to_ticktick())
-                    except:
-                        # If we can't get event loop, skip sync
-                        logger.warning("Could not sync to TickTick - no event loop")
-                        
-                except Exception as e:
-                    logger.warning(f"TickTick sync skipped: {e}")
+                        import asyncio
+                        from services.task_sync_service import TaskSyncService
+
+                        task_payload = {
+                            'id': todo_id,
+                            'title': get_value('title', ''),
+                            'description': get_value('description') or context,
+                            'priority': get_value('priority', 'medium'),
+                            'due_date': get_value('due_date'),
+                            'category': source,
+                            'source': source,
+                            'source_id': get_value('source_id'),
+                        }
+
+                        async def sync_task():
+                            sync_service = TaskSyncService(settings)
+                            result = await sync_service.sync_task(
+                                task_payload,
+                                preferred_provider=preferred_provider,
+                                provider_order=provider_order,
+                            )
+                            if result.get('success'):
+                                logger.info(
+                                    f"Synced todo '{task_payload['title']}' to {result.get('provider')}"
+                                )
+                            else:
+                                logger.warning(
+                                    f"Task sync failed for '{task_payload['title']}': {result.get('error')}"
+                                )
+
+                        try:
+                            loop = asyncio.get_event_loop()
+                            if loop.is_running():
+                                asyncio.create_task(sync_task())
+                            else:
+                                asyncio.run(sync_task())
+                        except Exception:
+                            logger.warning("Could not start background task sync for suggested todo")
+                    except Exception as e:
+                        logger.warning(f"Suggested todo sync skipped: {e}")
                 
                 return True
                 
@@ -1974,13 +2512,14 @@ class DatabaseManager:
                 cursor = conn.cursor()
                 cursor.execute("""
                     INSERT OR REPLACE INTO news_articles 
-                    (id, title, url, snippet, source, published_date, topics, relevance_score, user_feedback, is_read)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT is_read FROM news_articles WHERE id = ?), 0))
+                    (id, title, url, snippet, image_url, source, published_date, topics, relevance_score, user_feedback, is_read)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT is_read FROM news_articles WHERE id = ?), 0))
                 """, (
                     article_data.get('id'),
                     article_data.get('title'),
                     article_data.get('url'),
                     article_data.get('snippet'),
+                    article_data.get('image_url'),
                     article_data.get('source'),
                     article_data.get('published_date'),
                     json.dumps(article_data.get('topics', [])),
@@ -2014,7 +2553,7 @@ class DatabaseManager:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
-                    SELECT id, title, url, snippet, source, published_date, topics, relevance_score, is_liked, is_read
+                    SELECT id, title, url, snippet, image_url, source, published_date, topics, relevance_score, is_liked, is_read
                     FROM news_articles
                     WHERE is_read = 0
                     ORDER BY published_date DESC, relevance_score DESC
@@ -2064,6 +2603,206 @@ class DatabaseManager:
                 return True
         except Exception as e:
             logger.error(f"Error saving music content: {e}")
+            return False
+
+    # ==================== PLAYLIST METHODS ====================
+    
+    def save_playlist(self, playlist_data: Dict[str, Any]) -> bool:
+        """Save a music playlist to the database."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT OR REPLACE INTO music_playlists 
+                    (id, name, mood, artists, genres, tracks, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    playlist_data.get('id'),
+                    playlist_data.get('name'),
+                    playlist_data.get('mood'),
+                    json.dumps(playlist_data.get('artists', [])),
+                    json.dumps(playlist_data.get('genres', [])),
+                    json.dumps(playlist_data.get('tracks', [])),
+                    datetime.now().isoformat()
+                ))
+                conn.commit()
+                logger.info(f"Saved playlist: {playlist_data.get('name')}")
+                return True
+        except Exception as e:
+            logger.error(f"Error saving playlist: {e}")
+            return False
+
+    def get_playlists(self) -> List[Dict[str, Any]]:
+        """Get all saved playlists from the database."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT id, name, mood, artists, genres, tracks, created_at, updated_at
+                    FROM music_playlists
+                    ORDER BY created_at DESC
+                """)
+                rows = cursor.fetchall()
+                playlists = []
+                for row in rows:
+                    playlists.append({
+                        'id': row[0],
+                        'name': row[1],
+                        'mood': row[2],
+                        'artists': json.loads(row[3]) if row[3] else [],
+                        'genres': json.loads(row[4]) if row[4] else [],
+                        'tracks': json.loads(row[5]) if row[5] else [],
+                        'created_at': row[6],
+                        'updated_at': row[7]
+                    })
+                return playlists
+        except Exception as e:
+            logger.error(f"Error getting playlists: {e}")
+            return []
+
+    def get_playlist(self, playlist_id: str) -> Optional[Dict[str, Any]]:
+        """Get a single playlist by ID."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT id, name, mood, artists, genres, tracks, created_at, updated_at
+                    FROM music_playlists WHERE id = ?
+                """, (playlist_id,))
+                row = cursor.fetchone()
+                if row:
+                    return {
+                        'id': row[0],
+                        'name': row[1],
+                        'mood': row[2],
+                        'artists': json.loads(row[3]) if row[3] else [],
+                        'genres': json.loads(row[4]) if row[4] else [],
+                        'tracks': json.loads(row[5]) if row[5] else [],
+                        'created_at': row[6],
+                        'updated_at': row[7]
+                    }
+                return None
+        except Exception as e:
+            logger.error(f"Error getting playlist: {e}")
+            return None
+
+    def delete_playlist(self, playlist_id: str) -> bool:
+        """Delete a playlist from the database."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM music_playlists WHERE id = ?", (playlist_id,))
+                conn.commit()
+                logger.info(f"Deleted playlist: {playlist_id}")
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error deleting playlist: {e}")
+            return False
+
+    # ==================== LIKED SONGS METHODS ====================
+    
+    def save_liked_song(self, artist: str, title: str, youtube_id: str = None) -> bool:
+        """Save a liked song to the database."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT OR REPLACE INTO liked_songs (artist, title, youtube_id, liked_at)
+                    VALUES (?, ?, ?, ?)
+                """, (artist, title, youtube_id, datetime.now().isoformat()))
+                conn.commit()
+                logger.info(f"Saved liked song: {artist} - {title}")
+                return True
+        except Exception as e:
+            logger.error(f"Error saving liked song: {e}")
+            return False
+
+    def remove_liked_song(self, artist: str, title: str) -> bool:
+        """Remove a song from liked songs."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM liked_songs WHERE artist = ? AND title = ?", (artist, title))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error removing liked song: {e}")
+            return False
+
+    def get_liked_songs(self) -> List[Dict[str, Any]]:
+        """Get all liked songs from the database."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT artist, title, youtube_id, liked_at
+                    FROM liked_songs ORDER BY liked_at DESC
+                """)
+                rows = cursor.fetchall()
+                return [{'artist': row[0], 'title': row[1], 'youtube_id': row[2], 'liked_at': row[3]} for row in rows]
+        except Exception as e:
+            logger.error(f"Error getting liked songs: {e}")
+            return []
+
+    def is_song_liked(self, artist: str, title: str) -> bool:
+        """Check if a song is liked."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT 1 FROM liked_songs WHERE artist = ? AND title = ?", (artist, title))
+                return cursor.fetchone() is not None
+        except Exception as e:
+            logger.error(f"Error checking liked song: {e}")
+            return False
+
+    # ==================== MUSIC PLAYBACK STATE METHODS ====================
+    
+    def save_playback_state(self, playlist_id: str, playlist_name: str, tracks: List[Dict[str, Any]], 
+                           current_index: int = 0) -> bool:
+        """Save the current music playback state to database."""
+        try:
+            # Save as settings for persistence
+            self.save_setting('music_last_playlist_id', playlist_id)
+            self.save_setting('music_last_playlist_name', playlist_name)
+            self.save_setting('music_current_tracks', json.dumps(tracks))
+            self.save_setting('music_current_index', str(current_index))
+            self.save_setting('music_last_updated', datetime.now().isoformat())
+            logger.info(f"Saved playback state: {playlist_name} ({len(tracks)} tracks, index {current_index})")
+            return True
+        except Exception as e:
+            logger.error(f"Error saving playback state: {e}")
+            return False
+    
+    def get_playback_state(self) -> Optional[Dict[str, Any]]:
+        """Get the last music playback state from database."""
+        try:
+            playlist_id = self.get_setting('music_last_playlist_id')
+            playlist_name = self.get_setting('music_last_playlist_name')
+            tracks_json = self.get_setting('music_current_tracks')
+            current_index = self.get_setting('music_current_index', '0')
+            last_updated = self.get_setting('music_last_updated')
+            
+            if not tracks_json:
+                return None
+            
+            return {
+                'playlist_id': playlist_id,
+                'playlist_name': playlist_name,
+                'tracks': json.loads(tracks_json),
+                'current_index': int(current_index),
+                'last_updated': last_updated
+            }
+        except Exception as e:
+            logger.error(f"Error getting playback state: {e}")
+            return None
+    
+    def update_playback_index(self, index: int) -> bool:
+        """Update just the current track index."""
+        try:
+            self.save_setting('music_current_index', str(index))
+            return True
+        except Exception as e:
+            logger.error(f"Error updating playback index: {e}")
             return False
 
     def like_content(self, content_type: str, content_id: str, is_liked: bool = True) -> bool:
@@ -3272,6 +4011,10 @@ class DatabaseManager:
     def save_user_profile(self, profile: Dict[str, Any]) -> bool:
         """Save or update user profile."""
         try:
+            # Preserve unspecified fields so partial profile saves do not erase related data.
+            existing_profile = self.get_user_profile() or {}
+            merged_profile = {**existing_profile, **(profile or {})}
+
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
@@ -3286,26 +4029,26 @@ class DatabaseManager:
                 ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP,
                           ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
-                profile.get('full_name'),
-                profile.get('preferred_name'),
-                profile.get('occupation'),
-                profile.get('company'),
-                profile.get('role'),
-                profile.get('work_focus'),
-                profile.get('interests'),
-                profile.get('communication_style'),
-                profile.get('timezone'),
-                profile.get('work_hours'),
-                profile.get('priorities'),
-                profile.get('bio'),
-                profile.get('github_username'),
-                profile.get('soundcloud_url'),
-                profile.get('bandcamp_url'),
-                profile.get('music_artist_name'),
-                profile.get('music_label_name'),
-                profile.get('book_title'),
-                profile.get('project_paths'),
-                profile.get('vanity_search_terms')
+                merged_profile.get('full_name'),
+                merged_profile.get('preferred_name'),
+                merged_profile.get('occupation'),
+                merged_profile.get('company'),
+                merged_profile.get('role'),
+                merged_profile.get('work_focus'),
+                merged_profile.get('interests'),
+                merged_profile.get('communication_style'),
+                merged_profile.get('timezone'),
+                merged_profile.get('work_hours'),
+                merged_profile.get('priorities'),
+                merged_profile.get('bio'),
+                merged_profile.get('github_username'),
+                merged_profile.get('soundcloud_url'),
+                merged_profile.get('bandcamp_url'),
+                merged_profile.get('music_artist_name'),
+                merged_profile.get('music_label_name'),
+                merged_profile.get('book_title'),
+                merged_profile.get('project_paths'),
+                merged_profile.get('vanity_search_terms')
             ))
             
             conn.commit()
@@ -3316,6 +4059,132 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Error saving user profile: {e}")
             return False
+
+    def get_participant_contact(self, email: str) -> Optional[Dict[str, Any]]:
+        """Return a participant contact mapping by email."""
+        if not email:
+            return None
+        try:
+            normalized_email = email.strip().lower()
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    SELECT email, display_name, company, linkedin_url, linkedin_image_url,
+                           github_url, github_stats_json, enrichment_source, enrichment_refreshed_at,
+                           image_url, relationship_notes, notes, updated_at, created_at
+                    FROM participant_contacts
+                    WHERE email = ?
+                    """,
+                    (normalized_email,)
+                )
+                row = cursor.fetchone()
+                if not row:
+                    return None
+                contact = dict(row)
+                stats_raw = contact.get('github_stats_json')
+                if isinstance(stats_raw, str) and stats_raw.strip():
+                    try:
+                        contact['github_stats'] = json.loads(stats_raw)
+                    except Exception:
+                        contact['github_stats'] = {}
+                elif isinstance(stats_raw, dict):
+                    contact['github_stats'] = stats_raw
+                else:
+                    contact['github_stats'] = {}
+                return contact
+        except Exception as e:
+            logger.error(f"Error getting participant contact {email}: {e}")
+            return None
+
+    def save_participant_contact(self, contact: Dict[str, Any]) -> bool:
+        """Create or update a participant contact mapping."""
+        try:
+            email = str(contact.get('email') or '').strip().lower()
+            if not email:
+                return False
+
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    INSERT INTO participant_contacts (
+                        email, display_name, company, linkedin_url, linkedin_image_url,
+                        github_url, github_stats_json, enrichment_source, enrichment_refreshed_at,
+                        image_url, relationship_notes, notes, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    ON CONFLICT(email) DO UPDATE SET
+                        display_name = COALESCE(excluded.display_name, participant_contacts.display_name),
+                        company = COALESCE(excluded.company, participant_contacts.company),
+                        linkedin_url = COALESCE(excluded.linkedin_url, participant_contacts.linkedin_url),
+                        linkedin_image_url = COALESCE(excluded.linkedin_image_url, participant_contacts.linkedin_image_url),
+                        github_url = COALESCE(excluded.github_url, participant_contacts.github_url),
+                        github_stats_json = COALESCE(excluded.github_stats_json, participant_contacts.github_stats_json),
+                        enrichment_source = COALESCE(excluded.enrichment_source, participant_contacts.enrichment_source),
+                        enrichment_refreshed_at = COALESCE(excluded.enrichment_refreshed_at, participant_contacts.enrichment_refreshed_at),
+                        image_url = COALESCE(excluded.image_url, participant_contacts.image_url),
+                        relationship_notes = COALESCE(excluded.relationship_notes, participant_contacts.relationship_notes),
+                        notes = COALESCE(excluded.notes, participant_contacts.notes),
+                        updated_at = CURRENT_TIMESTAMP
+                    """,
+                    (
+                        email,
+                        contact.get('display_name'),
+                        contact.get('company'),
+                        contact.get('linkedin_url'),
+                        contact.get('linkedin_image_url'),
+                        contact.get('github_url'),
+                        json.dumps(contact.get('github_stats') or contact.get('github_stats_json') or {}) if (
+                            contact.get('github_stats') is not None or contact.get('github_stats_json') is not None
+                        ) else None,
+                        contact.get('enrichment_source'),
+                        contact.get('enrichment_refreshed_at'),
+                        contact.get('image_url'),
+                        contact.get('relationship_notes'),
+                        contact.get('notes'),
+                    )
+                )
+                conn.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Error saving participant contact: {e}")
+            return False
+
+    def list_participant_contacts(self, limit: int = 200) -> List[Dict[str, Any]]:
+        """List mapped participant contacts for review and management."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    SELECT email, display_name, company, linkedin_url, linkedin_image_url,
+                           github_url, github_stats_json, enrichment_source, enrichment_refreshed_at,
+                           image_url, relationship_notes, notes, updated_at, created_at
+                    FROM participant_contacts
+                    ORDER BY updated_at DESC
+                    LIMIT ?
+                    """,
+                    (int(max(1, min(limit, 1000))),)
+                )
+                rows = cursor.fetchall()
+                contacts: List[Dict[str, Any]] = []
+                for row in rows:
+                    contact = dict(row)
+                    stats_raw = contact.get('github_stats_json')
+                    if isinstance(stats_raw, str) and stats_raw.strip():
+                        try:
+                            contact['github_stats'] = json.loads(stats_raw)
+                        except Exception:
+                            contact['github_stats'] = {}
+                    elif isinstance(stats_raw, dict):
+                        contact['github_stats'] = stats_raw
+                    else:
+                        contact['github_stats'] = {}
+                    contacts.append(contact)
+                return contacts
+        except Exception as e:
+            logger.error(f"Error listing participant contacts: {e}")
+            return []
     
     def save_ai_message_feedback(self, message_id: str, conversation_id: str, 
                                   feedback_type: str, rating: int = None, 

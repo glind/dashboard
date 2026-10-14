@@ -4,7 +4,7 @@ Simple Personal Dashboard with News Filtering
 Clean, minimal implementation focusing on core data sources
 """
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Query
 from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 import uvicorn
@@ -13,6 +13,8 @@ import requests
 import re
 from datetime import datetime, timedelta
 import os
+import subprocess
+import traceback
 import yaml
 from pathlib import Path
 import logging
@@ -25,6 +27,7 @@ import asyncio
 import time
 import secrets
 import io
+import hashlib
 import zipfile
 from urllib.parse import quote
 from typing import Dict, Any, Optional, List
@@ -154,16 +157,132 @@ DEFAULT_COMICS = {
     }
 }
 
-# Add the src directory to path for imports
+# Add the src directory and project root to path for imports
 src_dir = Path(__file__).parent
 project_root = src_dir.parent  # One level up from src/
 sys.path.insert(0, str(src_dir))
+sys.path.insert(0, str(project_root))  # Also add project root for config/ imports
 
 # Import database manager
 from database import db
 
 # Configure logging
 logger = logging.getLogger(__name__)
+
+# Lightweight performance metrics store for before/after comparisons.
+PERF_LOCK = threading.Lock()
+PERF_MAX_SAMPLES = 200
+PERF_METRICS: Dict[str, Dict[str, List[float]]] = {
+    'endpoints': {},
+    'background_collectors': {}
+}
+
+
+def _record_perf(namespace: str, metric_name: str, duration_ms: float):
+    """Record a timing sample for basic endpoint/collector benchmarking."""
+    with PERF_LOCK:
+        bucket = PERF_METRICS.setdefault(namespace, {})
+        series = bucket.setdefault(metric_name, [])
+        series.append(float(duration_ms))
+        if len(series) > PERF_MAX_SAMPLES:
+            del series[:-PERF_MAX_SAMPLES]
+
+
+def _summarize_perf(namespace: str) -> Dict[str, Any]:
+    """Return avg/p95 style summaries for a namespace."""
+    with PERF_LOCK:
+        source = PERF_METRICS.get(namespace, {})
+        summary: Dict[str, Any] = {}
+        for key, values in source.items():
+            if not values:
+                continue
+            ordered = sorted(values)
+            p95_index = max(0, int(len(ordered) * 0.95) - 1)
+            summary[key] = {
+                'samples': len(values),
+                'last_ms': round(values[-1], 2),
+                'avg_ms': round(sum(values) / len(values), 2),
+                'p95_ms': round(ordered[p95_index], 2),
+                'max_ms': round(max(values), 2),
+            }
+        return summary
+
+GOOGLE_GMAIL_READ_SCOPES = [
+    'https://www.googleapis.com/auth/gmail.readonly',
+]
+
+GOOGLE_GMAIL_WRITE_SCOPES = [
+    'https://www.googleapis.com/auth/gmail.modify',
+    'https://www.googleapis.com/auth/gmail.labels',
+    'https://www.googleapis.com/auth/gmail.send',
+]
+
+GOOGLE_CALENDAR_SCOPES = [
+    'https://www.googleapis.com/auth/calendar.readonly',
+    'https://www.googleapis.com/auth/calendar.events',
+]
+
+GOOGLE_IDENTITY_SCOPES = [
+    'https://www.googleapis.com/auth/userinfo.profile',
+    'https://www.googleapis.com/auth/userinfo.email',
+    'openid',
+    'https://www.googleapis.com/auth/drive.readonly',
+]
+
+
+def get_google_oauth_scopes() -> List[str]:
+    """Return the full Google OAuth scope set used by the dashboard."""
+    return [
+        *GOOGLE_IDENTITY_SCOPES,
+        *GOOGLE_CALENDAR_SCOPES,
+        *GOOGLE_GMAIL_READ_SCOPES,
+        *GOOGLE_GMAIL_WRITE_SCOPES,
+    ]
+
+
+def has_required_google_scopes(granted_scopes: Optional[List[str]], required_scopes: List[str]) -> bool:
+    """Check if all required Google scopes are present."""
+    granted = set(granted_scopes or [])
+    return all(scope in granted for scope in required_scopes)
+
+
+def normalize_ollama_host(raw_host: Optional[str]) -> str:
+    """Normalize Ollama host input from settings/UI into bare hostname."""
+    host = (raw_host or '').strip()
+    if not host:
+        return 'localhost'
+
+    host = host.replace('http://', '').replace('https://', '')
+    host = host.split('/')[0].strip()
+    if ':' in host:
+        host = host.split(':')[0].strip()
+    return host or 'localhost'
+
+
+def extract_task_sync_preferences(payload: Optional[Dict[str, Any]], default_enabled: bool = False) -> Dict[str, Any]:
+    """Normalize task sync preferences from request payloads."""
+    from services.task_sync_service import normalize_task_sync_order, normalize_task_sync_provider
+
+    data = payload or {}
+    raw_enabled = data.get('sync_to_tasks')
+    if raw_enabled is None:
+        raw_enabled = data.get('sync_to_ticktick')
+    if raw_enabled is None:
+        raw_enabled = default_enabled
+
+    raw_order = data.get('task_sync_provider_order') or data.get('task_sync_order') or []
+    if isinstance(raw_order, str):
+        raw_order = [item.strip() for item in raw_order.split(',') if item.strip()]
+
+    preferred_provider = normalize_task_sync_provider(
+        data.get('task_sync_provider') or data.get('task_sync_service')
+    )
+
+    return {
+        'enabled': bool(raw_enabled),
+        'preferred_provider': preferred_provider,
+        'provider_order': normalize_task_sync_order(preferred_provider, raw_order),
+    }
 
 # Configure SSL globally to fix certificate verification issues
 try:
@@ -204,6 +323,9 @@ except ImportError as e:
     print(f"Note: Could not import skin system: {e}")
     SKIN_SYSTEM_AVAILABLE = False
 
+# Dashboard profile (family vs laptop/modern) - see src/config/profile.py
+from config.profile import get_dashboard_profile, is_family_profile
+
 # Try to import AI Assistant modules
 try:
     from processors.ai_providers import ai_manager, create_provider, OllamaProvider, OpenAIProvider, GeminiProvider
@@ -215,9 +337,74 @@ except ImportError as e:
     AI_ASSISTANT_AVAILABLE = False
 
 # Set up logging
-logging.basicConfig(level=logging.INFO)
+# ── Logging setup ──────────────────────────────────────────────────────────────
+import logging.handlers as _logging_handlers
+LOG_FILE_PATH = Path(__file__).resolve().parent.parent / "dashboard.log"
+_log_formatter = logging.Formatter(
+    "%(asctime)s %(levelname)-8s %(name)s: %(message)s",
+    datefmt="%Y-%m-%dT%H:%M:%S"
+)
+_rotating_handler = _logging_handlers.RotatingFileHandler(
+    str(LOG_FILE_PATH),
+    maxBytes=5 * 1024 * 1024,   # 5 MB per file
+    backupCount=5,               # keep dashboard.log.1 … .5
+    encoding="utf-8"
+)
+_rotating_handler.setFormatter(_log_formatter)
+_stream_handler = logging.StreamHandler()
+_stream_handler.setFormatter(_log_formatter)
+logging.basicConfig(level=logging.INFO, handlers=[_rotating_handler, _stream_handler])
+logging.getLogger("uvicorn.access").setLevel(logging.WARNING)   # quiet access noise
+# ────────────────────────────────────────────────────────────────────────────────
 
 app = FastAPI(title="Simple Personal Dashboard")
+
+
+# Serve static files for PWA and frontend assets from both locations
+from fastapi.staticfiles import StaticFiles
+import os
+
+
+class _MultiDirStaticFiles(StaticFiles):
+    """StaticFiles that looks up a path in several directories, in order."""
+
+    def __init__(self, directories):
+        directories = [str(d) for d in directories]
+        super().__init__(directory=directories[0])
+        self.all_directories = directories
+
+
+# src/static is the canonical frontend dir (independent of the working directory);
+# the repo-root static/ dir is a fallback for PWA assets.
+_static_dirs = [d for d in (Path(__file__).parent / "static", Path(__file__).parent.parent / "static") if d.is_dir()]
+if _static_dirs:
+    app.mount("/static", _MultiDirStaticFiles(_static_dirs), name="static")
+
+# Register music playlist router
+try:
+    from modules.music.endpoints import router as music_router
+    app.include_router(music_router)
+    logging.info("✅ Music playlist router registered")
+except ImportError as e:
+    logging.warning(f"Could not load music playlist router: {e}")
+
+
+# Register Focus Playlists router
+try:
+    from modules.music.focus_playlists_endpoints import router as focus_playlists_router
+    app.include_router(focus_playlists_router)
+    logging.info("✅ Focus Playlists router registered")
+except ImportError as e:
+    logging.warning(f"Could not load focus playlists router: {e}")
+
+# Register tasks router independently so it is available even if other modules fail
+try:
+    from modules.tasks.endpoints import router as tasks_router
+    app.include_router(tasks_router)
+    logging.info("✅ Tasks module registered")
+except ImportError as e:
+    logging.warning(f"Could not load tasks module: {e}")
+
 
 # ================= AI Voice Settings API =================
 from database import DatabaseManager
@@ -271,24 +458,28 @@ async def delete_voice_settings():
     db.delete_setting('voice_model_path')
     return {"success": True, "message": "Voice model and model_path deleted."}
 
-# Register custom module routers
+# Register remaining custom module routers
 try:
+    from modules.music_news.endpoints import router as music_news_router
+    from modules.vanity_alerts.endpoints import router as vanity_alerts_router
+    from modules.comms.endpoints import router as comms_router
     from modules.foundershield.endpoints import router as foundershield_router
     from modules.leads.endpoints import router as leads_router
-    from modules.tasks.endpoints import router as tasks_router
     from modules.ai_summarizer.endpoints import router as ai_summarizer_router
     from modules.providers.endpoints import router as providers_router
     from modules.providers.oauth import router as providers_oauth_router
     
+    app.include_router(music_news_router)
+    app.include_router(vanity_alerts_router)
+    app.include_router(comms_router)
     app.include_router(foundershield_router, prefix="/foundershield")
     app.include_router(leads_router)
-    app.include_router(tasks_router)
     app.include_router(ai_summarizer_router)
     app.include_router(providers_router)
     app.include_router(providers_oauth_router)
-    logging.info("✅ Custom modules registered (foundershield, leads, tasks, ai_summarizer, providers)")
+    logging.info("✅ Custom modules registered (music_news, vanity_alerts, comms, foundershield, leads, ai_summarizer, providers)")
 except ImportError as e:
-    logging.warning(f"Could not load custom modules: {e}")
+    logging.warning(f"Could not load non-task custom modules: {e}")
 
 # Register Trust Layer API
 try:
@@ -336,6 +527,8 @@ class BackgroundDataManager:
         self.cache_timestamps: Dict[str, datetime] = {}
         self.cache_duration = timedelta(minutes=10)  # Cache for 10 minutes
         self.background_tasks: Dict[str, threading.Thread] = {}
+        self._cache_lock = threading.Lock()
+        self._max_cache_entries = 16
         self.running = True
         
         # Start background collection threads
@@ -345,7 +538,7 @@ class BackgroundDataManager:
         """Start background data collection threads."""
         endpoints = [
             'calendar', 'email', 'github', 'news', 
-            'music', 'vanity', 'weather', 'jokes'
+            'music', 'vanity', 'weather', 'jokes', 'participant_enrichment'
         ]
         
         for endpoint in endpoints:
@@ -370,7 +563,8 @@ class BackgroundDataManager:
             'music': self._collect_music,
             'vanity': self._collect_vanity,
             'weather': self._collect_weather,
-            'jokes': self._collect_jokes
+            'jokes': self._collect_jokes,
+            'participant_enrichment': self._collect_participant_enrichment
         }
         
         collect_func = collection_functions.get(endpoint)
@@ -380,49 +574,210 @@ class BackgroundDataManager:
         
         # Initial delay to stagger startup
         time.sleep(hash(endpoint) % 30)  # 0-30 second delay based on endpoint name
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
         
-        while self.running:
+        try:
+            while self.running:
+                try:
+                    logger.info(f"Background collecting {endpoint} data...")
+                    perf_start = time.perf_counter()
+                    data = loop.run_until_complete(collect_func())
+                    with self._cache_lock:
+                        self.cache[endpoint] = data
+                        self.cache_timestamps[endpoint] = datetime.now()
+                        self._trim_cache_if_needed()
+                    duration_ms = (time.perf_counter() - perf_start) * 1000
+                    _record_perf('background_collectors', endpoint, duration_ms)
+                    logger.info(f"Successfully cached {endpoint} data")
+                    
+                    # Sleep for different intervals based on data type
+                    sleep_intervals = {
+                        'calendar': 300,  # 5 minutes
+                        'email': 180,     # 3 minutes
+                        'github': 600,    # 10 minutes
+                        'news': 900,      # 15 minutes
+                        'music': 1800,    # 30 minutes
+                        'vanity': 1800,   # 30 minutes
+                        'weather': 900,   # 15 minutes
+                        'jokes': 3600,    # 1 hour
+                        'participant_enrichment': 2700  # 45 minutes
+                    }
+                    sleep_time = sleep_intervals.get(endpoint, 600)
+                    time.sleep(sleep_time)
+                    
+                except Exception as e:
+                    logger.error(f"Error in background collection for {endpoint}: {e}")
+                    # Wait 5 minutes before retrying on error
+                    time.sleep(300)
+        finally:
             try:
-                logger.info(f"Background collecting {endpoint} data...")
-                data = asyncio.run(collect_func())
-                self.cache[endpoint] = data
-                self.cache_timestamps[endpoint] = datetime.now()
-                logger.info(f"Successfully cached {endpoint} data")
-                
-                # Sleep for different intervals based on data type
-                sleep_intervals = {
-                    'calendar': 300,  # 5 minutes
-                    'email': 180,     # 3 minutes
-                    'github': 600,    # 10 minutes
-                    'news': 900,      # 15 minutes
-                    'music': 1800,    # 30 minutes
-                    'vanity': 1800,   # 30 minutes
-                    'weather': 900,   # 15 minutes
-                    'jokes': 3600     # 1 hour
-                }
-                sleep_time = sleep_intervals.get(endpoint, 600)
-                time.sleep(sleep_time)
-                
-            except Exception as e:
-                logger.error(f"Error in background collection for {endpoint}: {e}")
-                # Wait 5 minutes before retrying on error
-                time.sleep(300)
+                loop.close()
+            except Exception:
+                pass
+
+    def _trim_cache_if_needed(self):
+        """Trim cache to prevent unbounded growth if new endpoint keys are added."""
+        if len(self.cache_timestamps) <= self._max_cache_entries:
+            return
+
+        sorted_keys = sorted(self.cache_timestamps.items(), key=lambda item: item[1])
+        keys_to_remove = [key for key, _ in sorted_keys[:-self._max_cache_entries]]
+        for key in keys_to_remove:
+            self.cache.pop(key, None)
+            self.cache_timestamps.pop(key, None)
+
+    async def _collect_calendar(self):
+        try:
+            settings = Settings()
+            collector = CalendarCollector(settings)
+            start_date = datetime.now()
+            end_date = start_date + timedelta(days=7)
+            events_data = await collector.collect_events(start_date, end_date)
+            formatted_events = []
+            for event in (events_data or [])[:10]:
+                start_time = event.get('start_time')
+                end_time = event.get('end_time')
+                formatted_events.append({
+                    "title": event.get('summary', 'Untitled Event'),
+                    "summary": event.get('summary', 'Untitled Event'),
+                    "time": start_time.strftime("%I:%M %p") if hasattr(start_time, 'strftime') else 'All day',
+                    "description": event.get('description', ''),
+                    "location": event.get('location', ''),
+                    "organizer": event.get('organizer', ''),
+                    "attendees": event.get('attendees', []) or [],
+                    "start": {"dateTime": start_time.isoformat()} if hasattr(start_time, 'isoformat') else None,
+                    "end": {"dateTime": end_time.isoformat()} if hasattr(end_time, 'isoformat') else None,
+                    "event_id": event.get('id', ''),
+                    "calendar_url": f"https://calendar.google.com/calendar/event?eid={event.get('id', '')}" if event.get('id') else "https://calendar.google.com/calendar",
+                    "is_all_day": event.get('is_all_day', False),
+                    "status": event.get('status', ''),
+                    "created": event.get('created', ''),
+                    "updated": event.get('updated', ''),
+                    "html_link": event.get('html_link', '')
+                })
+            return {"events": formatted_events}
+        except Exception as e:
+            logger.error(f"Calendar collection error: {e}")
+            return {"error": str(e), "events": []}
+
+    async def _collect_email(self):
+        try:
+            tokens_file = project_root / "tokens" / "google_credentials.json"
+            if not tokens_file.exists():
+                return {"emails": [], "total_count": 0, "unread_count": 0, "authenticated": False, "error": "Not authenticated with Google"}
+            account_config = {
+                'name': 'primary',
+                'credentials_file': str(tokens_file),
+                'scopes': [
+                    'https://www.googleapis.com/auth/gmail.readonly',
+                    'https://www.googleapis.com/auth/calendar.readonly'
+                ]
+            }
+            collector = GmailCollector(account_config)
+            return await collector.collect_data()
+        except Exception as e:
+            logger.error(f"Email collection error: {e}")
+            return {"error": str(e), "emails": []}
+
+    async def _collect_github(self):
+        try:
+            from database import get_credentials
+            github_creds = get_credentials('github')
+            if not (github_creds and github_creds.get('token')):
+                return {"data": [], "total": 0, "error": "No GitHub credentials"}
+
+            username = github_creds.get('username') or (db.get_user_profile() or {}).get('github_username', 'unknown')
+            token = github_creds.get('token')
+            headers = {'Authorization': f'token {token}', 'Accept': 'application/vnd.github.v3+json'}
+
+            github_items = []
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                review_response = await client.get(f'https://api.github.com/search/issues?q=review-requested:{username}+is:open+is:pr', headers=headers)
+                if review_response.status_code == 200:
+                    github_items.extend(review_response.json().get('items', [])[:3])
+
+                issues_response = await client.get(f'https://api.github.com/search/issues?q=assignee:{username}+is:issue+is:open', headers=headers)
+                if issues_response.status_code == 200:
+                    github_items.extend(issues_response.json().get('items', [])[:3])
+
+            return {"data": github_items, "total": len(github_items)}
+        except Exception as e:
+            logger.error(f"GitHub collection error: {e}")
+            return {"error": str(e), "data": []}
+
+    async def _collect_news(self):
+        try:
+            from collectors.news_collector import NewsCollector
+            return await NewsCollector().collect_data()
+        except Exception as e:
+            logger.error(f"News collection error: {e}")
+            return {"error": str(e), "articles": []}
+
+    async def _collect_music(self):
+        try:
+            from collectors.music_collector import MusicCollector
+            return await MusicCollector().collect_data()
+        except Exception as e:
+            logger.error(f"Music collection error: {e}")
+            return {"error": str(e), "data": []}
+
+    async def _collect_vanity(self):
+        try:
+            from collectors.vanity_alerts_collector import VanityAlertsCollector
+            return await VanityAlertsCollector().collect_data()
+        except Exception as e:
+            logger.error(f"Vanity collection error: {e}")
+            return {"error": str(e), "alerts": []}
+
+    async def _collect_weather(self):
+        try:
+            settings = Settings()
+            return await WeatherCollector(settings).collect_data()
+        except Exception as e:
+            logger.error(f"Weather collection error: {e}")
+            return {"error": str(e), "current": {}}
+
+    async def _collect_jokes(self):
+        try:
+            settings = Settings()
+            return await JokesCollector(settings).collect_data()
+        except Exception as e:
+            logger.error(f"Jokes collection error: {e}")
+            return {"error": str(e), "joke": "Failed to load joke"}
+
+    async def _collect_participant_enrichment(self):
+        """Warm participant enrichment cache for repeat attendees."""
+        try:
+            result = await _run_participant_enrichment_warmup(max_participants=16)
+            return {
+                "success": True,
+                "warmed": result.get('warmed', 0),
+                "participants": result.get('participants', []),
+                "timestamp": datetime.now().isoformat()
+            }
+        except Exception as e:
+            logger.error(f"Participant enrichment warmup error: {e}")
+            return {"success": False, "error": str(e), "warmed": 0}
     
     def get_cached_data(self, endpoint: str) -> Optional[Dict[str, Any]]:
         """Get cached data for an endpoint if available and fresh."""
-        if endpoint not in self.cache:
-            return None
-            
-        timestamp = self.cache_timestamps.get(endpoint)
-        if not timestamp:
-            return None
-            
-        # Check if cache is still fresh
-        if datetime.now() - timestamp > self.cache_duration:
-            logger.info(f"Cache for {endpoint} is stale")
-            return None
-            
-        return self.cache[endpoint]
+        with self._cache_lock:
+            if endpoint not in self.cache:
+                return None
+
+            timestamp = self.cache_timestamps.get(endpoint)
+            if not timestamp:
+                return None
+
+            # Check if cache is still fresh
+            if datetime.now() - timestamp > self.cache_duration:
+                logger.info(f"Cache for {endpoint} is stale")
+                self.cache.pop(endpoint, None)
+                self.cache_timestamps.pop(endpoint, None)
+                return None
+
+            return self.cache.get(endpoint)
     
     def stop(self):
         """Stop all background collection threads."""
@@ -430,6 +785,682 @@ class BackgroundDataManager:
         for thread in self.background_tasks.values():
             if thread.is_alive():
                 thread.join(timeout=5)
+
+
+PARTICIPANT_INTEL_CACHE_TTL = timedelta(minutes=10)
+PARTICIPANT_ENRICHMENT_REFRESH_INTERVAL = timedelta(hours=12)
+participant_intel_cache: Dict[str, Dict[str, Any]] = {}
+participant_intel_cache_lock = threading.Lock()
+participant_notes_cache: Dict[str, Any] = {
+    'timestamp': None,
+    'notes': [],
+    'limit': 0
+}
+participant_calendar_cache: Dict[str, Any] = {
+    'timestamp': None,
+    'cache_key': '',
+    'events': []
+}
+self_identity_cache: Dict[str, Any] = {
+    'timestamp': None,
+    'emails': []
+}
+
+
+def _normalize_email(value: str) -> str:
+    """Normalize attendee email-like values from UI/API payloads."""
+    if not value:
+        return ""
+    value = str(value).strip().lower()
+    # Handle values like "Name <email@example.com>"
+    match = re.search(r'<([^>]+)>', value)
+    if match:
+        value = match.group(1).strip().lower()
+    return value
+
+
+def _display_name_for_email(email: str) -> str:
+    """Build a readable name from an email local part."""
+    local = (email.split('@')[0] if '@' in email else email).strip()
+    local = re.sub(r'[._\-]+', ' ', local)
+    local = re.sub(r'\s+', ' ', local).strip()
+    return local.title() if local else email
+
+
+def _extract_links(text: str) -> Dict[str, str]:
+    """Extract likely LinkedIn and GitHub profile links from free text."""
+    linkedin = ""
+    github = ""
+    if not text:
+        return {'linkedin': linkedin, 'github': github}
+
+    linkedin_match = re.search(r'https?://(?:www\.)?linkedin\.com/(?:in|company)/[^\s)\]"\']+', text, re.IGNORECASE)
+    github_match = re.search(r'https?://(?:www\.)?github\.com/[^\s)\]"\']+', text, re.IGNORECASE)
+    if linkedin_match:
+        linkedin = linkedin_match.group(0)
+    if github_match:
+        github = github_match.group(0)
+    return {'linkedin': linkedin, 'github': github}
+
+
+def _extract_github_username(github_url: str) -> str:
+    """Extract GitHub username from a profile URL."""
+    if not github_url:
+        return ''
+    normalized = str(github_url).strip()
+    match = re.search(r'github\.com/([A-Za-z0-9\-]+)', normalized, re.IGNORECASE)
+    if not match:
+        return ''
+    username = match.group(1).strip().strip('/')
+    # Ignore obvious non-profile routes.
+    if username.lower() in {'features', 'topics', 'collections', 'marketplace', 'orgs', 'organizations'}:
+        return ''
+    return username
+
+
+def _parse_timestamp(value: Any) -> Optional[datetime]:
+    """Best-effort timestamp parser for cached enrichment metadata."""
+    if not value:
+        return None
+    try:
+        text = str(value).strip()
+        if text.endswith('Z'):
+            text = text.replace('Z', '+00:00')
+        return datetime.fromisoformat(text)
+    except Exception:
+        return None
+
+
+async def _fetch_github_profile_stats(github_url: str) -> Dict[str, Any]:
+    """Fetch public GitHub profile stats for participant enrichment."""
+    username = _extract_github_username(github_url)
+    if not username:
+        return {}
+
+    api_url = f"https://api.github.com/users/{username}"
+    headers = {
+        'Accept': 'application/vnd.github+json',
+        'User-Agent': 'buildly-dashboard-participant-intel'
+    }
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            response = await client.get(api_url, headers=headers)
+            if response.status_code != 200:
+                return {}
+            payload = response.json() or {}
+            return {
+                'username': payload.get('login') or username,
+                'name': payload.get('name') or '',
+                'company': payload.get('company') or '',
+                'followers': int(payload.get('followers') or 0),
+                'following': int(payload.get('following') or 0),
+                'public_repos': int(payload.get('public_repos') or 0),
+                'public_gists': int(payload.get('public_gists') or 0),
+                'profile_url': payload.get('html_url') or github_url,
+                'avatar_url': payload.get('avatar_url') or '',
+                'bio': payload.get('bio') or '',
+                'updated_at': payload.get('updated_at') or ''
+            }
+    except Exception as github_error:
+        logger.warning(f"GitHub enrichment failed for {username}: {github_error}")
+        return {}
+
+
+async def _refresh_participant_enrichment_cache(
+    email: str,
+    contact_map: Dict[str, Any],
+    inferred_linkedin_url: str,
+    inferred_github_url: str
+) -> Dict[str, Any]:
+    """Refresh and persist participant profile enrichment for repeat attendees."""
+    safe_email = _normalize_email(email)
+    if not safe_email:
+        return contact_map or {}
+
+    contact_map = contact_map or {}
+    merged_github_url = contact_map.get('github_url') or inferred_github_url
+    merged_linkedin_url = contact_map.get('linkedin_url') or inferred_linkedin_url
+    github_stats = contact_map.get('github_stats') or {}
+    existing_avatar = contact_map.get('image_url') or contact_map.get('linkedin_image_url') or ''
+
+    refreshed_at = _parse_timestamp(contact_map.get('enrichment_refreshed_at'))
+    stale = not refreshed_at or (datetime.now() - refreshed_at) > PARTICIPANT_ENRICHMENT_REFRESH_INTERVAL
+    should_refresh_github = bool(merged_github_url) and (
+        stale or not github_stats or not existing_avatar
+    )
+
+    updates: Dict[str, Any] = {'email': safe_email}
+    if merged_linkedin_url and merged_linkedin_url != contact_map.get('linkedin_url'):
+        updates['linkedin_url'] = merged_linkedin_url
+    if merged_github_url and merged_github_url != contact_map.get('github_url'):
+        updates['github_url'] = merged_github_url
+
+    if should_refresh_github:
+        stats = await _fetch_github_profile_stats(merged_github_url)
+        if stats:
+            updates['github_stats'] = stats
+            updates['enrichment_source'] = 'github_api'
+            updates['enrichment_refreshed_at'] = datetime.now().isoformat()
+            if stats.get('profile_url'):
+                updates['github_url'] = stats.get('profile_url')
+            if stats.get('avatar_url') and not existing_avatar:
+                updates['image_url'] = stats.get('avatar_url')
+
+    if len(updates) > 1:
+        db.save_participant_contact(updates)
+        refreshed = db.get_participant_contact(safe_email)
+        if refreshed:
+            return refreshed
+
+    return contact_map
+
+
+def _collapse_double_letters(value: str) -> str:
+    """Normalize repeated letters (e.g. patriicia -> patricia)."""
+    if not value:
+        return ''
+    return re.sub(r'(.)\1+', r'\1', value.lower())
+
+
+def _text_mentions_person(text: str, email: str, name_hint: str) -> bool:
+    """Fast heuristic for matching notes/tasks to a participant."""
+    if not text:
+        return False
+    lowered = text.lower()
+    if email and email in lowered:
+        return True
+
+    local = email.split('@')[0] if '@' in email else ''
+    if local and local in lowered:
+        return True
+
+    first_name = (name_hint.split(' ')[0] if name_hint else '').strip().lower()
+    if first_name and len(first_name) > 2 and first_name in lowered:
+        return True
+
+    # Handle common misspellings with repeated characters (Patriicia vs Patricia).
+    collapsed_text = _collapse_double_letters(lowered)
+    collapsed_name = _collapse_double_letters(first_name)
+    if collapsed_name and len(collapsed_name) > 2 and collapsed_name in collapsed_text:
+        return True
+    return False
+
+
+async def _get_known_self_emails() -> List[str]:
+    """Resolve the signed-in user's email aliases for participant exclusion."""
+    now = datetime.now()
+    ts = self_identity_cache.get('timestamp')
+    if ts and (now - ts) < timedelta(minutes=30):
+        return list(self_identity_cache.get('emails', []))
+
+    emails = set()
+
+    try:
+        saved_self = db.get_setting('self_emails', [])
+        if isinstance(saved_self, str):
+            saved_self = [item.strip() for item in saved_self.split(',') if item.strip()]
+        for item in (saved_self or []):
+            normalized = _normalize_email(item)
+            if normalized and '@' in normalized:
+                emails.add(normalized)
+    except Exception:
+        pass
+
+    try:
+        profile = db.get_user_profile() or {}
+        for key in ('email', 'primary_email'):
+            normalized = _normalize_email(profile.get(key, ''))
+            if normalized and '@' in normalized:
+                emails.add(normalized)
+    except Exception:
+        pass
+
+    # Try to resolve primary Gmail account email if available.
+    try:
+        from google.oauth2.credentials import Credentials
+        from googleapiclient.discovery import build
+
+        tokens_file = project_root / "tokens" / "google_credentials.json"
+        if tokens_file.exists():
+            creds = Credentials.from_authorized_user_file(
+                str(tokens_file),
+                [
+                    'https://www.googleapis.com/auth/gmail.readonly',
+                    'https://www.googleapis.com/auth/userinfo.email'
+                ]
+            )
+            service = build('gmail', 'v1', credentials=creds)
+            profile_data = service.users().getProfile(userId='me').execute()
+            normalized = _normalize_email(profile_data.get('emailAddress', ''))
+            if normalized and '@' in normalized:
+                emails.add(normalized)
+    except Exception:
+        pass
+
+    self_identity_cache['timestamp'] = now
+    self_identity_cache['emails'] = sorted(emails)
+    return list(self_identity_cache['emails'])
+
+
+async def _get_notes_snapshot_for_participants(limit: int = 40) -> List[Dict[str, Any]]:
+    """Load notes context with TTL cache to avoid repeated expensive scans."""
+    now = datetime.now()
+    with participant_intel_cache_lock:
+        ts = participant_notes_cache.get('timestamp')
+        cached_limit = int(participant_notes_cache.get('limit') or 0)
+        if ts and (now - ts) < PARTICIPANT_INTEL_CACHE_TTL and cached_limit >= int(limit):
+            return participant_notes_cache.get('notes', [])
+
+    try:
+        from collectors.notes_collector import collect_all_notes
+
+        notes_config = db.get_credentials('notes') or {}
+        obsidian_path = (
+            os.getenv('OBSIDIAN_VAULT_PATH') or
+            db.get_setting('obsidian_vault_path') or
+            notes_config.get('obsidian_vault_path')
+        )
+        gdrive_folder_id = (
+            os.getenv('GOOGLE_DRIVE_NOTES_FOLDER_ID') or
+            db.get_setting('google_drive_notes_folder_id') or
+            notes_config.get('google_drive_folder_id')
+        )
+
+        # Keep this endpoint responsive: skip Apple Notes and cap timeout.
+        result = await asyncio.wait_for(
+            asyncio.to_thread(
+                collect_all_notes,
+                obsidian_path=obsidian_path,
+                gdrive_folder_id=gdrive_folder_id,
+                include_apple_notes=False,
+                limit=limit
+            ),
+            timeout=18.0
+        )
+        notes = result.get('notes', []) if isinstance(result, dict) else []
+    except Exception as note_error:
+        logger.warning(f"Participant intelligence notes fetch fallback: {note_error}")
+        notes = []
+
+    with participant_intel_cache_lock:
+        participant_notes_cache['timestamp'] = now
+        participant_notes_cache['notes'] = notes
+        participant_notes_cache['limit'] = int(limit)
+    return notes
+
+
+async def _get_calendar_snapshot_for_participants(
+    lookback_days: int = 365,
+    future_days: int = 30,
+    max_events: int = 500
+) -> List[Dict[str, Any]]:
+    """Load broader calendar context for participant intelligence with TTL cache."""
+    lookback_days = max(30, min(int(lookback_days), 3650))
+    future_days = max(0, min(int(future_days), 365))
+    max_events = max(50, min(int(max_events), 1500))
+    cache_key = f"{lookback_days}:{future_days}:{max_events}"
+    now = datetime.now()
+
+    with participant_intel_cache_lock:
+        ts = participant_calendar_cache.get('timestamp')
+        if (
+            ts and
+            (now - ts) < PARTICIPANT_INTEL_CACHE_TTL and
+            participant_calendar_cache.get('cache_key') == cache_key
+        ):
+            return participant_calendar_cache.get('events', [])
+
+    events_by_key: Dict[str, Dict[str, Any]] = {}
+
+    # Start with background cached calendar events.
+    cached_calendar = background_manager.get_cached_data('calendar') or {}
+    cached_events = cached_calendar.get('events') if isinstance(cached_calendar, dict) else []
+    for event in (cached_events or []):
+        marker = event.get('event_id') or f"{event.get('summary', '')}:{event.get('start', '')}"
+        if marker:
+            events_by_key[marker] = event
+
+    # Pull deeper history directly from Calendar API for richer participant context.
+    if COLLECTORS_AVAILABLE:
+        try:
+            settings = Settings()
+            collector = CalendarCollector(settings)
+            start_date = now - timedelta(days=lookback_days)
+            end_date = now + timedelta(days=future_days)
+            deep_events = await asyncio.wait_for(
+                collector.collect_events(start_date, end_date),
+                timeout=20.0
+            )
+
+            for event in (deep_events or []):
+                start_time = event.get('start_time')
+                end_time = event.get('end_time')
+                event_id = event.get('id', '')
+                formatted = {
+                    'event_id': event_id,
+                    'summary': event.get('summary', ''),
+                    'description': event.get('description', ''),
+                    'organizer': event.get('organizer', ''),
+                    'attendees': event.get('attendees', []) or [],
+                    'start': start_time.isoformat() if hasattr(start_time, 'isoformat') else str(start_time or ''),
+                    'end': end_time.isoformat() if hasattr(end_time, 'isoformat') else str(end_time or ''),
+                    'updated': event.get('updated', ''),
+                    'calendar_url': f"https://calendar.google.com/calendar/event?eid={event_id}" if event_id else ''
+                }
+                marker = formatted.get('event_id') or f"{formatted.get('summary', '')}:{formatted.get('start', '')}"
+                if marker:
+                    events_by_key[marker] = formatted
+        except Exception as calendar_error:
+            logger.warning(f"Participant intelligence deep calendar fallback: {calendar_error}")
+
+    merged_events = list(events_by_key.values())
+    merged_events.sort(key=lambda item: str(item.get('start', '')), reverse=True)
+    merged_events = merged_events[:max_events]
+
+    with participant_intel_cache_lock:
+        participant_calendar_cache['timestamp'] = now
+        participant_calendar_cache['cache_key'] = cache_key
+        participant_calendar_cache['events'] = merged_events
+
+    return merged_events
+
+
+async def _run_participant_enrichment_warmup(max_participants: int = 16) -> Dict[str, Any]:
+    """Preload participant intelligence for recurring attendees and persist enrichment cache."""
+    max_participants = max(4, min(int(max_participants), 40))
+
+    calendar_events = await _get_calendar_snapshot_for_participants(
+        lookback_days=365,
+        future_days=30,
+        max_events=700
+    )
+    if not calendar_events:
+        return {'warmed': 0, 'participants': []}
+
+    self_emails = set(await _get_known_self_emails())
+    counts: Dict[str, int] = {}
+    for event in calendar_events:
+        attendees = event.get('attendees') or []
+        organizer = event.get('organizer', '')
+        values = list(attendees)
+        if organizer:
+            values.append(organizer)
+        for value in values:
+            normalized = _normalize_email(value)
+            if not normalized or '@' not in normalized or normalized in self_emails:
+                continue
+            counts[normalized] = counts.get(normalized, 0) + 1
+
+    if not counts:
+        return {'warmed': 0, 'participants': []}
+
+    prioritized = [
+        email for email, _ in sorted(counts.items(), key=lambda item: item[1], reverse=True)[:max_participants]
+    ]
+
+    notes = await _get_notes_snapshot_for_participants(limit=180)
+    warmed: List[str] = []
+    for email in prioritized:
+        try:
+            await _build_participant_intelligence(
+                email=email,
+                notes=notes,
+                event_context={
+                    'event_id': 'participant-warmup',
+                    'title': 'Participant Warmup',
+                    'description': '',
+                    'organizer': '',
+                    'attendees': [email],
+                    'start': datetime.now().isoformat()
+                },
+                calendar_events=calendar_events,
+                recent_email_limit=15,
+                todo_limit=15
+            )
+            warmed.append(email)
+        except Exception as warm_error:
+            logger.warning(f"Participant warmup failed for {email}: {warm_error}")
+
+    return {
+        'warmed': len(warmed),
+        'participants': warmed
+    }
+
+
+async def _build_participant_intelligence(
+    email: str,
+    notes: List[Dict[str, Any]],
+    event_context: Dict[str, Any],
+    calendar_events: List[Dict[str, Any]],
+    recent_email_limit: int = 20,
+    todo_limit: int = 20
+) -> Dict[str, Any]:
+    """Aggregate participant context from emails, calendar, tasks, notes, and profile hints."""
+    safe_email = _normalize_email(email)
+    if not safe_email:
+        return {}
+
+    name_hint = _display_name_for_email(safe_email)
+    cache_key = f"{safe_email}:{event_context.get('event_id', '')}"
+
+    with participant_intel_cache_lock:
+        cached = participant_intel_cache.get(cache_key)
+        if cached and (datetime.now() - cached['timestamp']) < PARTICIPANT_INTEL_CACHE_TTL:
+            return cached['data']
+
+    email_pattern = f"%{safe_email}%"
+    contact_map = db.get_participant_contact(safe_email) or {}
+
+    with db.get_connection() as conn:
+        cursor = conn.cursor()
+
+        cursor.execute(
+            """
+            SELECT COUNT(*) AS total, MAX(received_date) AS last_date
+            FROM emails
+            WHERE LOWER(sender) LIKE ? OR LOWER(recipient) LIKE ?
+            """,
+            (email_pattern, email_pattern)
+        )
+        email_stats = cursor.fetchone() or {'total': 0, 'last_date': None}
+
+        cursor.execute(
+            """
+            SELECT id, subject, sender, recipient, received_date, body
+            FROM emails
+            WHERE LOWER(sender) LIKE ? OR LOWER(recipient) LIKE ?
+            ORDER BY received_date DESC
+            LIMIT ?
+            """,
+            (email_pattern, email_pattern, max(5, min(int(recent_email_limit), 100)))
+        )
+        recent_email_rows = cursor.fetchall() or []
+
+        todo_search = f"%{safe_email.split('@')[0]}%"
+        cursor.execute(
+            """
+            SELECT id, title, description, source, source_url, source_preview, status, due_date, created_at
+            FROM universal_todos
+            WHERE LOWER(title) LIKE ?
+               OR LOWER(COALESCE(description, '')) LIKE ?
+               OR LOWER(COALESCE(source_preview, '')) LIKE ?
+               OR LOWER(COALESCE(source_url, '')) LIKE ?
+            ORDER BY created_at DESC
+                LIMIT ?
+            """,
+                (email_pattern, email_pattern, todo_search, email_pattern, max(10, min(int(todo_limit), 100)))
+        )
+        todo_rows = cursor.fetchall() or []
+
+    participant_meetings = []
+    for event in calendar_events:
+        attendees = event.get('attendees') or []
+        attendees_norm = {_normalize_email(item) for item in attendees}
+        organizer_norm = _normalize_email(event.get('organizer', ''))
+        if safe_email in attendees_norm or safe_email == organizer_norm:
+            participant_meetings.append(event)
+
+    # Ensure current event context contributes to participant meeting count.
+    context_attendees = {_normalize_email(item) for item in (event_context.get('attendees') or [])}
+    context_organizer = _normalize_email(event_context.get('organizer', ''))
+    if safe_email in context_attendees or safe_email == context_organizer:
+        participant_meetings.append({
+            'event_id': event_context.get('event_id', ''),
+            'summary': event_context.get('title', ''),
+            'start': event_context.get('start', None)
+        })
+
+    unique_meeting_ids = set()
+    deduped_meetings = []
+    for meeting in participant_meetings:
+        marker = meeting.get('event_id') or f"{meeting.get('summary', '')}:{meeting.get('start', '')}"
+        if marker in unique_meeting_ids:
+            continue
+        unique_meeting_ids.add(marker)
+        deduped_meetings.append(meeting)
+
+    participant_notes = []
+    link_text_pool: List[str] = []
+    for note in notes:
+        title = str(note.get('title') or '')
+        preview = str(note.get('preview') or '')
+        content_blob = f"{title}\n{preview}"
+        if _text_mentions_person(content_blob, safe_email, name_hint):
+            participant_notes.append({
+                'title': title,
+                'preview': preview[:280],
+                'source': note.get('source', ''),
+                'modified_at': note.get('modified_at', ''),
+                'url': note.get('url', ''),
+                'path': note.get('relative_path', '')
+            })
+            link_text_pool.append(content_blob)
+
+    # Add meeting description snippets as note-like context for recent events.
+    for meeting in deduped_meetings:
+        meeting_description = str(meeting.get('description') or event_context.get('description') or '')
+        if not meeting_description:
+            continue
+        if _text_mentions_person(meeting_description, safe_email, name_hint):
+            participant_notes.append({
+                'title': meeting.get('summary') or event_context.get('title') or 'Meeting Note',
+                'preview': meeting_description[:280],
+                'source': 'calendar_event',
+                'modified_at': meeting.get('updated') or event_context.get('start') or datetime.now().isoformat(),
+                'url': meeting.get('calendar_url') or '',
+                'path': ''
+            })
+            link_text_pool.append(meeting_description)
+
+    for row in recent_email_rows:
+        link_text_pool.append(str(row['body'] or ''))
+    for row in todo_rows:
+        link_text_pool.append(str(row['description'] or ''))
+        link_text_pool.append(str(row['source_url'] or ''))
+
+    linkedin_url = ''
+    github_url = ''
+    for blob in link_text_pool:
+        links = _extract_links(blob)
+        if not linkedin_url and links['linkedin']:
+            linkedin_url = links['linkedin']
+        if not github_url and links['github']:
+            github_url = links['github']
+        if linkedin_url and github_url:
+            break
+
+    contact_map = await _refresh_participant_enrichment_cache(
+        safe_email,
+        contact_map,
+        linkedin_url,
+        github_url
+    )
+
+    relationship_signals = []
+    if email_stats['total']:
+        relationship_signals.append(f"{email_stats['total']} emails exchanged")
+    if deduped_meetings:
+        relationship_signals.append(f"{len(deduped_meetings)} calendar meetings")
+    if participant_notes:
+        relationship_signals.append(f"{len(participant_notes)} note mentions")
+    if todo_rows:
+        relationship_signals.append(f"{len(todo_rows)} related todos")
+
+    if relationship_signals:
+        how_known = "Known via " + ", ".join(relationship_signals)
+    else:
+        how_known = "No prior interactions found in local dashboard data"
+
+    if contact_map.get('relationship_notes'):
+        how_known = contact_map.get('relationship_notes')
+
+    avatar_hash = hashlib.md5(safe_email.encode('utf-8')).hexdigest()
+    avatar_url = f"https://www.gravatar.com/avatar/{avatar_hash}?d=identicon&s=160"
+
+    if contact_map.get('display_name'):
+        name_hint = contact_map.get('display_name')
+    if contact_map.get('linkedin_url'):
+        linkedin_url = contact_map.get('linkedin_url')
+    if contact_map.get('github_url'):
+        github_url = contact_map.get('github_url')
+    if contact_map.get('image_url'):
+        avatar_url = contact_map.get('image_url')
+    elif contact_map.get('linkedin_image_url'):
+        avatar_url = contact_map.get('linkedin_image_url')
+
+    github_stats = contact_map.get('github_stats') or {}
+
+    data = {
+        'email': safe_email,
+        'name': name_hint,
+        'how_known': how_known,
+        'emails_exchanged': int(email_stats['total'] or 0),
+        'last_email_at': email_stats['last_date'],
+        'meetings_count': len(deduped_meetings),
+        'latest_meeting_notes': sorted(
+            participant_notes,
+            key=lambda item: item.get('modified_at', ''),
+            reverse=True
+        )[:5],
+        'related_todos': [
+            {
+                'id': row['id'],
+                'title': row['title'],
+                'status': row['status'],
+                'source': row['source'],
+                'due_date': row['due_date'],
+                'created_at': row['created_at'],
+                'source_url': row['source_url']
+            }
+            for row in todo_rows
+        ],
+        'profiles': {
+            'linkedin': linkedin_url,
+            'github': github_url
+        },
+        'github_stats': github_stats,
+        'images': {
+            'avatar': avatar_url,
+            'linkedin_portrait': contact_map.get('linkedin_image_url') or ''
+        },
+        'contact_notes': contact_map.get('notes') or '',
+        'recent_emails': [
+            {
+                'id': row['id'],
+                'subject': row['subject'],
+                'sender': row['sender'],
+                'received_date': row['received_date']
+            }
+            for row in recent_email_rows
+        ][:10]
+    }
+
+    with participant_intel_cache_lock:
+        participant_intel_cache[cache_key] = {
+            'timestamp': datetime.now(),
+            'data': data
+        }
+    return data
     
     # Collection methods (these will be implemented to call the actual collectors)
     async def _collect_calendar(self):
@@ -501,9 +1532,27 @@ class BackgroundDataManager:
     
     async def _collect_email(self):
         try:
-            from config.settings import Settings
-            settings = Settings()
-            collector = GmailCollector(settings)
+            # Create proper account config for GmailCollector (same as /api/email endpoint)
+            tokens_file = project_root / "tokens" / "google_credentials.json"
+            if not tokens_file.exists():
+                return {
+                    "emails": [],
+                    "total_count": 0,
+                    "unread_count": 0,
+                    "authenticated": False,
+                    "error": "Not authenticated with Google"
+                }
+            
+            account_config = {
+                'name': 'primary',
+                'credentials_file': str(tokens_file),
+                'scopes': [
+                    'https://www.googleapis.com/auth/gmail.readonly',
+                    'https://www.googleapis.com/auth/calendar.readonly'
+                ]
+            }
+            
+            collector = GmailCollector(account_config)
             return await collector.collect_data()
         except Exception as e:
             logger.error(f"Email collection error: {e}")
@@ -631,9 +1680,464 @@ class BackgroundDataManager:
             logger.error(f"Jokes collection error: {e}")
             return {"error": str(e), "joke": "Failed to load joke"}
 
+    async def _collect_participant_enrichment(self):
+        """Warm participant enrichment cache for repeat attendees."""
+        try:
+            result = await _run_participant_enrichment_warmup(max_participants=16)
+            return {
+                "success": True,
+                "warmed": result.get('warmed', 0),
+                "participants": result.get('participants', []),
+                "timestamp": datetime.now().isoformat()
+            }
+        except Exception as e:
+            logger.error(f"Participant enrichment warmup error: {e}")
+            return {"success": False, "error": str(e), "warmed": 0}
+
 
 # Initialize background data manager
 background_manager = BackgroundDataManager()
+
+# In-memory diagnostics event log
+DIAGNOSTIC_EVENTS: List[Dict[str, Any]] = []
+DIAGNOSTIC_LOCK = threading.Lock()
+DIAGNOSTIC_MAX_EVENTS = 200
+
+
+def _extract_json_from_ai_text(raw_text: str) -> Optional[Dict[str, Any]]:
+    """Attempt to parse JSON from AI output, including fenced blocks."""
+    text = (raw_text or '').strip()
+    if not text:
+        return None
+
+    try:
+        return json.loads(text)
+    except Exception:
+        pass
+
+    if '```' in text:
+        for block in text.split('```'):
+            candidate = block.replace('json', '', 1).strip()
+            if not candidate:
+                continue
+            try:
+                return json.loads(candidate)
+            except Exception:
+                continue
+
+    start = text.find('{')
+    end = text.rfind('}')
+    if start >= 0 and end > start:
+        candidate = text[start:end + 1]
+        try:
+            return json.loads(candidate)
+        except Exception:
+            return None
+
+    return None
+
+
+def _build_default_diagnostic(error_message: str) -> Dict[str, Any]:
+    """Fallback diagnostic when AI parsing fails or provider is unavailable."""
+    message = (error_message or '').strip() or 'Unknown error'
+    return {
+        "summary": f"Dashboard reported: {message}",
+        "likely_causes": [
+            "Temporary service interruption",
+            "Misconfigured provider or credentials",
+            "Module-specific runtime exception"
+        ],
+        "confidence": "low",
+        "can_auto_fix": False,
+        "repair_actions": [],
+        "code_fixes": [],
+        "commit_message": "",
+        "pr_title": "",
+        "pr_body": "",
+        "manual_steps": [
+            "Open the affected module and click refresh.",
+            "Check Settings → AI/Providers and verify connectivity.",
+            "Review dashboard.log for backend stack traces."
+        ]
+    }
+
+
+def _allowed_repair_actions(module_name: Optional[str] = None) -> List[Dict[str, Any]]:
+    actions = [
+        {
+            "key": "apply_code_fix",
+            "label": "Apply Code Fix & Create PR",
+            "description": "AI writes file patches, commits to a fix branch, pushes, and opens a GitHub Pull Request for review.",
+            "requires_approval": True
+        },
+        {
+            "key": "refresh_module",
+            "label": "Refresh Module Cache",
+            "description": "Clears module cache and refreshes data for one widget.",
+            "requires_approval": True
+        },
+        {
+            "key": "restart_dashboard",
+            "label": "Restart Dashboard Service",
+            "description": "Runs ./ops/startup.sh restart to recover from service-level failures.",
+            "requires_approval": True
+        }
+    ]
+
+    if module_name:
+        for action in actions:
+            if action["key"] == "refresh_module":
+                action["module"] = module_name
+    return actions
+
+
+async def _run_ai_diagnostic(
+    *,
+    title: str,
+    module_name: str,
+    source: str,
+    error_message: str,
+    stack_trace: str,
+    context: Dict[str, Any],
+    include_repair_actions: bool = True
+) -> Dict[str, Any]:
+    """Use configured AI provider to generate diagnosis and repair plan."""
+    fallback = _build_default_diagnostic(error_message)
+
+    if not AI_ASSISTANT_AVAILABLE:
+        return fallback
+
+    try:
+        ai_service = get_ai_service(db, settings)
+        allowed_actions = _allowed_repair_actions(module_name if module_name else None)
+
+        log_context = _get_error_log_context(module_name, lines=80)
+
+        prompt = f"""
+    You are the dashboard self-diagnostic assistant.
+    Analyze this runtime issue and return STRICT JSON only.
+
+    Issue Title: {title}
+    Module: {module_name or 'unknown'}
+    Source: {source or 'unknown'}
+    Error Message: {error_message or 'n/a'}
+    Stack Trace:
+    {stack_trace or 'n/a'}
+    Context JSON:
+    {json.dumps(context or {}, ensure_ascii=False)[:4000]}
+
+    Recent ERROR/WARNING log lines (from dashboard.log):
+    {log_context[:3000]}
+
+    Allowed auto repair actions:
+    {json.dumps(allowed_actions, ensure_ascii=False)}
+
+    Project source files are under src/ (Python backend: src/main.py, collectors, processors; JS frontend: src/static/dashboard.js; HTML: src/templates/dashboard_modern.html).
+
+Return this JSON schema exactly:
+{{
+  "summary": "short explanation",
+  "likely_causes": ["cause 1", "cause 2"],
+  "confidence": "low|medium|high",
+  "can_auto_fix": true,
+  "repair_actions": [
+    {{"key":"apply_code_fix","label":"Apply Code Fix & Create PR","description":"...","requires_approval":true}},
+    {{"key":"refresh_module","label":"Refresh Module Cache","description":"...","requires_approval":true,"module":"emails"}},
+    {{"key":"restart_dashboard","label":"Restart Dashboard Service","description":"...","requires_approval":true}}
+  ],
+  "code_fixes": [
+    {{
+      "file": "src/relative/path/to/file.py",
+      "description": "what this change does",
+      "old_snippet": "exact existing code to replace (10-30 lines with context)",
+      "new_snippet": "replacement code"
+    }}
+  ],
+  "commit_message": "fix(<module>): short imperative description",
+  "pr_title": "Fix: <short title>",
+  "pr_body": "## Problem\n...\n## Solution\n...\n## Testing\n...",
+  "manual_steps": ["step 1", "step 2"]
+}}
+
+Rules:
+- If uncertain, set can_auto_fix=false and leave code_fixes empty.
+- Only include apply_code_fix action when you have specific, concrete code_fixes.
+- Never invent unsupported action keys.
+- code_fixes old_snippet must be exact verbatim text from the source file.
+- Prefer concise, actionable steps.
+""".strip()
+
+        result = await ai_service.chat(
+            message=prompt,
+            conversation_id=f"diag_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+            include_context=False,
+            assistant_id=None
+        )
+
+        if not result.get('success'):
+            return fallback
+
+        parsed = _extract_json_from_ai_text(result.get('response', ''))
+        if not parsed or not isinstance(parsed, dict):
+            return fallback
+
+        # Parse code_fixes from AI output
+        raw_code_fixes = parsed.get("code_fixes") if isinstance(parsed.get("code_fixes"), list) else []
+        normalized_fixes = []
+        for fix in raw_code_fixes:
+            if not isinstance(fix, dict):
+                continue
+            file_path = str(fix.get("file") or "").strip()
+            old_snippet = str(fix.get("old_snippet") or "").strip()
+            new_snippet = str(fix.get("new_snippet") or "").strip()
+            if file_path and old_snippet and new_snippet:
+                normalized_fixes.append({
+                    "file": file_path,
+                    "description": str(fix.get("description") or "").strip(),
+                    "old_snippet": old_snippet,
+                    "new_snippet": new_snippet
+                })
+
+        diagnosis = {
+            "summary": parsed.get("summary") or fallback["summary"],
+            "likely_causes": parsed.get("likely_causes") or fallback["likely_causes"],
+            "confidence": parsed.get("confidence") or "low",
+            "can_auto_fix": bool(parsed.get("can_auto_fix", False)) if include_repair_actions else False,
+            "repair_actions": parsed.get("repair_actions") if include_repair_actions else [],
+            "code_fixes": normalized_fixes,
+            "commit_message": str(parsed.get("commit_message") or "").strip() or f"fix({module_name or 'general'}): AI-assisted repair",
+            "pr_title": str(parsed.get("pr_title") or "").strip() or title,
+            "pr_body": str(parsed.get("pr_body") or "").strip(),
+            "manual_steps": parsed.get("manual_steps") or fallback["manual_steps"]
+        }
+
+        if not isinstance(diagnosis["repair_actions"], list):
+            diagnosis["repair_actions"] = []
+
+        allowed_keys = {"restart_dashboard", "refresh_module", "apply_code_fix"}
+        normalized_actions = []
+        for action in diagnosis["repair_actions"]:
+            if not isinstance(action, dict):
+                continue
+            key = str(action.get("key", "")).strip()
+            if key not in allowed_keys:
+                continue
+            # Only allow apply_code_fix if we actually have code patches
+            if key == "apply_code_fix" and not normalized_fixes:
+                continue
+            normalized_actions.append({
+                "key": key,
+                "label": action.get("label") or key.replace('_', ' ').title(),
+                "description": action.get("description") or "",
+                "requires_approval": True,
+                "module": action.get("module") or module_name
+            })
+
+        diagnosis["repair_actions"] = normalized_actions
+        if not diagnosis["repair_actions"]:
+            diagnosis["can_auto_fix"] = False
+
+        return diagnosis
+    except Exception as ai_err:
+        logger.warning(f"AI diagnostic generation failed: {ai_err}")
+        return fallback
+
+
+def _push_diagnostic_event(event: Dict[str, Any]) -> Dict[str, Any]:
+    with DIAGNOSTIC_LOCK:
+        DIAGNOSTIC_EVENTS.append(event)
+        if len(DIAGNOSTIC_EVENTS) > DIAGNOSTIC_MAX_EVENTS:
+            DIAGNOSTIC_EVENTS.pop(0)
+    return event
+
+
+def _find_diagnostic_event(event_id: str) -> Optional[Dict[str, Any]]:
+    with DIAGNOSTIC_LOCK:
+        for item in DIAGNOSTIC_EVENTS:
+            if item.get('id') == event_id:
+                return item
+    return None
+
+
+def _get_recent_logs(
+    lines: int = 200,
+    level_filter: Optional[str] = None,
+    module_filter: Optional[str] = None
+) -> List[str]:
+    """Read recent lines from the rotating log file, with optional level/module filter."""
+    try:
+        if not LOG_FILE_PATH.exists():
+            return []
+        with open(str(LOG_FILE_PATH), "r", encoding="utf-8", errors="replace") as f:
+            f.seek(0, 2)
+            size = f.tell()
+            read_size = min(size, 512 * 1024)  # at most 512 KB
+            f.seek(max(0, size - read_size))
+            raw_lines = f.readlines()
+
+        result = []
+        level_upper = (level_filter or "").upper()
+        module_lower = (module_filter or "").lower()
+
+        for line in raw_lines:
+            line = line.rstrip()
+            if not line:
+                continue
+            if level_upper and level_upper not in line:
+                continue
+            if module_lower and module_lower not in line.lower():
+                continue
+            result.append(line)
+
+        return result[-lines:]
+    except Exception as e:
+        logger.warning(f"Could not read log file: {e}")
+        return []
+
+
+def _get_error_log_context(module_name: Optional[str] = None, lines: int = 60) -> str:
+    """Fetch recent ERROR/WARNING lines for AI prompts."""
+    all_lines = _get_recent_logs(lines=lines, module_filter=module_name or None)
+    relevant = [l for l in all_lines if "ERROR" in l or "WARNING" in l or "Traceback" in l or "Exception" in l]
+    if not relevant:
+        relevant = _get_recent_logs(lines=30, level_filter="ERROR")
+    return "\n".join(relevant[-50:]) if relevant else "(no recent errors in log)"
+
+
+def _get_github_token_and_repo() -> Dict[str, Any]:
+    """Return github token, owner, and repo from credentials + git remote."""
+    try:
+        from database import get_credentials
+        github_creds = get_credentials('github') or {}
+        token = github_creds.get('token') or ''
+    except Exception:
+        token = ''
+
+    owner = ''
+    repo = ''
+    try:
+        result = subprocess.run(
+            ['git', 'remote', 'get-url', 'origin'],
+            capture_output=True, text=True, timeout=5,
+            cwd=str(project_root)
+        )
+        remote_url = result.stdout.strip()
+        # Handle https://github.com/owner/repo.git or git@github.com:owner/repo.git
+        if 'github.com' in remote_url:
+            parts = remote_url.rstrip('.git').replace(':', '/').split('/')
+            if len(parts) >= 2:
+                repo = parts[-1]
+                owner = parts[-2]
+    except Exception:
+        pass
+
+    return {'token': token, 'owner': owner, 'repo': repo}
+
+
+def _create_fix_branch(event_id: str) -> str:
+    """Create and checkout a new fix branch. Returns branch name."""
+    short_id = (event_id or 'fix').split('_')[-1][:8]
+    branch = f"fix/ai-diag-{short_id}"
+    subprocess.run(
+        ['git', 'checkout', '-b', branch],
+        check=True, capture_output=True, timeout=15,
+        cwd=str(project_root)
+    )
+    return branch
+
+
+def _apply_file_patches(patches: List[Dict[str, Any]]) -> List[str]:
+    """Apply old→new snippet replacements to source files. Returns list of modified file paths."""
+    modified = []
+    for patch in patches:
+        rel_path = (patch.get('file') or '').strip()
+        old_snippet = patch.get('old_snippet') or ''
+        new_snippet = patch.get('new_snippet') or ''
+        if not rel_path or not old_snippet:
+            continue
+        abs_path = project_root / rel_path
+        if not abs_path.exists():
+            logger.warning(f"Patch target file not found: {abs_path}")
+            continue
+        content = abs_path.read_text(encoding='utf-8')
+        if old_snippet not in content:
+            logger.warning(f"Snippet not found in {rel_path}, skipping patch")
+            continue
+        abs_path.write_text(content.replace(old_snippet, new_snippet, 1), encoding='utf-8')
+        modified.append(rel_path)
+    return modified
+
+
+def _git_commit_and_push(branch: str, file_paths: List[str], commit_message: str) -> str:
+    """Stage files, commit, and push branch. Returns short commit SHA."""
+    for fp in file_paths:
+        subprocess.run(
+            ['git', 'add', fp],
+            check=True, capture_output=True, timeout=10,
+            cwd=str(project_root)
+        )
+    subprocess.run(
+        ['git', 'commit', '-m', commit_message],
+        check=True, capture_output=True, timeout=15,
+        cwd=str(project_root)
+    )
+    subprocess.run(
+        ['git', 'push', 'origin', branch],
+        check=True, capture_output=True, timeout=30,
+        cwd=str(project_root)
+    )
+    result = subprocess.run(
+        ['git', 'rev-parse', '--short', 'HEAD'],
+        capture_output=True, text=True, timeout=5,
+        cwd=str(project_root)
+    )
+    return result.stdout.strip()
+
+
+def _create_github_pr_via_api(
+    token: str, owner: str, repo: str,
+    head_branch: str, base_branch: str,
+    title: str, body: str
+) -> Dict[str, Any]:
+    """Create a GitHub Pull Request via REST API. Returns PR data dict."""
+    import urllib.request as _urllib_request
+    url = f"https://api.github.com/repos/{owner}/{repo}/pulls"
+    payload = json.dumps({
+        "title": title,
+        "body": body or f"AI-generated fix branch `{head_branch}`.",
+        "head": head_branch,
+        "base": base_branch,
+        "draft": False
+    }).encode('utf-8')
+    req = _urllib_request.Request(
+        url,
+        data=payload,
+        headers={
+            'Authorization': f'token {token}',
+            'Accept': 'application/vnd.github.v3+json',
+            'Content-Type': 'application/json'
+        },
+        method='POST'
+    )
+    try:
+        with _urllib_request.urlopen(req, timeout=20) as resp:
+            return json.loads(resp.read().decode('utf-8'))
+    except Exception as pr_err:
+        return {'error': str(pr_err)}
+
+
+def _get_default_branch() -> str:
+    """Get the default branch name (main/master)."""
+    try:
+        result = subprocess.run(
+            ['git', 'symbolic-ref', 'refs/remotes/origin/HEAD'],
+            capture_output=True, text=True, timeout=5,
+            cwd=str(project_root)
+        )
+        ref = result.stdout.strip()  # refs/remotes/origin/main
+        return ref.split('/')[-1] if ref else 'main'
+    except Exception:
+        return 'main'
 
 
 # Load configuration if it exists
@@ -732,7 +2236,7 @@ if assets_dir.exists():
     app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
 
 @app.get("/", response_class=HTMLResponse)
-async def dashboard(code: str = None, state: str = None, error: str = None):
+async def dashboard(code: str = None, state: str = None, error: str = None, ui: str = None):
     """Serve the main dashboard page or handle OAuth callbacks"""
     
     # Check if this is a TickTick OAuth callback
@@ -743,9 +2247,16 @@ async def dashboard(code: str = None, state: str = None, error: str = None):
         else:
             return RedirectResponse(f"/auth/ticktick/callback?code={code}" + (f"&state={state}" if state else ""))
     
-    # Serve the modern template (ONLY SOURCE OF TRUTH)
+    # Pick the UI for this install (see src/config/profile.py):
+    #   family -> templates/dashboard_family.html (+ static/dashboard_family.js)
+    #   modern -> templates/dashboard_modern.html (+ static/dashboard.js)
+    # `?ui=family` / `?ui=modern` overrides per request.
+    profile = (ui or '').strip().lower()
+    if profile not in ('family', 'modern'):
+        profile = get_dashboard_profile()
     src_dir = Path(__file__).parent
-    template_path = src_dir / "templates" / "dashboard_modern.html"
+    template_name = "dashboard_family.html" if profile == 'family' else "dashboard_modern.html"
+    template_path = src_dir / "templates" / template_name
     
     if not template_path.exists():
         logger.error(f"Template not found: {template_path}")
@@ -781,6 +2292,7 @@ async def dashboard(code: str = None, state: str = None, error: str = None):
 @app.get("/api/calendar")
 async def get_calendar():
     """Get calendar events from Google Calendar"""
+    perf_start = time.perf_counter()
     try:
         # Try to get cached data first
         cached_data = background_manager.get_cached_data('calendar')
@@ -856,11 +2368,241 @@ async def get_calendar():
         return {"events": [{"title": "Team Meeting", "time": "9:00 AM - 10:00 AM"}]}
     except Exception as e:
         return {"error": str(e)}
+    finally:
+        _record_perf('endpoints', '/api/calendar', (time.perf_counter() - perf_start) * 1000)
+
+
+@app.post("/api/calendar/participants/intelligence")
+async def get_calendar_participants_intelligence(request: Request):
+    """Build participant intelligence for calendar attendees/organizer."""
+    perf_start = time.perf_counter()
+    try:
+        payload = await request.json()
+        raw_participants = payload.get('participants') or []
+        if isinstance(raw_participants, str):
+            raw_participants = [raw_participants]
+
+        normalized_participants = []
+        for value in raw_participants:
+            email = _normalize_email(value)
+            if email and '@' in email and email not in normalized_participants:
+                normalized_participants.append(email)
+
+        organizer = _normalize_email(payload.get('organizer', ''))
+        if organizer and '@' in organizer and organizer not in normalized_participants:
+            normalized_participants.append(organizer)
+
+        # Do not show participant cards for the signed-in user (Greg/self).
+        self_emails = set(await _get_known_self_emails())
+        normalized_participants = [
+            email for email in normalized_participants
+            if email not in self_emails
+        ]
+
+        normalized_participants = normalized_participants[:12]
+        if not normalized_participants:
+            return {'success': True, 'participants': [], 'excluded_self_emails': sorted(list(self_emails))}
+
+        event_context = {
+            'event_id': str(payload.get('event_id') or ''),
+            'title': str(payload.get('title') or ''),
+            'description': str(payload.get('description') or ''),
+            'organizer': organizer,
+            'attendees': payload.get('participants') or [],
+            'start': payload.get('start')
+        }
+
+        calendar_lookback_days = payload.get('calendar_lookback_days', 365)
+        calendar_future_days = payload.get('calendar_future_days', 30)
+        calendar_max_events = payload.get('calendar_max_events', 500)
+        notes_limit = payload.get('notes_limit', 120)
+        recent_email_limit = payload.get('email_limit', 20)
+        todo_limit = payload.get('todo_limit', 20)
+
+        calendar_events = await _get_calendar_snapshot_for_participants(
+            lookback_days=calendar_lookback_days,
+            future_days=calendar_future_days,
+            max_events=calendar_max_events
+        )
+        notes = await _get_notes_snapshot_for_participants(limit=max(40, min(int(notes_limit), 400)))
+
+        enriched = await asyncio.gather(*[
+            _build_participant_intelligence(
+                email,
+                notes,
+                event_context,
+                calendar_events,
+                recent_email_limit=recent_email_limit,
+                todo_limit=todo_limit
+            )
+            for email in normalized_participants
+        ])
+
+        return {
+            'success': True,
+            'participants': [item for item in enriched if item],
+            'count': len(enriched),
+            'event_id': event_context['event_id'],
+            'excluded_self_emails': sorted(list(self_emails))
+        }
+    except Exception as e:
+        logger.error(f"Error building participant intelligence: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        _record_perf('endpoints', '/api/calendar/participants/intelligence', (time.perf_counter() - perf_start) * 1000)
+
+
+@app.post('/api/calendar/participants/cache/clear')
+async def clear_participant_intelligence_cache(request: Request):
+    """Clear participant intelligence cache entries for manual refresh workflows."""
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+
+    participants = payload.get('participants') or []
+    participants = [_normalize_email(item) for item in participants if _normalize_email(item)]
+
+    cleared = 0
+    with participant_intel_cache_lock:
+        if participants:
+            keys = list(participant_intel_cache.keys())
+            for key in keys:
+                if any(email in key for email in participants):
+                    participant_intel_cache.pop(key, None)
+                    cleared += 1
+        else:
+            cleared = len(participant_intel_cache)
+            participant_intel_cache.clear()
+            participant_notes_cache['timestamp'] = None
+            participant_notes_cache['notes'] = []
+            participant_notes_cache['limit'] = 0
+            participant_calendar_cache['timestamp'] = None
+            participant_calendar_cache['cache_key'] = ''
+            participant_calendar_cache['events'] = []
+
+    return {'success': True, 'cleared': cleared, 'participants': participants}
+
+
+@app.get('/api/participants/contact')
+async def get_participant_contact(email: str):
+    """Get explicit participant mapping data by email."""
+    contact = db.get_participant_contact(email)
+    return {'success': True, 'contact': contact}
+
+
+@app.post('/api/participants/contact')
+async def save_participant_contact(request: Request):
+    """Save explicit participant mapping data (name, links, headshot, notes)."""
+    payload = await request.json()
+    payload['email'] = _normalize_email(payload.get('email', ''))
+    if not payload['email']:
+        raise HTTPException(status_code=400, detail='email is required')
+
+    ok = db.save_participant_contact(payload)
+    if not ok:
+        raise HTTPException(status_code=500, detail='Could not save participant contact')
+
+    # Keep derived caches coherent after manual updates.
+    with participant_intel_cache_lock:
+        keys = list(participant_intel_cache.keys())
+        for key in keys:
+            if payload['email'] in key:
+                participant_intel_cache.pop(key, None)
+
+    return {'success': True, 'contact': db.get_participant_contact(payload['email'])}
+
+
+@app.get('/api/participants/contacts')
+async def list_participant_contacts(limit: int = 200):
+    """List participant contact mappings."""
+    contacts = db.list_participant_contacts(limit=limit)
+    return {
+        'success': True,
+        'contacts': contacts,
+        'count': len(contacts)
+    }
+
+
+@app.get('/api/performance/metrics')
+async def get_performance_metrics():
+    """Expose in-memory timing summaries for major endpoints and collectors."""
+    return {
+        'success': True,
+        'timestamp': datetime.now().isoformat(),
+        'endpoints': _summarize_perf('endpoints'),
+        'background_collectors': _summarize_perf('background_collectors')
+    }
+
+
+@app.post('/api/performance/benchmark')
+async def run_performance_benchmark(request: Request):
+    """Run a lightweight benchmark sweep and return timing snapshots."""
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+
+    iterations = int(payload.get('iterations', 3))
+    iterations = max(1, min(iterations, 10))
+
+    durations = {
+        '/api/calendar': [],
+        '/api/tasks': [],
+        '/api/email': [],
+        '/api/calendar/participants/intelligence': []
+    }
+
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        for _ in range(iterations):
+            start = time.perf_counter()
+            await client.get('http://localhost:8008/api/calendar')
+            durations['/api/calendar'].append((time.perf_counter() - start) * 1000)
+
+            start = time.perf_counter()
+            await client.get('http://localhost:8008/api/tasks')
+            durations['/api/tasks'].append((time.perf_counter() - start) * 1000)
+
+            start = time.perf_counter()
+            await client.get('http://localhost:8008/api/email')
+            durations['/api/email'].append((time.perf_counter() - start) * 1000)
+
+            start = time.perf_counter()
+            await client.post(
+                'http://localhost:8008/api/calendar/participants/intelligence',
+                json={'participants': ['benchmark@example.com'], 'event_id': 'benchmark'}
+            )
+            durations['/api/calendar/participants/intelligence'].append((time.perf_counter() - start) * 1000)
+
+    for metric_name, values in durations.items():
+        for value in values:
+            _record_perf('endpoints', metric_name, value)
+
+    summary = {
+        name: {
+            'avg_ms': round(sum(values) / len(values), 2),
+            'min_ms': round(min(values), 2),
+            'max_ms': round(max(values), 2),
+            'samples': len(values)
+        }
+        for name, values in durations.items()
+    }
+
+    logger.info(f"Performance benchmark complete: {summary}")
+    return {
+        'success': True,
+        'iterations': iterations,
+        'results': summary,
+        'metrics_snapshot': {
+            'endpoints': _summarize_perf('endpoints'),
+            'background_collectors': _summarize_perf('background_collectors')
+        }
+    }
 
 
 @app.post("/api/notes/scan")
 async def scan_notes():
-    """Scan for new notes from Obsidian and Google Drive with detailed feedback."""
+    """Scan for new notes from all configured sources with detailed feedback."""
     try:
         from collectors.notes_collector import collect_all_notes
         from database import get_credentials, DatabaseManager
@@ -885,22 +2627,66 @@ async def scan_notes():
             notes_config.get('google_drive_folder_id')
         )
         
+        # Apple Notes setting (macOS only)
+        include_apple_notes = (
+            os.getenv('INCLUDE_APPLE_NOTES', 'true').lower() == 'true' and
+            str(
+                db.get_setting(
+                    'apple_notes_enabled',
+                    db.get_setting('include_apple_notes', 'true')
+                )
+            ).lower() != 'false'
+        )
+        
+        # Google Keep settings
+        google_keep_email = (
+            os.getenv('GOOGLE_KEEP_EMAIL') or
+            db.get_setting('google_keep_email') or
+            notes_config.get('google_keep_email')
+        )
+        google_keep_token = (
+            os.getenv('GOOGLE_KEEP_TOKEN') or
+            db.get_setting('google_keep_token') or
+            notes_config.get('google_keep_token')
+        )
+        google_keep_labels_str = (
+            os.getenv('GOOGLE_KEEP_LABELS') or
+            db.get_setting('google_keep_labels') or
+            notes_config.get('google_keep_labels', '')
+        )
+        google_keep_labels = [l.strip() for l in google_keep_labels_str.split(',') if l.strip()] if google_keep_labels_str else None
+        
         # Other settings
         limit = int(os.getenv('NOTES_LIMIT', db.get_setting('notes_limit', notes_config.get('notes_limit', 10))))
         
-        logger.info(f"Scanning notes - Obsidian: {obsidian_path}, GDrive: {gdrive_folder_id}")
+        logger.info(f"Scanning notes - Obsidian: {obsidian_path}, GDrive: {gdrive_folder_id}, Apple Notes: {include_apple_notes}, Google Keep: {bool(google_keep_email)}")
         
-        # DEBUG: Log what we're working with
-        logger.info(f"DEBUG - obsidian_path: {repr(obsidian_path)}")
-        logger.info(f"DEBUG - gdrive_folder_id: {repr(gdrive_folder_id)}")
-        
-        # Collect notes from all sources
+        # Collect notes from all sources (run in thread so it cannot block the event loop)
         try:
-            result = collect_all_notes(
-                obsidian_path=obsidian_path,
-                gdrive_folder_id=gdrive_folder_id,
-                limit=limit
+            result = await asyncio.wait_for(
+                asyncio.to_thread(
+                    collect_all_notes,
+                    obsidian_path=obsidian_path,
+                    gdrive_folder_id=gdrive_folder_id,
+                    include_apple_notes=include_apple_notes,
+                    google_keep_email=google_keep_email,
+                    google_keep_token=google_keep_token,
+                    google_keep_labels=google_keep_labels,
+                    limit=limit
+                ),
+                timeout=20.0
             )
+        except asyncio.TimeoutError:
+            logger.error("Notes scan timed out after 20 seconds")
+            return {
+                "success": False,
+                "error": "Notes scan timed out. Please verify Google/Obsidian connectivity and try again.",
+                "notes": [],
+                "obsidian_count": 0,
+                "gdrive_count": 0,
+                "total_todos_found": 0,
+                "suggestions_created": 0
+            }
         except Exception as collect_err:
             logger.error(f"Error in collect_all_notes: {collect_err}")
             logger.error(f"Traceback: {traceback.format_exc()}")
@@ -950,6 +2736,8 @@ async def scan_notes():
             "notes": result['notes'],
             "obsidian_count": result['obsidian_count'],
             "gdrive_count": result['gdrive_count'],
+            "apple_notes_count": result.get('apple_notes_count', 0),
+            "google_keep_count": result.get('google_keep_count', 0),
             "total_todos_found": result['total_todos_found'],
             "suggestions_created": suggestions_created,
             "config_status": {
@@ -957,9 +2745,13 @@ async def scan_notes():
                 'obsidian_path': obsidian_path or 'Not configured',
                 'gdrive_configured': bool(gdrive_folder_id and gdrive_folder_id.strip()),
                 'gdrive_folder_id': gdrive_folder_id or 'Not configured',
+                'apple_notes_enabled': include_apple_notes,
+                'google_keep_configured': bool(google_keep_email and google_keep_token),
                 'notes_by_source': {
                     'obsidian': result['obsidian_count'],
-                    'google_drive': result['gdrive_count']
+                    'google_drive': result['gdrive_count'],
+                    'apple_notes': result.get('apple_notes_count', 0),
+                    'google_keep': result.get('google_keep_count', 0)
                 }
             }
         }
@@ -978,8 +2770,123 @@ async def scan_notes():
             "notes": [],
             "obsidian_count": 0,
             "gdrive_count": 0,
+            "apple_notes_count": 0,
+            "google_keep_count": 0,
             "total_todos_found": 0,
             "suggestions_created": 0
+        }
+
+
+@app.post("/api/notes/sync")
+async def sync_notes(request: Request):
+    """Sync notes between Apple Notes and Obsidian."""
+    try:
+        from collectors.notes_collector import AppleNotesCollector, ObsidianNotesCollector, sync_notes_between_sources
+        from database import DatabaseManager
+        
+        body = await request.json()
+        source = body.get('source', 'apple_notes')  # Source to sync from
+        target = body.get('target', 'obsidian')  # Target to sync to
+        note_ids = body.get('note_ids', [])  # Specific notes to sync (empty = all recent)
+        
+        db = DatabaseManager()
+        
+        # Get Obsidian path
+        obsidian_path = db.get_setting('obsidian_vault_path')
+        if not obsidian_path:
+            return {
+                "success": False,
+                "error": "Obsidian vault path not configured. Please configure it in Settings."
+            }
+        
+        synced_notes = []
+        errors = []
+        
+        if source == 'apple_notes' and target == 'obsidian':
+            # Sync from Apple Notes to Obsidian
+            apple_collector = AppleNotesCollector()
+            obsidian_collector = ObsidianNotesCollector(obsidian_path)
+            
+            # Get Apple Notes
+            apple_notes = apple_collector.collect()
+            
+            if note_ids:
+                # Filter to specific notes
+                apple_notes = [n for n in apple_notes if n.get('id') in note_ids]
+            
+            # Create sync folder in Obsidian
+            sync_folder = os.path.join(obsidian_path, "Apple Notes Sync")
+            os.makedirs(sync_folder, exist_ok=True)
+            
+            for note in apple_notes:
+                try:
+                    # Create markdown file
+                    safe_title = "".join(c for c in note['title'] if c.isalnum() or c in (' ', '-', '_')).strip()
+                    if not safe_title:
+                        safe_title = f"Note_{note.get('id', 'unknown')}"
+                    
+                    file_path = os.path.join(sync_folder, f"{safe_title}.md")
+                    
+                    # Build markdown content
+                    content_lines = [
+                        f"# {note['title']}",
+                        "",
+                        f"**Source:** Apple Notes",
+                        f"**Synced:** {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+                        f"**Original Folder:** {note.get('folder', 'Notes')}",
+                        "",
+                        "---",
+                        "",
+                        note.get('content', note.get('preview', ''))
+                    ]
+                    
+                    # Add TODOs if present
+                    if note.get('todos'):
+                        content_lines.extend([
+                            "",
+                            "## Tasks Found",
+                            ""
+                        ])
+                        for todo in note['todos']:
+                            content_lines.append(f"- [ ] {todo}")
+                    
+                    content = "\n".join(content_lines)
+                    
+                    with open(file_path, 'w', encoding='utf-8') as f:
+                        f.write(content)
+                    
+                    synced_notes.append({
+                        'title': note['title'],
+                        'source': 'apple_notes',
+                        'target_path': file_path
+                    })
+                    
+                except Exception as e:
+                    errors.append({
+                        'note': note.get('title', 'Unknown'),
+                        'error': str(e)
+                    })
+        
+        elif source == 'obsidian' and target == 'apple_notes':
+            # Sync from Obsidian to Apple Notes
+            return {
+                "success": False,
+                "error": "Syncing from Obsidian to Apple Notes is not yet supported. Apple Notes doesn't have a public API for creating notes programmatically."
+            }
+        
+        return {
+            "success": True,
+            "synced": len(synced_notes),
+            "notes": synced_notes,
+            "errors": errors if errors else None,
+            "message": f"Synced {len(synced_notes)} notes from {source} to {target}"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error syncing notes: {e}")
+        return {
+            "success": False,
+            "error": str(e)
         }
 
 
@@ -1010,23 +2917,70 @@ async def get_notes():
             notes_config.get('google_drive_folder_id')  # credentials.yaml
         )
         
+        # Apple Notes setting (macOS only)
+        include_apple_notes = (
+            os.getenv('INCLUDE_APPLE_NOTES', 'true').lower() == 'true' and
+            str(
+                db.get_setting(
+                    'apple_notes_enabled',
+                    db.get_setting('include_apple_notes', 'true')
+                )
+            ).lower() != 'false'
+        )
+        apple_notes_timeout = int(os.getenv('APPLE_NOTES_TIMEOUT', db.get_setting('apple_notes_timeout', 10)))
+
         # Other settings
         limit = int(os.getenv('NOTES_LIMIT', db.get_setting('notes_limit', notes_config.get('notes_limit', 10))))
         auto_create = os.getenv('AUTO_CREATE_TASKS', str(db.get_setting('auto_create_tasks', notes_config.get('auto_create_tasks', True)))).lower() in ('true', '1', 'yes')
         
-        logger.info(f"Collecting notes - Obsidian: {obsidian_path}, GDrive: {gdrive_folder_id}")
+        logger.info(
+            f"Collecting notes - Obsidian: {obsidian_path}, GDrive: {gdrive_folder_id}, "
+            f"Apple Notes: {include_apple_notes}"
+        )
         
         # TEMPORARY DEBUG
         logger.info(f"DEBUG - obsidian_path type: {type(obsidian_path)}, value: {repr(obsidian_path)}")
         logger.info(f"DEBUG - gdrive_folder_id type: {type(gdrive_folder_id)}, value: {repr(gdrive_folder_id)}")
         
-        # Collect notes from all sources
+        # Collect notes from all sources (run in thread so it cannot block the event loop)
         try:
-            result = collect_all_notes(
-                obsidian_path=obsidian_path,
-                gdrive_folder_id=gdrive_folder_id,
-                limit=limit
+            result = await asyncio.wait_for(
+                asyncio.to_thread(
+                    collect_all_notes,
+                    obsidian_path=obsidian_path,
+                    gdrive_folder_id=gdrive_folder_id,
+                    include_apple_notes=include_apple_notes,
+                    apple_notes_timeout=apple_notes_timeout,
+                    limit=limit
+                ),
+                timeout=12.0
             )
+        except asyncio.TimeoutError:
+            logger.error("Notes collection timed out after 12 seconds")
+
+            # Fallback: return local notes quickly when remote providers are slow.
+            try:
+                logger.warning("Retrying notes collection with remote providers disabled")
+                result = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        collect_all_notes,
+                        obsidian_path=obsidian_path,
+                        gdrive_folder_id=None,
+                        include_apple_notes=False,
+                        limit=limit
+                    ),
+                    timeout=6.0
+                )
+            except Exception:
+                return {
+                    "success": False,
+                    "error": "Notes loading timed out. Please verify Google/Obsidian connectivity and try again.",
+                    "notes": [],
+                    "obsidian_count": 0,
+                    "gdrive_count": 0,
+                    "total_todos_found": 0,
+                    "tasks_created": 0
+                }
         except Exception as collect_err:
             logger.error(f"Error in collect_all_notes: {collect_err}")
             logger.error(f"Traceback: {traceback.format_exc()}")
@@ -1156,6 +3110,47 @@ async def get_notes_settings():
                 'source': 'env' if os.getenv('AUTO_CREATE_TASKS') else
                          'database' if db.get_setting('auto_create_tasks') is not None else
                          'config' if notes_config.get('auto_create_tasks') is not None else 'default'
+            },
+            # Apple Notes settings
+            'apple_notes_enabled': {
+                'value': os.getenv('APPLE_NOTES_ENABLED', str(db.get_setting('apple_notes_enabled', notes_config.get('apple_notes_enabled', False)))).lower() in ('true', '1', 'yes'),
+                'source': 'env' if os.getenv('APPLE_NOTES_ENABLED') else
+                         'database' if db.get_setting('apple_notes_enabled') is not None else
+                         'config' if notes_config.get('apple_notes_enabled') is not None else 'default'
+            },
+            # Google Keep settings
+            'google_keep_email': {
+                'value': (
+                    os.getenv('GOOGLE_KEEP_EMAIL') or
+                    db.get_setting('google_keep_email') or
+                    notes_config.get('google_keep_email') or
+                    ''
+                ),
+                'source': 'env' if os.getenv('GOOGLE_KEEP_EMAIL') else
+                         'database' if db.get_setting('google_keep_email') else
+                         'config' if notes_config.get('google_keep_email') else 'default'
+            },
+            'google_keep_token': {
+                'value': (
+                    os.getenv('GOOGLE_KEEP_TOKEN') or
+                    db.get_setting('google_keep_token') or
+                    notes_config.get('google_keep_token') or
+                    ''
+                ),
+                'source': 'env' if os.getenv('GOOGLE_KEEP_TOKEN') else
+                         'database' if db.get_setting('google_keep_token') else
+                         'config' if notes_config.get('google_keep_token') else 'default'
+            },
+            'google_keep_labels': {
+                'value': (
+                    os.getenv('GOOGLE_KEEP_LABELS') or
+                    db.get_setting('google_keep_labels') or
+                    notes_config.get('google_keep_labels') or
+                    ''
+                ),
+                'source': 'env' if os.getenv('GOOGLE_KEEP_LABELS') else
+                         'database' if db.get_setting('google_keep_labels') else
+                         'config' if notes_config.get('google_keep_labels') else 'default'
             }
         }
         
@@ -1216,7 +3211,7 @@ async def update_notes_settings(settings: Dict[str, Any]):
         db = DatabaseManager()
         
         updated = []
-        
+
         # Update each setting in the database
         if 'obsidian_vault_path' in settings:
             db.save_setting('obsidian_vault_path', settings['obsidian_vault_path'])
@@ -1225,14 +3220,35 @@ async def update_notes_settings(settings: Dict[str, Any]):
         if 'google_drive_notes_folder_id' in settings:
             db.save_setting('google_drive_notes_folder_id', settings['google_drive_notes_folder_id'])
             updated.append('google_drive_notes_folder_id')
-        
+
         if 'notes_limit' in settings:
-            db.save_setting('notes_limit', int(settings['notes_limit']))
+            notes_limit = max(1, min(int(settings['notes_limit']), 100))
+            db.save_setting('notes_limit', notes_limit)
             updated.append('notes_limit')
         
         if 'auto_create_tasks' in settings:
             db.save_setting('auto_create_tasks', bool(settings['auto_create_tasks']))
             updated.append('auto_create_tasks')
+        
+        # Apple Notes settings
+        if 'apple_notes_enabled' in settings:
+            apple_enabled = bool(settings['apple_notes_enabled'])
+            db.save_setting('apple_notes_enabled', apple_enabled)
+            db.save_setting('include_apple_notes', 'true' if apple_enabled else 'false')
+            updated.append('apple_notes_enabled')
+        
+        # Google Keep settings
+        if 'google_keep_email' in settings:
+            db.save_setting('google_keep_email', settings['google_keep_email'])
+            updated.append('google_keep_email')
+        
+        if 'google_keep_token' in settings:
+            db.save_setting('google_keep_token', settings['google_keep_token'])
+            updated.append('google_keep_token')
+        
+        if 'google_keep_labels' in settings:
+            db.save_setting('google_keep_labels', settings['google_keep_labels'])
+            updated.append('google_keep_labels')
         
         logger.info(f"Updated notes settings: {updated}")
         
@@ -1246,27 +3262,30 @@ async def update_notes_settings(settings: Dict[str, Any]):
         logger.error(f"Error updating notes settings: {e}")
         return {"success": False, "error": str(e)}
 
-
-@app.get("/api/user/profile")
-async def get_user_profile():
-    """Get user profile settings."""
-    try:
-        profile = db.get_user_profile()
-        
-        return {
-            "success": True,
-            "profile": profile
-        }
-        
-    except Exception as e:
-        logger.error(f"Error getting user profile: {e}")
-        return {"success": False, "error": str(e)}
-
 @app.post("/api/user/profile")
 async def save_user_profile(request: Request):
     """Save user profile settings."""
     try:
         profile_data = await request.json()
+
+        primary_email = _normalize_email(profile_data.get('email') or profile_data.get('primary_email') or '')
+        explicit_self_emails = profile_data.get('self_emails') or []
+        if isinstance(explicit_self_emails, str):
+            explicit_self_emails = [item.strip() for item in explicit_self_emails.split(',') if item.strip()]
+        normalized_self_emails = []
+        for item in explicit_self_emails:
+            normalized = _normalize_email(item)
+            if normalized and '@' in normalized and normalized not in normalized_self_emails:
+                normalized_self_emails.append(normalized)
+        if primary_email and primary_email not in normalized_self_emails:
+            normalized_self_emails.append(primary_email)
+
+        if primary_email:
+            db.save_setting('primary_email', primary_email)
+        if normalized_self_emails:
+            db.save_setting('self_emails', normalized_self_emails)
+            self_identity_cache['timestamp'] = None
+            self_identity_cache['emails'] = []
         
         success = db.save_user_profile(profile_data)
         
@@ -1289,13 +3308,20 @@ async def get_ai_settings():
     """Get AI/Ollama configuration settings."""
     try:
         from database import DatabaseManager
+        from config.settings import Settings
+        
         db = DatabaseManager()
         
+        # Load defaults from config file
+        config_path = project_root / "src" / "config" / "config.yaml"
+        config_settings = Settings.from_yaml(str(config_path)) if config_path.exists() else Settings()
+        
+        # Use config file values as defaults, but database settings take priority
         settings = {
             'ai_provider': db.get_setting('ai_provider', 'ollama'),
-            'ollama_host': db.get_setting('ollama_host', 'localhost'),
-            'ollama_port': db.get_setting('ollama_port', 11434),
-            'ollama_model': db.get_setting('ollama_model', 'llama3.2:1b'),
+            'ollama_host': db.get_setting('ollama_host', config_settings.ollama.host),
+            'ollama_port': db.get_setting('ollama_port', config_settings.ollama.port),
+            'ollama_model': db.get_setting('ollama_model', config_settings.ollama.model),
             'openai_api_key': db.get_setting('openai_api_key', ''),
             'openai_model': db.get_setting('openai_model', 'gpt-4o-mini'),
             'gemini_api_key': db.get_setting('gemini_api_key', ''),
@@ -1371,9 +3397,9 @@ async def update_ai_settings(settings: Dict[str, Any]):
                 
                 if provider_type == 'ollama':
                     # Create/update Ollama provider
-                    ollama_host = settings.get('ollama_host', db.get_setting('ollama_host', 'localhost'))
+                    ollama_host = normalize_ollama_host(settings.get('ollama_host', db.get_setting('ollama_host', 'localhost')))
                     ollama_port = settings.get('ollama_port', db.get_setting('ollama_port', 11434))
-                    ollama_model = settings.get('ollama_model', db.get_setting('ollama_model', 'llama3.2:latest'))
+                    ollama_model = settings.get('ollama_model', db.get_setting('ollama_model', 'deepseek-r1:latest'))
                     
                     config = {
                         'base_url': f'http://{ollama_host}:{ollama_port}',
@@ -1486,45 +3512,63 @@ async def update_ai_settings(settings: Dict[str, Any]):
 
 
 @app.get("/api/ollama/models")
-async def get_ollama_models():
+async def get_ollama_models(host: Optional[str] = None, port: Optional[int] = None):
     """Get list of available Ollama models."""
     try:
         from database import DatabaseManager
+        from config.settings import Settings
+        
         db = DatabaseManager()
         
-        # Get Ollama host and port from settings
-        host = db.get_setting('ollama_host', 'localhost')
-        port = db.get_setting('ollama_port', 11434)
-        url = f"http://{host}:{port}/api/tags"
+        # Load defaults from config file
+        config_path = project_root / "src" / "config" / "config.yaml"
+        config_settings = Settings.from_yaml(str(config_path)) if config_path.exists() else Settings()
         
+        # Get Ollama host and port from settings (database takes priority over config)
+        configured_host = normalize_ollama_host(host or db.get_setting('ollama_host', config_settings.ollama.host))
+        configured_port = int(port or db.get_setting('ollama_port', config_settings.ollama.port))
+        fallback_hosts = [configured_host]
+        if configured_host != 'localhost':
+            fallback_hosts.append('localhost')
+
+        last_error = None
         async with httpx.AsyncClient() as client:
-            response = await client.get(url, timeout=5.0)
-            
-            if response.status_code == 200:
-                data = response.json()
-                models = []
-                
-                if 'models' in data:
-                    for model in data['models']:
-                        models.append({
-                            'name': model.get('name'),
-                            'size': model.get('size', 0),
-                            'modified': model.get('modified_at', ''),
-                            'digest': model.get('digest', '')
-                        })
-                
-                return {
-                    "success": True,
-                    "models": models,
-                    "count": len(models),
-                    "server": f"{host}:{port}"
-                }
-            else:
-                return {
-                    "success": False,
-                    "error": f"Ollama server returned status {response.status_code}",
-                    "models": []
-                }
+            for candidate_host in fallback_hosts:
+                url = f"http://{candidate_host}:{configured_port}/api/tags"
+                try:
+                    response = await client.get(url, timeout=5.0)
+                except httpx.ConnectError as e:
+                    last_error = f"Cannot connect to Ollama at {candidate_host}:{configured_port}"
+                    logger.warning(last_error)
+                    continue
+
+                if response.status_code == 200:
+                    data = response.json()
+                    models = []
+
+                    if 'models' in data:
+                        for model in data['models']:
+                            models.append({
+                                'name': model.get('name'),
+                                'size': model.get('size', 0),
+                                'modified': model.get('modified_at', ''),
+                                'digest': model.get('digest', '')
+                            })
+
+                    return {
+                        "success": True,
+                        "models": models,
+                        "count": len(models),
+                        "server": f"{candidate_host}:{configured_port}"
+                    }
+
+                last_error = f"Ollama server at {candidate_host}:{configured_port} returned status {response.status_code}"
+
+        return {
+            "success": False,
+            "error": last_error or "Cannot connect to Ollama server. Make sure it's running.",
+            "models": []
+        }
                 
     except httpx.ConnectError:
         return {
@@ -1541,19 +3585,77 @@ async def get_ollama_models():
         }
 
 
+@app.post("/api/settings/ai/test")
+async def test_ai_provider_connection(payload: Dict[str, Any]):
+    """Test AI provider connectivity without saving settings."""
+    try:
+        from database import DatabaseManager
+        dbm = DatabaseManager()
+        provider = (payload.get('provider') or '').strip().lower()
+
+        if provider == 'ollama':
+            host = normalize_ollama_host(payload.get('host') or dbm.get_setting('ollama_host', 'localhost'))
+            port = int(payload.get('port') or dbm.get_setting('ollama_port', 11434))
+            url = f"http://{host}:{port}/api/tags"
+            async with httpx.AsyncClient(timeout=6.0) as client:
+                response = await client.get(url)
+            if response.status_code == 200:
+                return {"success": True, "provider": "ollama", "message": f"Connected to {host}:{port}"}
+            return {
+                "success": False,
+                "provider": "ollama",
+                "error": f"Ollama returned status {response.status_code} at {host}:{port}"
+            }
+
+        if provider == 'openai':
+            api_key = (payload.get('api_key') or '').strip()
+            if not api_key or api_key.startswith('••••'):
+                api_key = str(dbm.get_setting('openai_api_key', '') or '').strip()
+            model = (payload.get('model') or 'gpt-4o-mini').strip()
+            if not api_key:
+                return {"success": False, "provider": "openai", "error": "API key is required"}
+
+            test_provider = create_provider('openai', 'openai-test', {
+                'api_key': api_key,
+                'model_name': model,
+            })
+            ok = await test_provider.health_check()
+            return {"success": bool(ok), "provider": "openai", "message": "Connection successful" if ok else None, "error": None if ok else "OpenAI health check failed"}
+
+        if provider == 'gemini':
+            api_key = (payload.get('api_key') or '').strip()
+            if not api_key or api_key.startswith('••••'):
+                api_key = str(dbm.get_setting('gemini_api_key', '') or '').strip()
+            model = (payload.get('model') or 'gemini-2.0-flash').strip()
+            if not api_key:
+                return {"success": False, "provider": "gemini", "error": "API key is required"}
+
+            test_provider = create_provider('gemini', 'gemini-test', {
+                'api_key': api_key,
+                'model_name': model,
+            })
+            ok = await test_provider.health_check()
+            return {"success": bool(ok), "provider": "gemini", "message": "Connection successful" if ok else None, "error": None if ok else "Gemini health check failed"}
+
+        return {"success": False, "error": "Unsupported provider. Use ollama, openai, or gemini."}
+    except Exception as e:
+        logger.error(f"Error testing AI provider connection: {e}")
+        return {"success": False, "error": str(e)}
+
+
 @app.post("/api/ollama/pull")
 async def pull_ollama_model(request: Dict[str, Any]):
     """Pull a new Ollama model."""
     try:
         from database import DatabaseManager
-        db = DatabaseManager()
+        dbm = DatabaseManager()
         
         model_name = request.get('model')
         if not model_name:
             return {"success": False, "error": "Model name is required"}
         
-        host = db.get_setting('ollama_host', 'localhost')
-        port = db.get_setting('ollama_port', 11434)
+        host = normalize_ollama_host(request.get('host') or dbm.get_setting('ollama_host', 'localhost'))
+        port = int(request.get('port') or dbm.get_setting('ollama_port', 11434))
         url = f"http://{host}:{port}/api/pull"
         
         async with httpx.AsyncClient(timeout=300.0) as client:
@@ -1562,12 +3664,12 @@ async def pull_ollama_model(request: Dict[str, Any]):
             if response.status_code == 200:
                 return {
                     "success": True,
-                    "message": f"Successfully pulled model: {model_name}"
+                    "message": f"Successfully pulled model: {model_name} on {host}:{port}"
                 }
             else:
                 return {
                     "success": False,
-                    "error": f"Failed to pull model: {response.text}"
+                    "error": f"Failed to pull model on {host}:{port}: {response.text}"
                 }
                 
     except Exception as e:
@@ -2055,22 +4157,85 @@ async def test_gdrive_connection(request: Dict[str, Any]):
 
 
 @app.get("/api/email") 
-async def get_email():
-    """Get email summary from Gmail - always fetch fresh data"""
+async def get_email(refresh: bool = False, timeout_seconds: int = 12):
+    """Get email summary from Gmail with cache fallback to avoid frontend timeouts."""
+    perf_start = time.perf_counter()
     try:
-        # ALWAYS fetch fresh data - no caching for emails
-        logger.info("Fetching fresh email data from Gmail")
+        timeout_seconds = max(6, min(timeout_seconds, 30))
+
+        # Fast path: serve background cached snapshot unless caller explicitly refreshes.
+        cached_data = None
+        if not refresh:
+            cached_data = background_manager.get_cached_data('email')
+            if cached_data and isinstance(cached_data, dict) and cached_data.get('emails') is not None:
+                cached_data = dict(cached_data)
+                cached_data['cached'] = True
+                cached_data['stale'] = False
+                return cached_data
+
+        logger.info("Fetching email data from Gmail")
         if COLLECTORS_AVAILABLE:
             try:
-                settings = Settings()
-                gmail_collector = GmailCollector(settings)
-                data = await gmail_collector.collect_data()
+                # Create proper account config for GmailCollector
+                tokens_file = project_root / "tokens" / "google_credentials.json"
+                if not tokens_file.exists():
+                    return {
+                        "emails": [],
+                        "total_count": 0,
+                        "unread_count": 0,
+                        "authenticated": False,
+                        "error": "Not authenticated with Google. Please click 'Connect Google' button."
+                    }
+                
+                account_config = {
+                    'name': 'primary',
+                    'credentials_file': str(tokens_file),
+                    'scopes': [
+                        'https://www.googleapis.com/auth/gmail.readonly',
+                        'https://www.googleapis.com/auth/calendar.readonly'
+                    ]
+                }
+                
+                gmail_collector = GmailCollector(account_config)
+                data = await asyncio.wait_for(gmail_collector.collect_data(), timeout=float(timeout_seconds))
+
+                # Keep background cache warm for fast future reads.
+                with background_manager._cache_lock:
+                    background_manager.cache['email'] = data
+                    background_manager.cache_timestamps['email'] = datetime.now()
                 
                 logger.info(f"Retrieved {data.get('total_count', 0)} emails, {data.get('unread_count', 0)} unread")
                 return data
+            except asyncio.TimeoutError:
+                logger.warning(f"Email collection timed out after {timeout_seconds}s")
+
+                fallback = cached_data or background_manager.get_cached_data('email')
+                if fallback and isinstance(fallback, dict):
+                    fallback = dict(fallback)
+                    fallback['cached'] = True
+                    fallback['stale'] = True
+                    fallback['warning'] = f"Email refresh timed out after {timeout_seconds}s; serving cached results."
+                    return fallback
+
+                return {
+                    "emails": [],
+                    "total_count": 0,
+                    "unread_count": 0,
+                    "authenticated": True,
+                    "warning": f"Email refresh timed out after {timeout_seconds}s.",
+                    "timeout": True
+                }
                 
             except Exception as e:
                 logger.error(f"Error collecting email data: {e}")
+                fallback = cached_data or background_manager.get_cached_data('email')
+                if fallback and isinstance(fallback, dict):
+                    fallback = dict(fallback)
+                    fallback['cached'] = True
+                    fallback['stale'] = True
+                    fallback['warning'] = "Email refresh failed; serving cached results."
+                    return fallback
+
                 raise HTTPException(status_code=500, detail=f"Error collecting emails: {str(e)}")
         else:
             raise HTTPException(status_code=500, detail="Email collector not available")
@@ -2078,6 +4243,8 @@ async def get_email():
     except Exception as e:
         logger.error(f"Error in email API: {e}")
         return {"error": str(e), "emails": [], "total_count": 0, "unread_count": 0}
+    finally:
+        _record_perf('endpoints', '/api/email', (time.perf_counter() - perf_start) * 1000)
 
 @app.get("/api/github")
 async def get_github():
@@ -2751,6 +4918,60 @@ async def get_ebay_auctions(category: str = "retro_tech"):
     except Exception as e:
         logger.error(f"Error fetching eBay auctions: {e}")
         return {"success": False, "auctions": [], "error": str(e)}
+# Scanned sources management APIs
+
+@app.get("/api/scanned-sources")
+async def get_scanned_sources(source_type: str = None, include_dismissed: bool = True):
+    """Get list of scanned sources to see what has been processed."""
+    try:
+        sources = db.get_scanned_sources(source_type=source_type, include_dismissed=include_dismissed)
+        
+        # Group by source type for summary
+        summary = {}
+        for src in sources:
+            stype = src.get('source_type', 'unknown')
+            if stype not in summary:
+                summary[stype] = {'total': 0, 'dismissed': 0, 'tasks_created': 0}
+            summary[stype]['total'] += 1
+            if src.get('dismissed'):
+                summary[stype]['dismissed'] += 1
+            summary[stype]['tasks_created'] += src.get('tasks_created', 0)
+        
+        return {
+            "success": True,
+            "sources": sources,
+            "summary": summary,
+            "total_count": len(sources)
+        }
+    except Exception as e:
+        logger.error(f"Error getting scanned sources: {e}")
+        return {"error": str(e), "success": False}
+
+
+@app.post("/api/scanned-sources/clear")
+async def clear_scanned_sources(request: Request):
+    """Clear scanned sources to allow re-scanning.
+    
+    Options:
+    - source_type: Only clear specific type (email, calendar, obsidian, etc.)
+    - clear_dismissed: If true, also clear dismissed items (allows recreating deleted tasks)
+    """
+    try:
+        data = await request.json()
+        source_type = data.get('source_type')
+        clear_dismissed = data.get('clear_dismissed', False)
+        
+        count = db.clear_scanned_sources(source_type=source_type, clear_dismissed=clear_dismissed)
+        
+        return {
+            "success": True,
+            "cleared_count": count,
+            "source_type": source_type or "all",
+            "cleared_dismissed": clear_dismissed
+        }
+    except Exception as e:
+        logger.error(f"Error clearing scanned sources: {e}")
+        return {"error": str(e), "success": False}
 
 
 @app.get("/api/ticktick")
@@ -2850,7 +5071,10 @@ async def sync_email_todos_to_ticktick():
 
 @app.post("/api/email/scan-for-tasks")
 async def scan_emails_for_tasks(request: Request):
-    """Scan historical emails for tasks using strict AI filtering."""
+    """Scan historical emails for tasks using strict AI filtering.
+    
+    Tracks scanned sources to avoid re-processing emails and respects deleted tasks.
+    """
     try:
         if not COLLECTORS_AVAILABLE:
             raise HTTPException(status_code=503, detail="Email collectors not available")
@@ -2860,6 +5084,7 @@ async def scan_emails_for_tasks(request: Request):
         start_date_str = body.get('start_date')
         end_date_str = body.get('end_date')
         max_emails = body.get('max_emails', 100)
+        force_rescan = body.get('force_rescan', False)  # Force rescan previously scanned emails
         
         # Parse dates
         start_date = datetime.fromisoformat(start_date_str) if start_date_str else datetime.now() - timedelta(days=30)
@@ -2886,6 +5111,7 @@ async def scan_emails_for_tasks(request: Request):
         tasks_created = 0
         tasks_skipped = 0
         emails_skipped = 0
+        already_scanned = 0
         
         # Analyze each email for tasks
         for email in emails:
@@ -2896,39 +5122,79 @@ async def scan_emails_for_tasks(request: Request):
                 email_id = email.get('id', '')
                 received_date = email.get('received_date', '')
                 risk_score = email.get('risk_score', 0)  # Get risk score from email data
+                labels = [label.upper() for label in email.get('labels', [])]
+                is_starred = 'STARRED' in labels
+                is_important = bool(email.get('is_important')) or 'IMPORTANT' in labels
+                email_priority = (email.get('priority') or email.get('ollama_priority') or 'medium').lower()
+                
+                # Check if email was already scanned (unless force_rescan is True)
+                if not force_rescan and db.is_source_scanned('email', email_id):
+                    already_scanned += 1
+                    continue
+                
+                # Check if task already exists or was deleted (avoid duplicates and re-creation)
+                existing_tasks = task_manager.get_tasks_by_source('email', email_id, include_deleted=True)
+                if existing_tasks:
+                    logger.info(f"Task already exists/deleted for email: {subject[:50]}")
+                    tasks_skipped += 1
+                    # Mark as scanned to prevent future checks
+                    db.mark_source_scanned('email', email_id, tasks_found=0, tasks_created=0)
+                    continue
                 
                 # Use AI analyzer with strict filtering and risk scoring
                 todos = await email_analyzer.analyze_email_for_todos(subject, body, sender, risk_score)
                 
                 if not todos:
                     emails_skipped += 1
+                    # Mark as scanned with no tasks found
+                    db.mark_source_scanned('email', email_id, tasks_found=0, tasks_created=0)
                     continue
                 
                 # Create tasks for each todo found
+                email_tasks_created = 0
                 for todo in todos:
                     # Check if task already exists (avoid duplicates)
-                    existing_tasks = task_manager.get_tasks_by_source('email', email_id)
+                    existing_tasks = db.get_todos_by_source('email', None)
+                    existing_tasks = [t for t in existing_tasks if t.get('source_id') == email_id]
                     if existing_tasks:
                         logger.info(f"Task already exists for email: {subject[:50]}")
                         tasks_skipped += 1
                         continue
+
+                    todo_reason = todo.get('reason', 'Detected as actionable from email content')
+                    base_priority = (todo.get('priority') or 'medium').lower()
+                    should_escalate = is_starred or is_important or email_priority == 'high' or risk_score >= 7
+                    derived_priority = 'high' if should_escalate else base_priority
+                    priority_reason = "Elevated priority from flagged/prioritized email" if should_escalate else "Priority from extracted task signal"
+                    source_preview = (email.get('snippet') or body or '')[:280]
+                    source_url = f"https://mail.google.com/mail/u/0/#inbox/{email_id}" if email_id else None
                     
                     # Create task
-                    task_data = {
-                        'title': todo.get('task'),
-                        'description': f"From: {sender}\nSubject: {subject}\n\nReason: {todo.get('reason', 'N/A')}",
-                        'due_date': todo.get('deadline'),
-                        'priority': todo.get('priority', 'medium'),
-                        'category': todo.get('category', 'email'),
-                        'source': 'email',
-                        'source_id': email_id,
-                        'status': 'pending',
-                        'requires_response': todo.get('requires_response', False)
-                    }
-                    
-                    task_manager.create_task(task_data)
-                    tasks_created += 1
-                    logger.info(f"Created task from email: {subject[:50]}")
+                    result = task_manager.create_task(
+                        title=todo.get('task', f"Follow up: {subject[:60]}"),
+                        description=f"From: {sender}\nSubject: {subject}\n\nWhy: {todo_reason}",
+                        priority=derived_priority,
+                        category=todo.get('category', 'email'),
+                        source='email',
+                        source_id=email_id,
+                        email_id=email_id,
+                        source_title=subject,
+                        source_url=source_url,
+                        source_preview=source_preview,
+                        creation_reason=f"{todo_reason}. {priority_reason}",
+                        sync_to_ticktick=COLLECTORS_AVAILABLE
+                    )
+
+                    if result.get('success'):
+                        tasks_created += 1
+                        email_tasks_created += 1
+                        logger.info(f"Created task from email: {subject[:50]}")
+                    else:
+                        tasks_skipped += 1
+                        logger.warning(f"Skipped task creation for email {email_id}: {result.get('error', 'unknown error')}")
+
+                # Mark source as scanned with tasks created count
+                db.mark_source_scanned('email', email_id, tasks_found=len(todos), tasks_created=email_tasks_created)
                     
             except Exception as e:
                 logger.error(f"Error processing email {email.get('id', 'unknown')}: {e}")
@@ -2937,6 +5203,7 @@ async def scan_emails_for_tasks(request: Request):
         return {
             "success": True,
             "emails_scanned": len(emails),
+            "already_scanned": already_scanned,
             "tasks_created": tasks_created,
             "tasks_skipped": tasks_skipped,
             "emails_skipped": emails_skipped,
@@ -3019,22 +5286,708 @@ async def remove_safe_sender(sender_email: str):
         logger.error(f"Error removing safe sender: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
+# Email Client API Endpoints (Send, Reply, Forward, Delete, Archive, etc.)
+
+def get_gmail_service(require_write: bool = False):
+    """Get authenticated Gmail service.
+
+    Args:
+        require_write: Require Gmail write scopes (modify/send/archive/etc.).
+    """
+    from google.oauth2.credentials import Credentials
+    from googleapiclient.discovery import build
+    import json
+    
+    tokens_file = project_root / "tokens" / "google_credentials.json"
+    if not tokens_file.exists():
+        raise HTTPException(status_code=401, detail="Not authenticated with Google. Please connect your Google account.")
+
+    token_scopes = []
+    try:
+        with open(tokens_file, 'r') as f:
+            token_scopes = json.load(f).get('scopes', [])
+    except Exception as e:
+        logger.warning(f"Could not read Google token scopes: {e}")
+
+    required_scopes = [*GOOGLE_GMAIL_READ_SCOPES]
+    if require_write:
+        required_scopes.extend(GOOGLE_GMAIL_WRITE_SCOPES)
+
+    if not has_required_google_scopes(token_scopes, required_scopes):
+        detail = "Google account needs Gmail permissions. Please reconnect Google."
+        if require_write:
+            detail = "Google account needs Gmail write permissions. Please reconnect Google to grant read/write email access."
+        raise HTTPException(
+            status_code=403,
+            detail=detail
+        )
+    
+    creds = Credentials.from_authorized_user_file(
+        str(tokens_file),
+        scopes=required_scopes
+    )
+    
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            from google.auth.transport.requests import Request
+            creds.refresh(Request())
+            with open(tokens_file, 'w') as f:
+                f.write(creds.to_json())
+        else:
+            raise HTTPException(status_code=401, detail="Google credentials expired. Please reconnect.")
+    
+    return build('gmail', 'v1', credentials=creds)
+
+
+@app.post("/api/email/send")
+async def send_email(request: Request):
+    """Send a new email."""
+    try:
+        import base64
+        from email.mime.text import MIMEText
+        from email.mime.multipart import MIMEMultipart
+        from email.mime.base import MIMEBase
+        from email import encoders
+        
+        data = await request.json()
+        to = data.get('to', '')
+        cc = data.get('cc', '')
+        bcc = data.get('bcc', '')
+        subject = data.get('subject', '')
+        body = data.get('body', '')
+        html_body = data.get('html_body', '')
+        attachments = data.get('attachments', [])  # List of {filename, content_base64, mime_type}
+        
+        if not to:
+            raise HTTPException(status_code=400, detail="Recipient (to) is required")
+        
+        service = get_gmail_service(require_write=True)
+        
+        # Create message
+        if html_body or attachments:
+            message = MIMEMultipart('alternative')
+        else:
+            message = MIMEText(body, 'plain')
+        
+        message['to'] = to
+        if cc:
+            message['cc'] = cc
+        if bcc:
+            message['bcc'] = bcc
+        message['subject'] = subject
+        
+        if html_body:
+            # Add both plain and HTML versions
+            part1 = MIMEText(body, 'plain')
+            part2 = MIMEText(html_body, 'html')
+            message.attach(part1)
+            message.attach(part2)
+        
+        # Handle attachments
+        for attachment in attachments:
+            part = MIMEBase('application', 'octet-stream')
+            content = base64.b64decode(attachment['content_base64'])
+            part.set_payload(content)
+            encoders.encode_base64(part)
+            part.add_header('Content-Disposition', f"attachment; filename={attachment['filename']}")
+            message.attach(part)
+        
+        # Encode and send
+        raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
+        
+        result = service.users().messages().send(
+            userId='me',
+            body={'raw': raw}
+        ).execute()
+        
+        logger.info(f"Email sent successfully, message ID: {result['id']}")
+        
+        return {
+            "success": True,
+            "message_id": result['id'],
+            "thread_id": result.get('threadId'),
+            "message": "Email sent successfully"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error sending email: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/email/reply")
+async def reply_to_email(request: Request):
+    """Reply to an email."""
+    try:
+        import base64
+        from email.mime.text import MIMEText
+        from email.mime.multipart import MIMEMultipart
+        
+        data = await request.json()
+        message_id = data.get('message_id')
+        body = data.get('body', '')
+        html_body = data.get('html_body', '')
+        reply_all = data.get('reply_all', False)
+        
+        if not message_id:
+            raise HTTPException(status_code=400, detail="message_id is required")
+        
+        service = get_gmail_service(require_write=True)
+        
+        # Get original message to get thread info and headers
+        original = service.users().messages().get(userId='me', id=message_id, format='full').execute()
+        headers = {h['name'].lower(): h['value'] for h in original['payload'].get('headers', [])}
+        
+        thread_id = original.get('threadId')
+        original_from = headers.get('from', '')
+        original_to = headers.get('to', '')
+        original_cc = headers.get('cc', '')
+        original_subject = headers.get('subject', '')
+        message_id_header = headers.get('message-id', '')
+        
+        # Determine recipients
+        reply_to = original_from
+        cc = ''
+        if reply_all:
+            # Include all original recipients except myself
+            all_recipients = set()
+            if original_to:
+                all_recipients.update([e.strip() for e in original_to.split(',')])
+            if original_cc:
+                all_recipients.update([e.strip() for e in original_cc.split(',')])
+            # Remove the original sender (they're in 'to') and our own email
+            all_recipients.discard(original_from)
+            cc = ', '.join(all_recipients)
+        
+        # Create reply message
+        if html_body:
+            message = MIMEMultipart('alternative')
+            message.attach(MIMEText(body, 'plain'))
+            message.attach(MIMEText(html_body, 'html'))
+        else:
+            message = MIMEText(body, 'plain')
+        
+        message['to'] = reply_to
+        if cc:
+            message['cc'] = cc
+        message['subject'] = f"Re: {original_subject}" if not original_subject.startswith('Re:') else original_subject
+        message['In-Reply-To'] = message_id_header
+        message['References'] = message_id_header
+        
+        raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
+        
+        result = service.users().messages().send(
+            userId='me',
+            body={'raw': raw, 'threadId': thread_id}
+        ).execute()
+        
+        logger.info(f"Reply sent successfully, message ID: {result['id']}")
+        
+        return {
+            "success": True,
+            "message_id": result['id'],
+            "thread_id": result.get('threadId'),
+            "message": "Reply sent successfully"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error replying to email: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/email/forward")
+async def forward_email(request: Request):
+    """Forward an email."""
+    try:
+        import base64
+        from email.mime.text import MIMEText
+        from email.mime.multipart import MIMEMultipart
+        
+        data = await request.json()
+        message_id = data.get('message_id')
+        to = data.get('to', '')
+        additional_message = data.get('body', '')
+        
+        if not message_id or not to:
+            raise HTTPException(status_code=400, detail="message_id and to are required")
+        
+        service = get_gmail_service(require_write=True)
+        
+        # Get original message
+        original = service.users().messages().get(userId='me', id=message_id, format='full').execute()
+        headers = {h['name'].lower(): h['value'] for h in original['payload'].get('headers', [])}
+        
+        original_subject = headers.get('subject', '')
+        original_from = headers.get('from', '')
+        original_date = headers.get('date', '')
+        original_body = original.get('snippet', '')
+        
+        # Get full body if available
+        if 'body' in original['payload'] and original['payload']['body'].get('data'):
+            original_body = base64.urlsafe_b64decode(original['payload']['body']['data']).decode('utf-8', errors='ignore')
+        
+        # Create forwarded message
+        forward_body = f"""
+{additional_message}
+
+---------- Forwarded message ---------
+From: {original_from}
+Date: {original_date}
+Subject: {original_subject}
+
+{original_body}
+"""
+        
+        message = MIMEText(forward_body, 'plain')
+        message['to'] = to
+        message['subject'] = f"Fwd: {original_subject}" if not original_subject.startswith('Fwd:') else original_subject
+        
+        raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
+        
+        result = service.users().messages().send(
+            userId='me',
+            body={'raw': raw}
+        ).execute()
+        
+        logger.info(f"Email forwarded successfully, message ID: {result['id']}")
+        
+        return {
+            "success": True,
+            "message_id": result['id'],
+            "message": "Email forwarded successfully"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error forwarding email: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/email/delete")
+async def delete_email(request: Request):
+    """Move email to trash."""
+    try:
+        data = await request.json()
+        message_id = data.get('message_id')
+        permanent = data.get('permanent', False)
+        
+        if not message_id:
+            raise HTTPException(status_code=400, detail="message_id is required")
+        
+        service = get_gmail_service(require_write=True)
+        
+        if permanent:
+            # Permanently delete
+            service.users().messages().delete(userId='me', id=message_id).execute()
+            logger.info(f"Email permanently deleted: {message_id}")
+        else:
+            # Move to trash
+            service.users().messages().trash(userId='me', id=message_id).execute()
+            logger.info(f"Email moved to trash: {message_id}")
+        
+        return {
+            "success": True,
+            "message": "Email deleted successfully" if permanent else "Email moved to trash"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting email: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/email/archive")
+async def archive_email(request: Request):
+    """Archive email (remove from inbox)."""
+    try:
+        data = await request.json()
+        message_id = data.get('message_id')
+        
+        if not message_id:
+            raise HTTPException(status_code=400, detail="message_id is required")
+        
+        service = get_gmail_service(require_write=True)
+        
+        # Remove INBOX label to archive
+        service.users().messages().modify(
+            userId='me',
+            id=message_id,
+            body={'removeLabelIds': ['INBOX']}
+        ).execute()
+        
+        logger.info(f"Email archived: {message_id}")
+        
+        return {
+            "success": True,
+            "message": "Email archived successfully"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error archiving email: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/email/mark-read")
+async def mark_email_read(request: Request):
+    """Mark email as read or unread."""
+    try:
+        data = await request.json()
+        message_id = data.get('message_id')
+        read = data.get('read', True)
+        
+        if not message_id:
+            raise HTTPException(status_code=400, detail="message_id is required")
+        
+        service = get_gmail_service(require_write=True)
+        
+        if read:
+            # Mark as read (remove UNREAD label)
+            service.users().messages().modify(
+                userId='me',
+                id=message_id,
+                body={'removeLabelIds': ['UNREAD']}
+            ).execute()
+        else:
+            # Mark as unread (add UNREAD label)
+            service.users().messages().modify(
+                userId='me',
+                id=message_id,
+                body={'addLabelIds': ['UNREAD']}
+            ).execute()
+        
+        logger.info(f"Email marked as {'read' if read else 'unread'}: {message_id}")
+        
+        return {
+            "success": True,
+            "message": f"Email marked as {'read' if read else 'unread'}"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error marking email: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/email/star")
+async def star_email(request: Request):
+    """Star or unstar an email."""
+    try:
+        data = await request.json()
+        message_id = data.get('message_id')
+        starred = data.get('starred', True)
+        
+        if not message_id:
+            raise HTTPException(status_code=400, detail="message_id is required")
+        
+        service = get_gmail_service(require_write=True)
+        
+        if starred:
+            service.users().messages().modify(
+                userId='me',
+                id=message_id,
+                body={'addLabelIds': ['STARRED']}
+            ).execute()
+        else:
+            service.users().messages().modify(
+                userId='me',
+                id=message_id,
+                body={'removeLabelIds': ['STARRED']}
+            ).execute()
+        
+        logger.info(f"Email {'starred' if starred else 'unstarred'}: {message_id}")
+        
+        return {
+            "success": True,
+            "message": f"Email {'starred' if starred else 'unstarred'}"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error starring email: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/email/{message_id}")
+async def get_email_detail(message_id: str):
+    """Get full email details including body."""
+    try:
+        import base64
+        import re
+
+        # Compatibility shim: provider manager calls /api/email/accounts,
+        # which can be routed here by the dynamic path.
+        if message_id == 'accounts':
+            tokens_file = project_root / "tokens" / "google_credentials.json"
+            google_accounts = []
+            if tokens_file.exists():
+                google_accounts.append({
+                    "name": "Google Account",
+                    "provider": "google",
+                    "authenticated": True
+                })
+            return {
+                "google": google_accounts,
+                "microsoft": []
+            }
+
+        # Guard against invalid message IDs (prevents Gmail API 400 noise)
+        if not re.fullmatch(r"[A-Za-z0-9_-]{10,}$", message_id):
+            raise HTTPException(status_code=400, detail="Invalid email message id")
+        
+        service = get_gmail_service()
+        
+        # Get full message
+        message = service.users().messages().get(
+            userId='me',
+            id=message_id,
+            format='full'
+        ).execute()
+        
+        headers = {h['name'].lower(): h['value'] for h in message['payload'].get('headers', [])}
+        
+        # Extract body
+        body = ''
+        html_body = ''
+        attachments = []
+        
+        def extract_parts(payload):
+            nonlocal body, html_body, attachments
+            
+            if 'body' in payload and payload['body'].get('data'):
+                content = base64.urlsafe_b64decode(payload['body']['data']).decode('utf-8', errors='ignore')
+                mime_type = payload.get('mimeType', '')
+                if 'html' in mime_type:
+                    html_body = content
+                else:
+                    body = content
+            
+            if 'parts' in payload:
+                for part in payload['parts']:
+                    mime_type = part.get('mimeType', '')
+                    if mime_type.startswith('text/'):
+                        if 'body' in part and part['body'].get('data'):
+                            content = base64.urlsafe_b64decode(part['body']['data']).decode('utf-8', errors='ignore')
+                            if 'html' in mime_type:
+                                html_body = content
+                            else:
+                                body = content
+                    elif part.get('filename'):
+                        # This is an attachment
+                        attachments.append({
+                            'filename': part['filename'],
+                            'mime_type': mime_type,
+                            'size': part['body'].get('size', 0),
+                            'attachment_id': part['body'].get('attachmentId')
+                        })
+                    
+                    # Recurse into nested parts
+                    extract_parts(part)
+        
+        extract_parts(message['payload'])
+        
+        # Determine if starred
+        labels = message.get('labelIds', [])
+        is_starred = 'STARRED' in labels
+        is_unread = 'UNREAD' in labels
+        
+        return {
+            "success": True,
+            "email": {
+                "id": message_id,
+                "thread_id": message.get('threadId'),
+                "subject": headers.get('subject', ''),
+                "from": headers.get('from', ''),
+                "to": headers.get('to', ''),
+                "cc": headers.get('cc', ''),
+                "bcc": headers.get('bcc', ''),
+                "date": headers.get('date', ''),
+                "body": body,
+                "html_body": html_body,
+                "snippet": message.get('snippet', ''),
+                "labels": labels,
+                "is_starred": is_starred,
+                "is_unread": is_unread,
+                "attachments": attachments
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting email detail: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/email/{message_id}/attachment/{attachment_id}")
+async def get_email_attachment(message_id: str, attachment_id: str):
+    """Download an email attachment."""
+    try:
+        import base64
+        from fastapi.responses import Response
+        
+        service = get_gmail_service()
+        
+        attachment = service.users().messages().attachments().get(
+            userId='me',
+            messageId=message_id,
+            id=attachment_id
+        ).execute()
+        
+        data = base64.urlsafe_b64decode(attachment['data'])
+        
+        return Response(
+            content=data,
+            media_type='application/octet-stream',
+            headers={'Content-Disposition': f'attachment; filename="attachment"'}
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error downloading attachment: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/email/labels/list")
+async def get_email_labels():
+    """Get all Gmail labels."""
+    try:
+        service = get_gmail_service()
+        
+        results = service.users().labels().list(userId='me').execute()
+        labels = results.get('labels', [])
+        
+        return {
+            "success": True,
+            "labels": [
+                {
+                    "id": label['id'],
+                    "name": label['name'],
+                    "type": label['type']
+                }
+                for label in labels
+            ]
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting labels: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/email/labels/apply")
+async def apply_email_label(request: Request):
+    """Apply or remove labels from an email."""
+    try:
+        data = await request.json()
+        message_id = data.get('message_id')
+        add_labels = data.get('add_labels', [])
+        remove_labels = data.get('remove_labels', [])
+        
+        if not message_id:
+            raise HTTPException(status_code=400, detail="message_id is required")
+        
+        service = get_gmail_service(require_write=True)
+        
+        body = {}
+        if add_labels:
+            body['addLabelIds'] = add_labels
+        if remove_labels:
+            body['removeLabelIds'] = remove_labels
+        
+        if body:
+            service.users().messages().modify(
+                userId='me',
+                id=message_id,
+                body=body
+            ).execute()
+        
+        logger.info(f"Labels updated for email {message_id}")
+        
+        return {
+            "success": True,
+            "message": "Labels updated successfully"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error applying labels: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # Task Management API Endpoints
 @app.get("/api/tasks")
 async def get_tasks(include_completed: bool = False, priority: str = None, status: str = None, category: str = None):
     """Get all tasks from database with optional filtering."""
+    perf_start = time.perf_counter()
     try:
-        if not TASK_MANAGER_AVAILABLE:
-            return {"error": "Task Manager not available", "success": False}
-        
-        if not COLLECTORS_AVAILABLE:
-            task_manager = TaskManager(None)
-        else:
-            settings = Settings()
-            task_manager = TaskManager(settings)
-            
-        # Get all tasks first
-        tasks = task_manager.get_all_tasks(include_completed=include_completed)
+        from database import DatabaseManager
+
+        active_db = DatabaseManager()
+        current_db_path = active_db.db_path
+        all_tasks = active_db.get_todos(include_completed=include_completed, include_deleted=False)
+
+        # Fallback: if runtime DB has no tasks, check known workspace DB locations
+        if len(all_tasks) == 0:
+            fallback_paths = [
+                project_root / "dashboard.db",
+                project_root / "data" / "dashboard.db",
+                project_root / "src" / "dashboard.db",
+                Path.home() / ".personal-dashboard" / "dashboard.db",
+            ]
+
+            for fallback_path in fallback_paths:
+                if not fallback_path.exists():
+                    continue
+
+                fallback_path_str = str(fallback_path)
+                if current_db_path and os.path.abspath(fallback_path_str) == os.path.abspath(current_db_path):
+                    continue
+
+                try:
+                    fallback_db = DatabaseManager(fallback_path_str)
+                    fallback_rows = fallback_db.get_todos(include_completed=include_completed, include_deleted=False)
+                    if fallback_rows:
+                        all_tasks = fallback_rows
+                        logger.info(f"Loaded {len(all_tasks)} tasks from fallback DB: {fallback_path_str}")
+                        break
+                except Exception as fallback_error:
+                    logger.warning(f"Failed reading fallback DB {fallback_path_str}: {fallback_error}")
+
+        tasks = []
+        for task in all_tasks:
+            tasks.append({
+                'id': task.get('id', ''),
+                'title': task.get('title', ''),
+                'description': task.get('description', ''),
+                'priority': task.get('priority', 'medium'),
+                'category': task.get('category', 'general'),
+                'status': task.get('status', 'pending'),
+                'source': task.get('source', 'manual'),
+                'source_id': task.get('source_id', ''),
+                'source_title': task.get('source_title', ''),
+                'source_url': task.get('source_url', ''),
+                'source_preview': task.get('source_preview', ''),
+                'creation_reason': task.get('creation_reason', ''),
+                'due_date': task.get('due_date', ''),
+                'created_at': task.get('created_at', ''),
+                'completed_at': task.get('completed_at', ''),
+                'requires_response': bool(task.get('requires_response', 0)),
+                'email_id': task.get('email_id', ''),
+                'gmail_link': f"https://mail.google.com/mail/u/0/#inbox/{task.get('email_id')}" if task.get('email_id') else None
+            })
         
         # Apply filters
         if priority:
@@ -3047,7 +6000,36 @@ async def get_tasks(include_completed: bool = False, priority: str = None, statu
             tasks = [t for t in tasks if t.get('category', '').lower() == category.lower()]
         
         # Get statistics for all tasks (unfiltered)
-        stats = task_manager.get_task_statistics()
+        status_counts = {}
+        priority_counts = {'high': 0, 'medium': 0, 'low': 0}
+        category_counts = {}
+        source_counts = {}
+
+        for task in all_tasks:
+            task_status = (task.get('status') or 'pending').lower()
+            task_priority = (task.get('priority') or 'medium').lower()
+            task_category = task.get('category') or 'general'
+            task_source = task.get('source') or 'manual'
+
+            status_counts[task_status] = status_counts.get(task_status, 0) + 1
+            category_counts[task_category] = category_counts.get(task_category, 0) + 1
+            source_counts[task_source] = source_counts.get(task_source, 0) + 1
+            if task_priority in priority_counts:
+                priority_counts[task_priority] += 1
+
+        stats = {
+            'total_tasks': len(all_tasks),
+            'pending_tasks': status_counts.get('pending', 0),
+            'completed_tasks': status_counts.get('completed', 0),
+            'high_priority': priority_counts['high'],
+            'medium_priority': priority_counts['medium'],
+            'low_priority': priority_counts['low'],
+            'overdue_tasks': 0,
+            'due_today': 0,
+            'due_this_week': 0,
+            'by_category': category_counts,
+            'by_source': source_counts
+        }
         
         return {
             "success": True,
@@ -3065,6 +6047,8 @@ async def get_tasks(include_completed: bool = False, priority: str = None, statu
     except Exception as e:
         logger.error(f"Error getting tasks: {e}")
         return {"error": str(e), "success": False}
+    finally:
+        _record_perf('endpoints', '/api/tasks', (time.perf_counter() - perf_start) * 1000)
 
 @app.post("/api/tasks")
 async def create_task(request: Request):
@@ -3076,10 +6060,16 @@ async def create_task(request: Request):
         data = await request.json()
         
         if not COLLECTORS_AVAILABLE:
+            settings_obj = None
             task_manager = TaskManager(None)
         else:
-            settings = Settings()
-            task_manager = TaskManager(settings)
+            settings_obj = Settings()
+            task_manager = TaskManager(settings_obj)
+
+        sync_preferences = extract_task_sync_preferences(
+            data,
+            default_enabled=getattr(getattr(settings_obj, 'task_sync', None), 'enabled', False),
+        )
         
         # Parse due_date if provided
         due_date = None
@@ -3098,8 +6088,22 @@ async def create_task(request: Request):
             source=data.get('source', 'manual'),
             source_id=data.get('source_id', ''),
             email_id=data.get('email_id', ''),
-            sync_to_ticktick=data.get('sync_to_ticktick', True) and COLLECTORS_AVAILABLE
+            sync_to_ticktick=False,
+            source_title=data.get('source_title'),
+            source_url=data.get('source_url'),
+            source_preview=data.get('source_preview'),
+            creation_reason=data.get('creation_reason')
         )
+
+        if result.get('success') and sync_preferences['enabled']:
+            from services.task_sync_service import TaskSyncService
+
+            sync_service = TaskSyncService(settings_obj)
+            result['task_sync'] = await sync_service.sync_task(
+                result.get('task', {}),
+                preferred_provider=sync_preferences['preferred_provider'],
+                provider_order=sync_preferences['provider_order'],
+            )
         
         return result
         
@@ -3157,7 +6161,7 @@ async def clear_all_tasks():
 
 @app.delete("/api/tasks/{task_id}")
 async def delete_task(task_id: str):
-    """Delete a task."""
+    """Delete a task and mark its source as dismissed to prevent recreation."""
     try:
         if not TASK_MANAGER_AVAILABLE:
             return {"error": "Task Manager not available", "success": False}
@@ -3167,8 +6171,20 @@ async def delete_task(task_id: str):
         else:
             settings = Settings()
             task_manager = TaskManager(settings)
-            
+        
+        # Get task info before deleting to mark source as dismissed
+        all_tasks = task_manager.get_all_tasks(include_completed=True, include_deleted=True)
+        task_to_delete = next((t for t in all_tasks if t.get('id') == task_id), None)
+        
         result = task_manager.delete_task(task_id)
+        
+        # If deletion succeeded, mark the source as dismissed
+        if result.get('success') and task_to_delete:
+            source = task_to_delete.get('source', '')
+            source_id = task_to_delete.get('source_id', '')
+            if source and source_id:
+                db.mark_source_dismissed(source, source_id)
+                logger.info(f"Marked source as dismissed: {source}/{source_id}")
         
         return result
         
@@ -3198,6 +6214,155 @@ async def sync_tasks_with_ticktick(request: Request):
     except Exception as e:
         logger.error(f"Error syncing tasks with TickTick: {e}")
         return {"error": str(e), "success": False}
+
+
+@app.get("/api/task-sync/providers/status")
+async def get_task_sync_provider_status():
+    """Get task sync provider connection status for settings UI."""
+    try:
+        from database import get_auth_token, get_credentials
+        from services.task_sync_service import TaskSyncService
+
+        settings = Settings()
+        sync_service = TaskSyncService(settings)
+
+        ticktick_token = get_auth_token('ticktick') or {}
+        ticktick_creds = get_credentials('ticktick') or {}
+        ticktick_has_setup = bool(ticktick_token.get('access_token') or ticktick_creds.get('api_token'))
+        ticktick_connected = False
+        ticktick_error = None
+        if ticktick_has_setup and COLLECTORS_AVAILABLE:
+            try:
+                collector = TickTickCollector(settings)
+                ticktick_connected = bool(await collector.is_authenticated())
+            except Exception as ticktick_exc:
+                ticktick_error = str(ticktick_exc)
+
+        todoist_token = sync_service._get_todoist_token()
+        apple_creds = get_credentials('apple') or {}
+        reminders_list = apple_creds.get('reminders_list') or apple_creds.get('list') or ''
+
+        return {
+            "success": True,
+            "providers": {
+                "ticktick": {
+                    "connected": ticktick_connected,
+                    "configured": ticktick_has_setup,
+                    "auth_url": "/auth/ticktick",
+                    "mode": "oauth",
+                    "error": ticktick_error,
+                },
+                "todoist": {
+                    "connected": bool(todoist_token),
+                    "configured": bool(todoist_token),
+                    "mode": "token",
+                    "has_token": bool(todoist_token),
+                },
+                "apple_reminders": {
+                    "connected": bool(reminders_list),
+                    "configured": bool(reminders_list),
+                    "mode": "local",
+                    "supported": sys.platform == "darwin",
+                    "list_name": reminders_list,
+                },
+            },
+        }
+    except Exception as e:
+        logger.error(f"Error loading task sync provider status: {e}")
+        return {"success": False, "error": str(e), "providers": {}}
+
+
+@app.post("/api/task-sync/providers/todoist/connect")
+async def connect_todoist_provider(request: Request):
+    """Save Todoist token for task sync."""
+    try:
+        from database import get_credentials, save_credentials
+
+        payload = await request.json()
+        api_token = str(payload.get('api_token') or '').strip()
+        if not api_token:
+            raise HTTPException(status_code=400, detail="Todoist API token is required")
+
+        existing = get_credentials('todoist') or {}
+        existing['api_token'] = api_token
+        save_credentials('todoist', existing)
+        return {"success": True, "provider": "todoist"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error saving Todoist credentials: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/task-sync/providers/apple_reminders/connect")
+async def connect_apple_reminders_provider(request: Request):
+    """Save Apple Reminders settings and trigger a lightweight permission check."""
+    try:
+        from database import get_credentials, save_credentials
+
+        if sys.platform != 'darwin':
+            raise HTTPException(status_code=400, detail="Apple Reminders is only available on macOS")
+
+        payload = await request.json()
+        list_name = str(payload.get('list_name') or '').strip()
+
+        script = 'tell application "Reminders" to get name of default list'
+        process = await asyncio.create_subprocess_exec(
+            'osascript', '-e', script,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await process.communicate()
+        if process.returncode != 0:
+            error_text = stderr.decode().strip() or stdout.decode().strip() or 'Apple Reminders permission check failed'
+            raise HTTPException(status_code=400, detail=error_text)
+
+        existing = get_credentials('apple') or {}
+        if list_name:
+            existing['reminders_list'] = list_name
+        save_credentials('apple', existing)
+
+        return {
+            "success": True,
+            "provider": "apple_reminders",
+            "default_list": stdout.decode().strip(),
+            "list_name": list_name or existing.get('reminders_list') or '',
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error connecting Apple Reminders: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/task-sync/providers/{provider}/disconnect")
+async def disconnect_task_sync_provider(provider: str):
+    """Disconnect a task sync provider by removing stored credentials/tokens."""
+    try:
+        normalized = str(provider or '').strip().lower()
+        provider_map = {
+            'ticktick': 'ticktick',
+            'todoist': 'todoist',
+            'apple_reminders': 'apple',
+            'apple': 'apple',
+        }
+        service_name = provider_map.get(normalized)
+        if not service_name:
+            raise HTTPException(status_code=404, detail='Unsupported provider')
+
+        with db.get_connection() as conn:
+            cursor = conn.cursor()
+            if normalized == 'ticktick':
+                cursor.execute("DELETE FROM auth_tokens WHERE service_name = ?", ('ticktick',))
+            cursor.execute("DELETE FROM credentials WHERE service_name = ?", (service_name,))
+            conn.commit()
+
+        return {"success": True, "provider": normalized}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error disconnecting task sync provider {provider}: {e}")
+        return {"success": False, "error": str(e)}
 
 
 @app.post("/api/tasks/generate")
@@ -3302,33 +6467,59 @@ async def get_task_details(task_id: str):
         
         # Convert to dict
         task = dict(task_row)
+        source_value = (task.get('source') or '').lower()
+        source_id = task.get('source_id')
+
+        if not task.get('source_title'):
+            task['source_title'] = task.get('title', '')
+        if not task.get('source_preview') and task.get('description'):
+            task['source_preview'] = task.get('description', '')[:280]
+        if not task.get('creation_reason'):
+            if source_value == 'email' and source_id:
+                task['creation_reason'] = 'Created from linked email action item'
+            elif source_value == 'calendar' and source_id:
+                task['creation_reason'] = 'Created from linked calendar event action item'
+            elif source_value.startswith('notes_'):
+                task['creation_reason'] = 'Created from linked notes action item'
+            else:
+                task['creation_reason'] = ''
+        if not task.get('source_url') and source_value == 'email' and source_id:
+            task['source_url'] = f"https://mail.google.com/mail/u/0/#inbox/{source_id}"
         
         # Add source link information
         source_info = {"type": "unknown", "link": None, "display_text": "Unknown source"}
+
+        source_url = task.get('source_url')
         
-        if task.get('source') == 'email' and task.get('source_id'):
+        if source_value == 'email' and task.get('source_id'):
             source_info = {
                 "type": "email",
                 "link": f"https://mail.google.com/mail/u/0/#inbox/{task['source_id']}",
                 "display_text": f"View email: {task.get('title', 'Email')}"
             }
-        elif task.get('source') == 'calendar' and task.get('source_id'):
+        elif source_value == 'calendar' and task.get('source_id'):
             source_info = {
                 "type": "calendar",
                 "link": f"https://calendar.google.com/calendar/event?eid={task['source_id']}",
                 "display_text": f"View calendar event: {task.get('title', 'Event')}"
             }
-        elif task.get('source') == 'obsidian' and task.get('source_id'):
+        elif source_value in ('obsidian', 'notes_obsidian') and task.get('source_id'):
             source_info = {
                 "type": "obsidian",
                 "link": f"obsidian://open?vault=&file={task['source_id']}",
                 "display_text": f"Open in Obsidian: {task.get('source_id', 'Note')}"
             }
-        elif task.get('source') == 'google_drive' and task.get('source_id'):
+        elif source_value in ('google_drive', 'notes_google_drive') and task.get('source_id'):
             source_info = {
                 "type": "google_drive",
                 "link": f"https://docs.google.com/document/d/{task['source_id']}/edit",
                 "display_text": f"View Google Doc: {task.get('title', 'Document')}"
+            }
+        elif source_url:
+            source_info = {
+                "type": source_value or "external",
+                "link": source_url,
+                "display_text": f"Open source item: {task.get('source_title') or task.get('title', 'Source')}"
             }
         
         # Add source info to task
@@ -3364,10 +6555,27 @@ async def get_suggested_todos(status: str = "pending"):
 
 
 @app.post("/api/suggested-todos/{suggestion_id}/approve")
-async def approve_suggested_todo(suggestion_id: str):
+async def approve_suggested_todo(suggestion_id: str, request: Request):
     """Approve a suggested todo and add it to the main todos list."""
     try:
-        success = db.approve_suggested_todo(suggestion_id)
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = {}
+
+        settings_obj = Settings() if COLLECTORS_AVAILABLE else None
+        sync_preferences = extract_task_sync_preferences(
+            payload,
+            default_enabled=getattr(getattr(settings_obj, 'task_sync', None), 'enabled', False),
+        )
+
+        success = db.approve_suggested_todo(
+            suggestion_id,
+            sync_enabled=sync_preferences['enabled'],
+            preferred_provider=sync_preferences['preferred_provider'],
+            provider_order=sync_preferences['provider_order'],
+            settings=settings_obj,
+        )
         
         if not success:
             raise HTTPException(status_code=404, detail="Suggested todo not found")
@@ -3380,6 +6588,66 @@ async def approve_suggested_todo(suggestion_id: str):
         raise
     except Exception as e:
         logger.error(f"Error approving suggested todo: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/suggested-todos/bulk")
+async def bulk_process_suggested_todos(request: Request):
+    """Bulk approve/reject suggested todos."""
+    try:
+        payload = await request.json()
+        action = (payload.get("action") or "").strip().lower()
+        suggestion_ids = payload.get("suggestion_ids") or []
+
+        if action not in {"approve", "reject"}:
+            raise HTTPException(status_code=400, detail="action must be 'approve' or 'reject'")
+
+        target_ids = []
+        if suggestion_ids:
+            target_ids = [str(item).strip() for item in suggestion_ids if str(item).strip()]
+        else:
+            pending = db.get_suggested_todos(status="pending")
+            target_ids = [str(item.get("id", "")).strip() for item in pending if item.get("id")]
+
+        processed = 0
+        failed = 0
+        settings_obj = Settings() if COLLECTORS_AVAILABLE else None
+        sync_preferences = extract_task_sync_preferences(
+            payload,
+            default_enabled=getattr(getattr(settings_obj, 'task_sync', None), 'enabled', False),
+        )
+
+        for suggestion_id in target_ids:
+            try:
+                if action == "approve":
+                    success = db.approve_suggested_todo(
+                        suggestion_id,
+                        sync_enabled=sync_preferences['enabled'],
+                        preferred_provider=sync_preferences['preferred_provider'],
+                        provider_order=sync_preferences['provider_order'],
+                        settings=settings_obj,
+                    )
+                else:
+                    success = db.reject_suggested_todo(suggestion_id)
+                if success:
+                    processed += 1
+                else:
+                    failed += 1
+            except Exception:
+                failed += 1
+
+        return {
+            "success": True,
+            "action": action,
+            "processed": processed,
+            "failed": failed,
+            "requested": len(target_ids),
+            "message": f"{action.title()}d {processed} suggestion(s)"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error bulk processing suggested todos: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -3729,14 +6997,14 @@ async def get_news(filter: str = "all", include_read: bool = False):
             # Build query based on whether we want to include read articles
             if include_read:
                 cursor.execute('''
-                    SELECT id, title, url, snippet, source, published_date, topics, relevance_score, is_read
+                    SELECT id, title, url, snippet, image_url, source, published_date, topics, relevance_score, is_read
                     FROM news_articles 
                     ORDER BY is_read ASC, published_date DESC 
                     LIMIT 50
                 ''')
             else:
                 cursor.execute('''
-                    SELECT id, title, url, snippet, source, published_date, topics, relevance_score, is_read
+                    SELECT id, title, url, snippet, image_url, source, published_date, topics, relevance_score, is_read
                     FROM news_articles 
                     WHERE is_read = 0
                     ORDER BY published_date DESC 
@@ -3773,6 +7041,7 @@ async def get_news(filter: str = "all", include_read: bool = False):
                 "source": article['source'],
                 "url": article['url'],
                 "description": article['snippet'] or "No description available",
+                "image_url": article['image_url'] if 'image_url' in article.keys() else None,
                 "published_at": article['published_date'],
                 "category": ', '.join(topics),
                 "relevance_score": article['relevance_score'] or 0.0,
@@ -3822,8 +7091,6 @@ async def get_news(filter: str = "all", include_read: bool = False):
         articles = await get_hacker_news_articles()
         return {"articles": articles, "filter": filter, "error": str(e), "source": "Error_Fallback"}
 
-async def get_hacker_news_articles():
-    """Get articles from Hacker News as fallback"""
 async def get_hacker_news_articles():
     """Get articles from Hacker News as fallback"""
     articles = []
@@ -4122,28 +7389,98 @@ async def get_vanity():
 
 @app.get("/api/vanity-alerts")
 async def get_vanity_alerts():
-    """Alias for vanity endpoint - returns alerts format (excluding dismissed)"""
-    vanity_data = await get_vanity()
-    
-    # Transform vanity data to alerts format, excluding dismissed
-    alerts = []
-    if isinstance(vanity_data, dict):
-        for alert in vanity_data.get('alerts', []):
-            # Skip dismissed alerts
-            if alert.get('is_dismissed'):
-                continue
-                
-            alerts.append({
-                'id': alert.get('id', str(hash(alert.get('title', '')))),
-                'title': alert.get('title', ''),
-                'description': alert.get('description', ''),
-                'type': alert.get('category', 'mention'),
-                'source': alert.get('source', ''),
-                'url': alert.get('url', ''),
-                'timestamp': alert.get('timestamp', '')
-            })
-    
-    return {"alerts": alerts}
+    """Return persisted vanity alerts quickly from the active workspace database."""
+    try:
+        with db.get_connection() as conn:
+            cursor = conn.cursor()
+
+            try:
+                cursor.execute("ALTER TABLE vanity_alerts ADD COLUMN is_dismissed INTEGER DEFAULT 0")
+                conn.commit()
+            except Exception:
+                pass
+
+            cursor.execute('''
+                SELECT
+                    id,
+                    title,
+                    COALESCE(snippet, content, '') AS description,
+                    COALESCE(search_term, 'mention') AS alert_type,
+                    COALESCE(source, '') AS source,
+                    COALESCE(url, '') AS url,
+                    COALESCE(timestamp, '') AS timestamp,
+                    COALESCE(confidence_score, 0) AS confidence_score,
+                    COALESCE(is_liked, 0) AS is_liked
+                FROM vanity_alerts
+                WHERE COALESCE(is_dismissed, 0) = 0
+                ORDER BY confidence_score DESC, timestamp DESC
+                LIMIT 100
+            ''')
+
+            alerts = []
+            for row in cursor.fetchall():
+                alerts.append({
+                    'id': row[0],
+                    'title': row[1],
+                    'description': row[2],
+                    'type': row[3],
+                    'source': row[4],
+                    'url': row[5],
+                    'timestamp': row[6],
+                    'is_liked': bool(row[8]),
+                })
+
+            if alerts:
+                return {"alerts": alerts, "count": len(alerts), "success": True}
+
+            # If table-backed alerts are empty, fall back to the broader vanity feed
+            # so the UI isn't empty while collectors repopulate the database table.
+            default_fallback_alerts = [{
+                'id': f"fallback-{int(time.time())}",
+                'title': 'Buildly Platform Update',
+                'description': 'Tracking mentions from configured vanity sources while fresh results are loading.',
+                'type': 'buildly',
+                'source': 'Dashboard Fallback',
+                'url': '',
+                'timestamp': datetime.now().isoformat(),
+                'is_liked': False,
+            }]
+            try:
+                # Bound collector latency so the UI receives a result quickly.
+                fallback = await asyncio.wait_for(get_vanity(), timeout=8.0)
+                fallback_alerts = []
+                for item in (fallback or {}).get("alerts", [])[:100]:
+                    fallback_alerts.append({
+                        'id': item.get('id') or f"fallback-{hash(item.get('title', ''))}",
+                        'title': item.get('title', 'Untitled mention'),
+                        'description': item.get('snippet') or item.get('content') or '',
+                        'type': item.get('search_term') or item.get('category') or 'mention',
+                        'source': item.get('source', ''),
+                        'url': item.get('url', ''),
+                        'timestamp': item.get('timestamp', ''),
+                        'is_liked': bool(item.get('is_liked', False)),
+                    })
+
+                if not fallback_alerts:
+                    fallback_alerts = default_fallback_alerts
+
+                return {
+                    "alerts": fallback_alerts,
+                    "count": len(fallback_alerts),
+                    "success": True,
+                    "source": "fallback",
+                }
+            except Exception as fallback_error:
+                logger.warning(f"Vanity alerts fallback failed: {fallback_error}")
+                return {
+                    "alerts": default_fallback_alerts,
+                    "count": len(default_fallback_alerts),
+                    "success": True,
+                    "source": "static-fallback",
+                }
+    except Exception as e:
+        logger.error(f"Error loading vanity alerts from database: {e}")
+        return {"alerts": [], "count": 0, "success": False, "error": str(e)}
 
 
 @app.post("/api/vanity-alerts/{alert_id}/dismiss")
@@ -4152,6 +7489,11 @@ async def dismiss_vanity_alert(alert_id: str):
     try:
         with db.get_connection() as conn:
             cursor = conn.cursor()
+            try:
+                cursor.execute("ALTER TABLE vanity_alerts ADD COLUMN is_dismissed INTEGER DEFAULT 0")
+                conn.commit()
+            except Exception:
+                pass
             cursor.execute("""
                 UPDATE vanity_alerts 
                 SET is_dismissed = 1
@@ -5074,36 +8416,313 @@ async def create_custom_playlist(request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/music/playlists")
-async def get_saved_playlists():
-    """Get all saved playlists"""
+@app.post("/api/ai/generate-playlist")
+async def generate_ai_playlist(request: Request):
+    """
+    Generate a playlist using AI (Ollama) with direct API call.
+    Bypasses conversation context for more reliable JSON output.
+    """
+    import aiohttp
+    import json
+    import re
+    
     try:
-        if COLLECTORS_AVAILABLE:
-            from collectors.universal_music_collector import UniversalMusicCollector
-            collector = UniversalMusicCollector()
-            playlists = await collector.get_saved_playlists()
+        data = await request.json()
+        mood = data.get('mood', 'chill')
+        liked_artists = data.get('liked_artists', []) or data.get('artists', [])
+        seed_songs = data.get('seed_songs', [])
+        genres = data.get('genres', [])
+        max_tracks = max(10, data.get('max_tracks', 20))  # Minimum 10 tracks
+        
+        # Mood descriptions for better AI understanding
+        mood_descriptions = {
+            'chill': 'relaxed, calm, laid-back',
+            'energetic': 'upbeat, high-energy, pump-up',
+            'focus': 'concentration, ambient, instrumental',
+            'happy': 'uplifting, feel-good, positive',
+            'sad': 'melancholic, emotional, slow',
+            'party': 'dance, club, EDM',
+            'romantic': 'love songs, slow jams',
+            'workout': 'high energy, motivating',
+            'sleep': 'calm, ambient, peaceful',
+            'custom': 'mixed genres'
+        }
+        mood_desc = mood_descriptions.get(mood.lower(), mood)
+        
+        # Build a concise but effective prompt
+        prompt_parts = [f"Generate {max_tracks} real songs for \"{mood}\" mood ({mood_desc})."]
+        
+        if liked_artists:
+            prompt_parts.append(f"Include multiple songs by: {', '.join(liked_artists)}. Also include similar artists.")
+        
+        if genres:
+            prompt_parts.append(f"Genres: {', '.join(genres)}.")
             
-            return {
-                "playlists": [
-                    {
-                        "id": p.id,
-                        "name": p.name,
-                        "description": p.description,
-                        "mood": p.mood,
-                        "created_by": p.created_by,
-                        "created_at": p.created_at.isoformat(),
-                        "track_count": len(p.tracks),
-                        "total_duration_ms": p.total_duration_ms,
-                        "services_used": p.services_used
+        if seed_songs:
+            prompt_parts.append(f"Similar to: {', '.join(seed_songs)}.")
+        
+        prompt_parts.append("""
+Return ONLY a JSON array, no markdown or explanation.
+Format: [{"artist": "Name", "title": "Song"}, ...]""")
+        
+        prompt = " ".join(prompt_parts)
+
+        # Get Ollama URL from database settings or configured provider
+        ollama_url = db.get_setting('ollama_url')
+        if not ollama_url:
+            # Try to get from configured Ollama provider
+            providers = db.get_ai_providers()
+            for p in providers:
+                if p.get('provider_type') == 'ollama' and p.get('is_active'):
+                    ollama_url = p.get('base_url') or p.get('config_data', {}).get('base_url')
+                    if ollama_url:
+                        break
+        if not ollama_url:
+            ollama_url = 'http://localhost:11434'
+        
+        logger.info(f"Using Ollama URL for playlist generation: {ollama_url}")
+        
+        # Use llama3.2:1b which follows instructions better than tinyllama
+        model = 'llama3.2:1b'
+        
+        # Try to use the configured model if available
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(f"{ollama_url}/api/tags") as resp:
+                    if resp.status == 200:
+                        tags = await resp.json()
+                        available_models = [m['name'] for m in tags.get('models', [])]
+                        if 'llama3.2:1b' in available_models:
+                            model = 'llama3.2:1b'
+                        elif 'llama3.2:latest' in available_models:
+                            model = 'llama3.2:latest'
+                        elif 'roger:latest' in available_models:
+                            model = 'roger:latest'
+                        logger.info(f"Using model {model} for playlist generation")
+        except Exception as e:
+            logger.warning(f"Could not check available models: {e}")
+        
+        # Call Ollama directly
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f"{ollama_url}/api/generate",
+                json={
+                    "model": model,
+                    "prompt": prompt,
+                    "stream": False,
+                    "options": {
+                        "temperature": 0.7,
+                        "num_predict": 2000
                     }
-                    for p in playlists
-                ]
-            }
-        else:
-            return {"playlists": []}
+                },
+                timeout=aiohttp.ClientTimeout(total=60)
+            ) as response:
+                if response.status != 200:
+                    error_text = await response.text()
+                    logger.error(f"Ollama error: {error_text}")
+                    raise HTTPException(status_code=500, detail=f"AI service error: {error_text}")
+                
+                result = await response.json()
+                ai_response = result.get('response', '')
+                logger.info(f"AI playlist response: {ai_response[:200]}...")
+        
+        # Parse the JSON from the response
+        # Remove code blocks
+        clean_response = ai_response
+        clean_response = re.sub(r'```json\s*', '', clean_response)
+        clean_response = re.sub(r'```\s*', '', clean_response)
+        clean_response = re.sub(r'```python[\s\S]*?```', '', clean_response)
+        clean_response = re.sub(r'```bash[\s\S]*?```', '', clean_response)
+        
+        # Find JSON array with artist/title
+        tracks = None
+        
+        # First, try to parse the entire response as JSON (with cleaning)
+        clean_response_stripped = clean_response.strip()
+        if clean_response_stripped.startswith('['):
+            try:
+                # Find the matching closing bracket
+                bracket_count = 0
+                end_pos = 0
+                for i, char in enumerate(clean_response_stripped):
+                    if char == '[':
+                        bracket_count += 1
+                    elif char == ']':
+                        bracket_count -= 1
+                        if bracket_count == 0:
+                            end_pos = i + 1
+                            break
+                
+                json_str = clean_response_stripped[:end_pos]
+                json_str = json_str.replace('\u2018', "'").replace('\u2019', "'")
+                json_str = json_str.replace('\u201c', '"').replace('\u201d', '"')
+                json_str = re.sub(r',\s*]', ']', json_str)
+                json_str = re.sub(r',\s*}', '}', json_str)
+                
+                parsed = json.loads(json_str)
+                if isinstance(parsed, list) and len(parsed) > 0:
+                    if isinstance(parsed[0], dict) and 'artist' in parsed[0]:
+                        tracks = parsed
+                    elif isinstance(parsed[0], str) and ' - ' in parsed[0]:
+                        # Convert "Artist - Title" format
+                        tracks = []
+                        for item in parsed:
+                            if isinstance(item, str) and ' - ' in item:
+                                parts = item.split(' - ', 1)
+                                tracks.append({"artist": parts[0].strip(), "title": parts[1].strip()})
+            except (json.JSONDecodeError, IndexError):
+                pass
+        
+        # Fallback: find JSON arrays in the response
+        if not tracks:
+            json_matches = re.findall(r'\[[\s\S]*?\]', clean_response)
+            for match in json_matches:
+                if '"artist"' in match and '"title"' in match:
+                    try:
+                        # Clean up common JSON issues
+                        clean_json = match
+                        clean_json = clean_json.replace('\u2018', "'").replace('\u2019', "'")
+                        clean_json = clean_json.replace('\u201c', '"').replace('\u201d', '"')
+                        clean_json = re.sub(r',\s*]', ']', clean_json)
+                        clean_json = re.sub(r',\s*}', '}', clean_json)
+                        
+                        tracks = json.loads(clean_json)
+                        if isinstance(tracks, list) and len(tracks) > 0:
+                            break
+                    except json.JSONDecodeError:
+                        continue
+                else:
+                    # Try parsing as simple string array like ["Artist - Title", ...]
+                    try:
+                        parsed = json.loads(match)
+                        if isinstance(parsed, list) and len(parsed) > 0 and isinstance(parsed[0], str):
+                            # Convert "Artist - Title" format to objects
+                            converted = []
+                            for item in parsed:
+                                if isinstance(item, str) and ' - ' in item:
+                                    parts = item.split(' - ', 1)
+                                    if len(parts) == 2:
+                                        converted.append({"artist": parts[0].strip(), "title": parts[1].strip()})
+                            if converted:
+                                tracks = converted
+                                break
+                    except json.JSONDecodeError:
+                        continue
+        
+        # Fallback: extract individual song objects
+        if not tracks:
+            song_pattern = r'\{\s*"artist"\s*:\s*"([^"]+)"\s*,\s*"title"\s*:\s*"([^"]+)"\s*\}'
+            song_matches = re.findall(song_pattern, clean_response)
+            if song_matches:
+                tracks = [{"artist": m[0], "title": m[1]} for m in song_matches]
+        
+        # Fallback: look for "Artist - Title" pattern anywhere in response
+        if not tracks:
+            # Match quoted strings in format "Artist - Title"
+            string_pattern = r'"([^"]+)\s*-\s*([^"]+)"'
+            string_matches = re.findall(string_pattern, clean_response)
+            if string_matches and len(string_matches) >= 2:  # At least 2 songs
+                tracks = [{"artist": m[0].strip(), "title": m[1].strip()} for m in string_matches]
+        
+        if not tracks or len(tracks) == 0:
+            logger.error(f"Could not parse playlist from AI response: {ai_response}")
+            raise HTTPException(status_code=500, detail="AI did not return valid playlist data")
+        
+        # Filter valid tracks
+        tracks = [t for t in tracks if isinstance(t, dict) and t.get('artist') and t.get('title')]
+        
+        logger.info(f"Generated playlist with {len(tracks)} tracks")
+        return {
+            "success": True,
+            "tracks": tracks,
+            "mood": mood,
+            "model": model
+        }
+        
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error getting playlists: {e}")
+        logger.error(f"Error generating AI playlist: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/youtube/search")
+async def youtube_search(q: str):
+    """Search YouTube and return the first video ID with fast fallbacks."""
+    import aiohttp
+    import re
+    from urllib.parse import quote_plus, unquote
+
+    def extract_video_id(text: str):
+        patterns = [
+            r'"videoId":"([a-zA-Z0-9_-]{11})"',
+            r'href="/watch\?v=([a-zA-Z0-9_-]{11})',
+            r'watch\?v=([a-zA-Z0-9_-]{11})',
+            r'youtu\.be/([a-zA-Z0-9_-]{11})',
+            r'%2Fwatch%3Fv%3D([a-zA-Z0-9_-]{11})',
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, text)
+            if match:
+                return match.group(1)
+        return None
+    
+    try:
+        encoded_query = quote_plus(q)
+        candidates = [
+            (
+                f"https://www.youtube.com/results?search_query={encoded_query}&hl=en&gl=US",
+                {
+                    'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                    'Accept-Language': 'en-US,en;q=0.9',
+                },
+                'youtube-html',
+            ),
+            (
+                f"https://html.duckduckgo.com/html/?q={quote_plus(f'site:youtube.com/watch {q}')}",
+                {
+                    'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                    'Accept-Language': 'en-US,en;q=0.9',
+                },
+                'duckduckgo-html',
+            ),
+        ]
+
+        timeout = aiohttp.ClientTimeout(total=4, connect=2, sock_read=3)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            for search_url, headers, source in candidates:
+                try:
+                    async with session.get(search_url, headers=headers) as response:
+                        if response.status != 200:
+                            continue
+                        html = await response.text()
+                        video_id = extract_video_id(html)
+                        if not video_id and source == 'duckduckgo-html':
+                            decoded_html = unquote(html)
+                            video_id = extract_video_id(decoded_html)
+                        if video_id:
+                            logger.info(f"YouTube search for '{q}' found video: {video_id} via {source}")
+                            return {"videoId": video_id, "query": q, "source": source}
+                except asyncio.TimeoutError:
+                    logger.warning(f"YouTube search timeout via {source} for query: {q}")
+                except Exception as source_error:
+                    logger.warning(f"YouTube search source {source} failed for '{q}': {source_error}")
+
+        logger.warning(f"No video found for query: {q}")
+        return {"videoId": None, "query": q, "error": "No video found", "searchUrl": f"https://www.youtube.com/results?search_query={encoded_query}"}
+        
+    except Exception as e:
+        logger.error(f"YouTube search error for '{q}': {e}")
+        return {"videoId": None, "query": q, "error": str(e)}
+
+
+# Note: Music playlist endpoints are now in modules/music/endpoints.py
+# which is included via music_router - provides:
+# - /api/music/playlists (GET, POST)
+# - /api/music/playback-state (GET, POST)
+# - /api/music/playback-state/index (PUT)
+# - /api/music/liked-songs (GET, POST, DELETE)
+# - /api/music/initial-data (GET)
 
 # OAuth endpoints for music services
 @app.get("/api/music/oauth/spotify/login")
@@ -5398,14 +9017,7 @@ async def google_calendar_auth():
         # Include all scopes that Google typically returns to avoid scope mismatch
         flow = Flow.from_client_secrets_file(
             str(creds_file),
-            scopes=[
-                'https://www.googleapis.com/auth/calendar.readonly',
-                'https://www.googleapis.com/auth/gmail.readonly',
-                'https://www.googleapis.com/auth/drive.readonly',
-                'https://www.googleapis.com/auth/userinfo.profile',
-                'https://www.googleapis.com/auth/userinfo.email',
-                'openid'
-            ],
+            scopes=get_google_oauth_scopes(),
             redirect_uri='http://localhost:8008/auth/google/callback'
         )
         
@@ -5448,19 +9060,22 @@ async def google_oauth_callback(code: str = None, state: str = None, error: str 
         # Google automatically adds profile/email/openid scopes, so we include them
         flow = Flow.from_client_secrets_file(
             str(creds_file),
-            scopes=[
-                'https://www.googleapis.com/auth/calendar.readonly',
-                'https://www.googleapis.com/auth/gmail.readonly',
-                'https://www.googleapis.com/auth/drive.readonly',
-                'https://www.googleapis.com/auth/userinfo.profile',
-                'https://www.googleapis.com/auth/userinfo.email',
-                'openid'
-            ],
+            scopes=get_google_oauth_scopes(),
             redirect_uri='http://localhost:8008/auth/google/callback'
         )
         
         # Exchange code for token (disable scope validation to handle Google's automatic additions)
-        flow.fetch_token(code=code)
+        try:
+            flow.fetch_token(code=code)
+        except Exception as token_error:
+            # If scope mismatch, user needs to disconnect and retry
+            if 'Scope has changed' in str(token_error):
+                logger.warning(f"Scope mismatch detected: {token_error}. User needs to disconnect and retry.")
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"OAuth scope changed. Please disconnect and reconnect: {str(token_error)}"
+                )
+            raise
         
         # Save credentials
         credentials = flow.credentials
@@ -5476,18 +9091,28 @@ async def google_oauth_callback(code: str = None, state: str = None, error: str 
         
         logger.info(f"Google credentials saved to {tokens_file}")
         
-        # Return success page that closes the popup
+        # Return success page that redirects back to the dashboard
         return HTMLResponse(content="""
         <html>
-            <head><title>Google Authentication Success</title></head>
-            <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
-                <h2 style="color: green;">✅ Google Authentication Successful!</h2>
-                <p>Your Google Calendar and Gmail access has been configured.</p>
-                <p>You can close this window and return to your dashboard.</p>
+            <head>
+                <title>Google Authentication Success</title>
+                <meta http-equiv="refresh" content="2;url=/">
+            </head>
+            <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px; background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); color: white; min-height: 100vh;">
+                <div style="max-width: 400px; margin: 0 auto; padding-top: 100px;">
+                    <div style="font-size: 64px; margin-bottom: 20px;">✅</div>
+                    <h2 style="color: #4ade80; margin-bottom: 16px;">Google Authentication Successful!</h2>
+                    <p style="color: #9ca3af; margin-bottom: 24px;">Your Google Calendar and Gmail access has been configured.</p>
+                    <p style="color: #6b7280; font-size: 14px;">Redirecting to dashboard...</p>
+                    <div style="margin-top: 20px;">
+                        <a href="/" style="color: #60a5fa; text-decoration: none;">Click here if not redirected automatically</a>
+                    </div>
+                </div>
                 <script>
+                    // Redirect to dashboard after brief delay
                     setTimeout(() => {
-                        window.close();
-                    }, 3000);
+                        window.location.href = '/';
+                    }, 2000);
                 </script>
             </body>
         </html>
@@ -5505,6 +9130,8 @@ async def google_auth_status():
     try:
         import json
         from datetime import datetime
+        from google.oauth2.credentials import Credentials
+        from google.auth.transport.requests import Request
         
         tokens_file = project_root / "tokens" / "google_credentials.json"
         
@@ -5519,6 +9146,9 @@ async def google_auth_status():
         with open(tokens_file, 'r') as f:
             token_data = json.load(f)
         
+        scopes = token_data.get('scopes', [])
+        has_refresh_token = bool(token_data.get('refresh_token'))
+
         # Check expiry
         expiry_str = token_data.get('expiry')
         is_expired = False
@@ -5528,8 +9158,24 @@ async def google_auth_status():
                 is_expired = expiry < datetime.now(expiry.tzinfo)
             except:
                 pass
+
+        # If expired but we have a refresh token, refresh silently and persist.
+        if is_expired and has_refresh_token:
+            try:
+                creds = Credentials.from_authorized_user_file(str(tokens_file), get_google_oauth_scopes())
+                if creds.expired and creds.refresh_token:
+                    creds.refresh(Request())
+                    with open(tokens_file, 'w') as f:
+                        f.write(creds.to_json())
+
+                    # Reload token data after successful refresh.
+                    token_data = json.loads(creds.to_json())
+                    scopes = token_data.get('scopes', scopes)
+                    is_expired = False
+                    logger.info("Refreshed Google credentials during status check")
+            except Exception as refresh_error:
+                logger.warning(f"Could not refresh Google token during status check: {refresh_error}")
         
-        scopes = token_data.get('scopes', [])
         scope_names = []
         if 'https://www.googleapis.com/auth/calendar.readonly' in scopes:
             scope_names.append('Calendar')
@@ -5537,11 +9183,24 @@ async def google_auth_status():
             scope_names.append('Gmail')
         if 'https://www.googleapis.com/auth/drive.readonly' in scopes:
             scope_names.append('Drive')
+        can_modify_gmail = has_required_google_scopes(scopes, GOOGLE_GMAIL_WRITE_SCOPES)
+        # Require reconnect only for actual auth breakage, not merely reduced (read-only) scope.
+        needs_reconnect = (is_expired and not has_refresh_token)
+
+        if is_expired:
+            message = "⚠️ Token expired - please reconnect"
+        elif not can_modify_gmail:
+            message = "✅ Connected (read-only Gmail scope). Reconnect only if you need mark-read/archive/labels actions."
+        else:
+            message = f"✅ Connected ({', '.join(scope_names)})"
         
         return {
             "authenticated": True,
             "expired": is_expired,
-            "message": f"✅ Connected ({', '.join(scope_names)})" if not is_expired else "⚠️ Token expired - please reconnect",
+            "needs_reconnect": needs_reconnect,
+            "can_modify_gmail": can_modify_gmail,
+            "has_refresh_token": has_refresh_token,
+            "message": message,
             "scopes": scopes,
             "scope_names": scope_names
         }
@@ -5866,6 +9525,331 @@ async def get_conversations():
         return {"error": str(e)}
 
 
+def _default_ai_assistants_config() -> Dict[str, Any]:
+    """Default assistant personas and voice settings."""
+    return {
+        "active_assistant_id": "rogr",
+        "assistants": [
+            {
+                "id": "rogr",
+                "name": "Rogr",
+                "personality": "Mission-focused, concise, practical",
+                "tagline": "Mission clarity achieved.",
+                "key_phrases": ["roger roger", "locked and loaded", "objective complete"],
+                "voice_style": "droid",
+                "voice_speed": 0.72,
+                "voice_pitch": 0.74,
+                "voice_model": "en_US-ryan-high",
+                "signature_phrase": "roger, roger",
+                "signature_enabled": True,
+                "browser_voice": "rogr"
+            },
+            {
+                "id": "strategist",
+                "name": "Strategist",
+                "personality": "Executive, structured, prioritization-first",
+                "tagline": "Focus drives outcomes.",
+                "key_phrases": ["top priority", "critical path", "next best action"],
+                "voice_style": "clean",
+                "voice_speed": 0.92,
+                "voice_pitch": 0.98,
+                "voice_model": "en_US-libritts-high",
+                "signature_phrase": "focus drives outcomes",
+                "signature_enabled": False,
+                "browser_voice": "rogr"
+            },
+            {
+                "id": "coach",
+                "name": "Coach",
+                "personality": "Supportive, clear, momentum-building",
+                "tagline": "Small wins, steady momentum.",
+                "key_phrases": ["small win", "momentum", "one step at a time"],
+                "voice_style": "radio",
+                "voice_speed": 0.85,
+                "voice_pitch": 1.08,
+                "voice_model": "en_US-lessac-medium",
+                "signature_phrase": "small wins, steady momentum",
+                "signature_enabled": False,
+                "browser_voice": "rogr"
+            }
+        ]
+    }
+
+
+def _normalize_assistant_payload(raw: Dict[str, Any], assistant_id: Optional[str] = None) -> Dict[str, Any]:
+    """Normalize assistant payload from API input."""
+    key_phrases = raw.get('key_phrases', [])
+    if isinstance(key_phrases, str):
+        key_phrases = [p.strip() for p in key_phrases.split(',') if p.strip()]
+    if not isinstance(key_phrases, list):
+        key_phrases = []
+
+    requested_style = str(raw.get('voice_style') or 'droid').strip()
+    style_defaults = {
+        'droid': (0.72, 0.74),
+        'clean': (0.95, 1.00),
+        'radio': (0.84, 1.08),
+        'pa_system': (0.80, 0.92),
+        'cinematic': (0.88, 0.92),
+        'glitch': (1.08, 1.22),
+    }
+    allowed_models = {
+        'auto',
+        'en_US-ryan-high',
+        'en_US-libritts-high',
+        'en_US-lessac-medium',
+    }
+    default_speed, default_pitch = style_defaults.get(requested_style, (0.75, 0.85))
+
+    raw_speed = raw.get('voice_speed', default_speed)
+    raw_pitch = raw.get('voice_pitch', default_pitch)
+    if raw_speed in (None, ''):
+        raw_speed = default_speed
+    if raw_pitch in (None, ''):
+        raw_pitch = default_pitch
+
+    normalized = {
+        "id": assistant_id or raw.get('id') or f"asst_{secrets.token_hex(4)}",
+        "name": str(raw.get('name') or 'Assistant').strip(),
+        "personality": str(raw.get('personality') or '').strip(),
+        "tagline": str(raw.get('tagline') or '').strip(),
+        "key_phrases": key_phrases[:12],
+        "voice_style": requested_style,
+        "voice_speed": float(raw_speed),
+        "voice_pitch": float(raw_pitch),
+        "voice_model": str(raw.get('voice_model') or 'auto').strip(),
+        "signature_phrase": str(raw.get('signature_phrase') or 'roger, roger').strip(),
+        "signature_enabled": bool(raw.get('signature_enabled', True)),
+        "browser_voice": str(raw.get('browser_voice') or 'rogr').strip(),
+    }
+
+    normalized['voice_speed'] = max(0.4, min(1.4, normalized['voice_speed']))
+    normalized['voice_pitch'] = max(0.4, min(1.4, normalized['voice_pitch']))
+    if normalized['voice_model'] not in allowed_models:
+        normalized['voice_model'] = 'auto'
+
+    if not normalized['name']:
+        normalized['name'] = 'Assistant'
+
+    return normalized
+
+
+def _get_ai_assistants_config() -> Dict[str, Any]:
+    """Get assistant configuration from settings, creating defaults if needed."""
+    config = db.get_setting('ai_assistants', None)
+    if not isinstance(config, dict) or not isinstance(config.get('assistants'), list) or len(config.get('assistants', [])) == 0:
+        config = _default_ai_assistants_config()
+        db.save_setting('ai_assistants', config)
+        return config
+
+    assistants = config.get('assistants', [])
+    normalized_assistants = []
+    changed = False
+    style_defaults = {
+        'droid': (0.72, 0.74),
+        'clean': (0.95, 1.00),
+        'radio': (0.84, 1.08),
+        'pa_system': (0.80, 0.92),
+        'cinematic': (0.88, 0.92),
+        'glitch': (1.08, 1.22),
+    }
+    for assistant in assistants:
+        normalized = _normalize_assistant_payload(assistant, assistant.get('id'))
+
+        # Migration: if legacy generic tuning is still present, apply style defaults.
+        legacy_speed = float(normalized.get('voice_speed', 0.75))
+        legacy_pitch = float(normalized.get('voice_pitch', 0.85))
+        if abs(legacy_speed - 0.75) < 1e-9 and abs(legacy_pitch - 0.85) < 1e-9:
+            default_speed, default_pitch = style_defaults.get(normalized.get('voice_style', 'droid'), (0.75, 0.85))
+            normalized['voice_speed'] = default_speed
+            normalized['voice_pitch'] = default_pitch
+
+        if normalized != assistant:
+            changed = True
+        normalized_assistants.append(normalized)
+
+    if changed:
+        config['assistants'] = normalized_assistants
+
+    active_id = config.get('active_assistant_id')
+    if not any(a.get('id') == active_id for a in config['assistants']):
+        config['active_assistant_id'] = config['assistants'][0].get('id')
+        changed = True
+
+    if changed:
+        db.save_setting('ai_assistants', config)
+
+    return config
+
+
+def _get_assistant_by_id(assistant_id: Optional[str] = None) -> Dict[str, Any]:
+    """Get assistant by id, or active assistant if id is omitted."""
+    config = _get_ai_assistants_config()
+    assistants: List[Dict[str, Any]] = config.get('assistants', [])
+    target_id = assistant_id or config.get('active_assistant_id')
+
+    for assistant in assistants:
+        if assistant.get('id') == target_id:
+            return assistant
+    return assistants[0] if assistants else {}
+
+
+def _apply_voice_assistant_profile(assistant: Dict[str, Any]) -> str:
+    """Apply assistant voice signature to voice module and return preferred style."""
+    style = assistant.get('voice_style', 'droid') if assistant else 'droid'
+
+    model_by_style = {
+        'droid': 'en_US-ryan-high',
+        'clean': 'en_US-libritts-high',
+        'radio': 'en_US-lessac-medium',
+        'pa_system': 'en_US-ryan-high',
+        'cinematic': 'en_US-libritts-high',
+        'glitch': 'en_US-lessac-medium',
+    }
+    try:
+        import voice as voice_module
+        voice_obj = voice_module.get_voice()
+        if assistant and assistant.get('signature_phrase'):
+            voice_obj.signature = assistant.get('signature_phrase')
+        if assistant:
+            if 'voice_speed' in assistant:
+                voice_obj.speed = float(assistant.get('voice_speed', voice_obj.speed))
+            if 'voice_pitch' in assistant:
+                voice_obj.pitch = float(assistant.get('voice_pitch', voice_obj.pitch))
+            if assistant.get('voice_style'):
+                voice_obj.default_style = assistant.get('voice_style')
+
+            requested_model = str(assistant.get('voice_model') or 'auto').strip()
+            if getattr(voice_obj, 'engine', 'piper') == 'coqui':
+                coqui_speaker_by_style = {
+                    'droid': 'p230',
+                    'clean': 'p225',
+                    'radio': 'p226',
+                    'pa_system': 'p227',
+                    'cinematic': 'p228',
+                    'glitch': 'p229',
+                }
+                requested_speaker = str(assistant.get('coqui_speaker') or '').strip()
+                active_coqui_model = str(getattr(voice_obj, 'coqui_model', '') or '').lower()
+                if requested_speaker:
+                    voice_obj.coqui_speaker = requested_speaker
+                elif 'vctk' in active_coqui_model:
+                    voice_obj.coqui_speaker = coqui_speaker_by_style.get(style)
+                else:
+                    voice_obj.coqui_speaker = None
+            else:
+                selected_model = model_by_style.get(style, 'en_US-ryan-high') if requested_model == 'auto' else requested_model
+                model_path = project_root / 'data' / 'voice_models' / 'piper' / f"{selected_model}.onnx"
+                if model_path.exists():
+                    voice_obj.model_path = str(model_path)
+                else:
+                    logger.warning(f"Requested voice model not found: {model_path}")
+    except Exception as e:
+        logger.warning(f"Unable to apply assistant voice profile: {e}")
+    return style
+
+
+@app.get("/api/ai/assistants")
+async def get_ai_assistants():
+    """Get all configured AI assistants and active assistant ID."""
+    try:
+        config = _get_ai_assistants_config()
+        return {
+            "success": True,
+            "active_assistant_id": config.get('active_assistant_id'),
+            "assistants": config.get('assistants', [])
+        }
+    except Exception as e:
+        logger.error(f"Error getting AI assistants: {e}")
+        return {"success": False, "error": str(e), "assistants": []}
+
+
+@app.post("/api/ai/assistants/save")
+async def save_ai_assistant(request: Request):
+    """Create or update an AI assistant persona."""
+    try:
+        data = await request.json()
+        incoming = data.get('assistant', data)
+        incoming_id = incoming.get('id')
+
+        config = _get_ai_assistants_config()
+        assistants = config.get('assistants', [])
+
+        normalized = _normalize_assistant_payload(incoming, incoming_id)
+        existing_index = next((i for i, a in enumerate(assistants) if a.get('id') == normalized['id']), -1)
+
+        if existing_index >= 0:
+            assistants[existing_index] = normalized
+            action = 'updated'
+        else:
+            assistants.append(normalized)
+            action = 'created'
+
+        config['assistants'] = assistants
+        if not config.get('active_assistant_id'):
+            config['active_assistant_id'] = normalized['id']
+
+        db.save_setting('ai_assistants', config)
+        return {
+            "success": True,
+            "assistant": normalized,
+            "active_assistant_id": config.get('active_assistant_id'),
+            "message": f"Assistant {action}"
+        }
+    except Exception as e:
+        logger.error(f"Error saving AI assistant: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/ai/assistants/select")
+async def select_ai_assistant(request: Request):
+    """Set the active AI assistant."""
+    try:
+        data = await request.json()
+        assistant_id = data.get('assistant_id')
+        if not assistant_id:
+            return {"success": False, "error": "assistant_id is required"}
+
+        config = _get_ai_assistants_config()
+        assistants = config.get('assistants', [])
+        if not any(a.get('id') == assistant_id for a in assistants):
+            return {"success": False, "error": "Assistant not found"}
+
+        config['active_assistant_id'] = assistant_id
+        db.save_setting('ai_assistants', config)
+        return {"success": True, "active_assistant_id": assistant_id}
+    except Exception as e:
+        logger.error(f"Error selecting AI assistant: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@app.delete("/api/ai/assistants/{assistant_id}")
+async def delete_ai_assistant(assistant_id: str):
+    """Delete an AI assistant persona."""
+    try:
+        config = _get_ai_assistants_config()
+        assistants = config.get('assistants', [])
+        if len(assistants) <= 1:
+            return {"success": False, "error": "At least one assistant is required"}
+
+        filtered = [a for a in assistants if a.get('id') != assistant_id]
+        if len(filtered) == len(assistants):
+            return {"success": False, "error": "Assistant not found"}
+
+        config['assistants'] = filtered
+        if config.get('active_assistant_id') == assistant_id:
+            config['active_assistant_id'] = filtered[0].get('id')
+
+        db.save_setting('ai_assistants', config)
+        return {
+            "success": True,
+            "active_assistant_id": config.get('active_assistant_id')
+        }
+    except Exception as e:
+        logger.error(f"Error deleting AI assistant: {e}")
+        return {"success": False, "error": str(e)}
+
+
 async def build_ai_context_with_frontend(user_message: str, frontend_context: dict) -> str:
     """Build context for AI from frontend data and database."""
     context_parts = []
@@ -6075,6 +10059,13 @@ async def chat_with_ai(request: Request):
         conversation_id = data.get('conversation_id')
         stream = data.get('stream', False)
         speak_response = data.get('speak', False)  # New: option to speak response
+        assistant_id = data.get('assistant_id')
+        include_context = data.get('include_context', True)
+
+        # Accept truthy/falsey string values from UI callers.
+        if isinstance(include_context, str):
+            include_context = include_context.strip().lower() not in ('0', 'false', 'no', 'off', '')
+        include_context = bool(include_context)
         
         if not message:
             return {"error": "Message is required"}
@@ -6091,14 +10082,20 @@ async def chat_with_ai(request: Request):
         # Use centralized AI service
         ai_service = get_ai_service(db, settings)
         import asyncio as _asyncio
+        # Family dashboards (small local models) keep a short timeout so the UI stays snappy;
+        # the laptop dashboard has no outer timeout (provider-level timeouts/retries apply).
+        # Override with AI_CHAT_TIMEOUT (seconds).
+        _timeout_env = os.environ.get('AI_CHAT_TIMEOUT')
+        chat_timeout = float(_timeout_env) if _timeout_env else (20.0 if is_family_profile() else None)
         try:
             result = await _asyncio.wait_for(
                 ai_service.chat(
                     message=message,
                     conversation_id=conversation_id,
-                    include_context=True
+                    include_context=include_context,
+                    assistant_id=assistant_id
                 ),
-                timeout=20.0
+                timeout=chat_timeout
             )
         except _asyncio.TimeoutError:
             logger.warning("AI chat timed out")
@@ -6111,8 +10108,14 @@ async def chat_with_ai(request: Request):
         if speak_response and result.get('response'):
             try:
                 import voice as voice_module
+                active_assistant = _get_assistant_by_id(assistant_id)
+                style = _apply_voice_assistant_profile(active_assistant)
+                add_signature = bool(active_assistant.get('signature_enabled', True)) if active_assistant else True
                 # Speak in background (non-blocking)
-                voice_module.say(result['response'], blocking=False)
+                if add_signature:
+                    voice_module.announce(result['response'], style=style, blocking=False)
+                else:
+                    voice_module.say(result['response'], style=style, blocking=False)
             except Exception as e:
                 logger.warning(f"Voice output failed: {e}")
         
@@ -6133,7 +10136,8 @@ async def chat_with_ai(request: Request):
 async def chat_with_ai_stream(
     message: str,
     conversation_id: str = None,
-    quiet: bool = False
+    quiet: bool = False,
+    assistant_id: str = None
 ):
     """Chat with AI assistant using Server-Sent Events for real-time updates."""
     if not AI_ASSISTANT_AVAILABLE:
@@ -6196,7 +10200,8 @@ async def chat_with_ai_stream(
                 result = await ai_service.chat(
                     message=message,
                     conversation_id=conversation_id,
-                    include_context=True
+                    include_context=True,
+                    assistant_id=assistant_id
                 )
                 
                 if not result.get('success'):
@@ -6289,7 +10294,7 @@ async def get_ai_context():
     
     try:
         ai_service = get_ai_service(db, settings)
-        context = ai_service.build_context(force_refresh=True)
+        context = await ai_service.build_context(force_refresh=True)
         context_hash = ai_service.get_context_hash(context)
         
         return {
@@ -6301,6 +10306,73 @@ async def get_ai_context():
         
     except Exception as e:
         logger.error(f"Error getting AI context: {e}")
+        return {"error": str(e), "success": False}
+
+
+@app.get("/api/ai/memory")
+async def get_ai_memory():
+    """Get AI short-term and long-term markdown memory."""
+    if not AI_ASSISTANT_AVAILABLE:
+        return {"error": "AI not available", "success": False}
+
+    try:
+        ai_service = get_ai_service(db, settings)
+        snapshot = ai_service.get_memory_snapshot()
+        return {
+            "success": True,
+            "memory": snapshot
+        }
+    except Exception as e:
+        logger.error(f"Error getting AI memory: {e}")
+        return {"error": str(e), "success": False}
+
+
+@app.post("/api/ai/memory")
+async def save_ai_memory(request: Request):
+    """Save AI memory markdown content."""
+    if not AI_ASSISTANT_AVAILABLE:
+        return {"error": "AI not available", "success": False}
+
+    try:
+        data = await request.json()
+        memory_type = data.get('memory_type')
+        content = data.get('content', '')
+
+        ai_service = get_ai_service(db, settings)
+        ai_service.save_memory_content(memory_type, content)
+        snapshot = ai_service.get_memory_snapshot()
+
+        return {
+            "success": True,
+            "memory": snapshot,
+            "message": f"{memory_type.replace('_', ' ').title()} saved"
+        }
+    except Exception as e:
+        logger.error(f"Error saving AI memory: {e}")
+        return {"error": str(e), "success": False}
+
+
+@app.post("/api/ai/memory/clear")
+async def clear_ai_memory(request: Request):
+    """Reset AI memory markdown content."""
+    if not AI_ASSISTANT_AVAILABLE:
+        return {"error": "AI not available", "success": False}
+
+    try:
+        data = await request.json()
+        memory_type = data.get('memory_type')
+
+        ai_service = get_ai_service(db, settings)
+        ai_service.reset_memory(memory_type)
+        snapshot = ai_service.get_memory_snapshot()
+
+        return {
+            "success": True,
+            "memory": snapshot,
+            "message": f"{memory_type.replace('_', ' ').title()} reset"
+        }
+    except Exception as e:
+        logger.error(f"Error clearing AI memory: {e}")
         return {"error": str(e), "success": False}
 
 
@@ -6401,7 +10473,11 @@ async def ai_create_tasks_batch(request: Request):
         data = await request.json()
         approved = data.get('approved', False)
         tasks = data.get('tasks', [])
-        sync_to_ticktick = data.get('sync_to_ticktick', False)
+        settings_obj = Settings() if COLLECTORS_AVAILABLE else None
+        sync_preferences = extract_task_sync_preferences(
+            data,
+            default_enabled=getattr(getattr(settings_obj, 'task_sync', None), 'enabled', False),
+        )
         
         if not approved:
             return {"error": "Action not approved by user", "success": False}
@@ -6413,21 +10489,36 @@ async def ai_create_tasks_batch(request: Request):
         ai_service = get_ai_service(db, settings)
         result = ai_service.create_tasks_batch(tasks)
         
-        # Sync to TickTick if requested
-        if sync_to_ticktick and result.get('success') and result.get('created_count', 0) > 0:
+        # Sync newly-created tasks if requested
+        if sync_preferences['enabled'] and result.get('success') and result.get('created_count', 0) > 0:
             try:
-                if COLLECTORS_AVAILABLE and TASK_MANAGER_AVAILABLE:
-                    from processors.task_manager import TaskManager
-                    from config.settings import Settings
-                    task_manager = TaskManager(Settings())
-                    sync_result = await task_manager.sync_with_ticktick(direction='to_ticktick')
-                    result['ticktick_sync'] = sync_result
-                    logger.info(f"Batch synced {result['created_count']} AI tasks to TickTick")
-                else:
-                    result['ticktick_sync'] = {"error": "TickTick sync not available"}
+                from services.task_sync_service import TaskSyncService
+
+                sync_service = TaskSyncService(settings_obj)
+                sync_results = []
+                for created_task in result.get('created_tasks', []):
+                    task_payload = created_task.get('task') or {}
+                    if not task_payload:
+                        continue
+                    sync_results.append(
+                        await sync_service.sync_task(
+                            task_payload,
+                            preferred_provider=sync_preferences['preferred_provider'],
+                            provider_order=sync_preferences['provider_order'],
+                        )
+                    )
+
+                synced_count = sum(1 for item in sync_results if item.get('success'))
+                result['task_sync'] = {
+                    'success': synced_count > 0,
+                    'synced_count': synced_count,
+                    'requested_count': len(sync_results),
+                    'results': sync_results,
+                }
+                logger.info(f"Batch synced {synced_count} AI tasks via task sync providers")
             except Exception as sync_err:
-                logger.error(f"Error syncing AI tasks to TickTick: {sync_err}")
-                result['ticktick_sync'] = {"error": str(sync_err)}
+                logger.error(f"Error syncing AI tasks to external providers: {sync_err}")
+                result['task_sync'] = {"error": str(sync_err), "success": False}
         
         return result
         
@@ -6850,10 +10941,36 @@ async def get_user_profile():
     """Get user profile for AI personalization."""
     try:
         profile = db.get_user_profile()
-        return profile
+        primary_email = _normalize_email(db.get_setting('primary_email', ''))
+        self_emails = db.get_setting('self_emails', []) or []
+        if isinstance(self_emails, str):
+            self_emails = [item.strip() for item in self_emails.split(',') if item.strip()]
+
+        normalized_self_emails = []
+        for item in self_emails:
+            normalized = _normalize_email(item)
+            if normalized and '@' in normalized and normalized not in normalized_self_emails:
+                normalized_self_emails.append(normalized)
+        if primary_email and primary_email not in normalized_self_emails:
+            normalized_self_emails.append(primary_email)
+
+        enriched_profile = dict(profile or {})
+        if primary_email:
+            enriched_profile['primary_email'] = primary_email
+            if not enriched_profile.get('email'):
+                enriched_profile['email'] = primary_email
+        if normalized_self_emails:
+            enriched_profile['self_emails'] = normalized_self_emails
+
+        # Keep backward compatibility: return both wrapped and flat keys.
+        return {
+            "success": True,
+            "profile": enriched_profile,
+            **enriched_profile
+        }
     except Exception as e:
         logger.error(f"Error getting user profile: {e}")
-        return {"error": str(e)}
+        return {"success": False, "error": str(e), "profile": {}}
 
 
 @app.post("/api/user/profile")
@@ -6861,6 +10978,26 @@ async def save_user_profile(request: Request):
     """Save or update user profile."""
     try:
         profile = await request.json()
+
+        primary_email = _normalize_email(profile.get('email') or profile.get('primary_email') or '')
+        explicit_self_emails = profile.get('self_emails') or []
+        if isinstance(explicit_self_emails, str):
+            explicit_self_emails = [item.strip() for item in explicit_self_emails.split(',') if item.strip()]
+        normalized_self_emails = []
+        for item in explicit_self_emails:
+            normalized = _normalize_email(item)
+            if normalized and '@' in normalized and normalized not in normalized_self_emails:
+                normalized_self_emails.append(normalized)
+        if primary_email and primary_email not in normalized_self_emails:
+            normalized_self_emails.append(primary_email)
+
+        if primary_email:
+            db.save_setting('primary_email', primary_email)
+        if normalized_self_emails:
+            db.save_setting('self_emails', normalized_self_emails)
+            self_identity_cache['timestamp'] = None
+            self_identity_cache['emails'] = []
+
         success = db.save_user_profile(profile)
         
         if success:
@@ -7073,7 +11210,7 @@ async def initialize_ai_providers():
             # Get Ollama configuration from settings (may have just been updated from env)
             ollama_host = db.get_setting('ollama_host', 'localhost')
             ollama_port = db.get_setting('ollama_port', 11434)
-            ollama_model = db.get_setting('ollama_model', 'llama3.2:1b')
+            ollama_model = db.get_setting('ollama_model', 'llama3.2:1b' if is_family_profile() else 'deepseek-r1:latest')
             
             # Build the URL from configured host and port
             configured_url = f'http://{ollama_host}:{ollama_port}'
@@ -7329,6 +11466,38 @@ async def get_leads():
     except Exception as e:
         logger.error(f"Error getting leads: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/leads/list")
+async def get_leads_list(limit: int = 100):
+    """Get leads list (alias for /api/leads with different format)."""
+    try:
+        # Import lead generation modules
+        from processors.lead_generator import LeadGenerator, PotentialLead
+        
+        lead_generator = LeadGenerator()
+        leads_list = []
+        
+        # Try to load existing leads from file
+        try:
+            leads_file = project_root / "data" / "generated_leads.json"
+            with open(leads_file, 'r') as f:
+                leads_data = json.load(f)
+                leads_list = leads_data if isinstance(leads_data, list) else []
+        except FileNotFoundError:
+            leads_list = []
+        
+        # Apply limit
+        leads_list = leads_list[:limit]
+        
+        return {
+            "leads": leads_list,
+            "total": len(leads_list)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting leads list: {e}")
+        return {"leads": [], "total": 0, "error": str(e)}
 
 
 @app.post("/api/leads/generate")
@@ -7672,6 +11841,540 @@ async def refresh_widget(widget_name: str):
     except Exception as e:
         logger.error(f"Error refreshing widget {widget_name}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/diagnostics/events")
+async def get_diagnostic_events(limit: int = Query(30, ge=1, le=200)):
+    """Get recent diagnostic events for self-heal UI."""
+    try:
+        with DIAGNOSTIC_LOCK:
+            events = list(DIAGNOSTIC_EVENTS)[-limit:]
+        return {
+            "success": True,
+            "events": list(reversed(events)),
+            "count": len(events)
+        }
+    except Exception as e:
+        logger.error(f"Error getting diagnostic events: {e}")
+        return {"success": False, "events": [], "error": str(e)}
+
+
+@app.post("/api/diagnostics/report")
+async def report_diagnostic_event(request: Request):
+    """Report runtime error/event and optionally run AI diagnosis."""
+    try:
+        data = await request.json()
+        module_name = (data.get('module') or 'general').strip()
+        source = (data.get('source') or 'runtime').strip()
+        error_message = (data.get('message') or data.get('detail') or 'Unknown error').strip()
+        stack_trace = (data.get('stack') or data.get('traceback') or '').strip()
+        title = (data.get('title') or error_message[:120]).strip() or 'Runtime error'
+        auto_analyze = bool(data.get('auto_analyze', True))
+        context = data.get('context') if isinstance(data.get('context'), dict) else {}
+
+        event = {
+            "id": f"diag_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{secrets.token_hex(3)}",
+            "created_at": datetime.now().isoformat(),
+            "title": title,
+            "module": module_name,
+            "source": source,
+            "message": error_message,
+            "stack": stack_trace,
+            "context": context,
+            "diagnosis": None,
+            "status": "reported"
+        }
+
+        if auto_analyze:
+            diagnosis = await _run_ai_diagnostic(
+                title=title,
+                module_name=module_name,
+                source=source,
+                error_message=error_message,
+                stack_trace=stack_trace,
+                context=context,
+                include_repair_actions=True
+            )
+            event["diagnosis"] = diagnosis
+            event["status"] = "diagnosed"
+
+        _push_diagnostic_event(event)
+
+        return {
+            "success": True,
+            "event": event,
+            "message": "Diagnostic event recorded"
+        }
+    except Exception as e:
+        logger.error(f"Error reporting diagnostic event: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/diagnostics/review")
+async def review_diagnostic_module(request: Request):
+    """User-requested AI diagnostic review for a module/section."""
+    try:
+        data = await request.json()
+        module_name = (data.get('module') or 'general').strip()
+        review_notes = (data.get('notes') or '').strip()
+        source = (data.get('source') or 'manual_review').strip()
+        context = data.get('context') if isinstance(data.get('context'), dict) else {}
+
+        combined_message = review_notes or f"User requested a diagnostic review for module '{module_name}'."
+        diagnosis = await _run_ai_diagnostic(
+            title=f"Manual review: {module_name}",
+            module_name=module_name,
+            source=source,
+            error_message=combined_message,
+            stack_trace='',
+            context=context,
+            include_repair_actions=True
+        )
+
+        event = {
+            "id": f"diag_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{secrets.token_hex(3)}",
+            "created_at": datetime.now().isoformat(),
+            "title": f"Manual review: {module_name}",
+            "module": module_name,
+            "source": source,
+            "message": combined_message,
+            "stack": '',
+            "context": context,
+            "diagnosis": diagnosis,
+            "status": "diagnosed"
+        }
+
+        _push_diagnostic_event(event)
+
+        return {
+            "success": True,
+            "event": event,
+            "diagnosis": diagnosis
+        }
+    except Exception as e:
+        logger.error(f"Error reviewing module diagnostics: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/diagnostics/repair")
+async def run_diagnostic_repair(request: Request):
+    """Execute approved repair action generated by diagnostics."""
+    try:
+        data = await request.json()
+        event_id = (data.get('event_id') or '').strip()
+        action_key = (data.get('action_key') or '').strip()
+        approved = bool(data.get('approved', False))
+        module_name = (data.get('module') or '').strip()
+
+        if not approved:
+            return {"success": False, "error": "Repair action must be explicitly approved"}
+        if not action_key:
+            return {"success": False, "error": "action_key is required"}
+
+        target_event = _find_diagnostic_event(event_id) if event_id else None
+        if target_event and not module_name:
+            module_name = str(target_event.get('module') or '').strip()
+
+        if action_key == 'restart_dashboard':
+            command = f"cd '{str(project_root)}' && ./ops/startup.sh restart"
+            subprocess.Popen(
+                ['bash', '-lc', command],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                preexec_fn=os.setpgrp
+            )
+            return {
+                "success": True,
+                "action": action_key,
+                "message": "Dashboard restart initiated"
+            }
+
+        if action_key == 'refresh_module':
+            widget_map = {
+                'emails': 'email',
+                'email': 'email',
+                'calendar': 'calendar',
+                'todos': 'tasks',
+                'tasks': 'tasks',
+                'github': 'github',
+                'news': 'news',
+                'weather': 'weather',
+                'music': 'music',
+                'servers': 'servers'
+            }
+            widget_name = widget_map.get(module_name.lower()) if module_name else None
+            if widget_name in background_manager.cache:
+                background_manager.cache.pop(widget_name, None)
+                background_manager.cache_timestamps.pop(widget_name, None)
+
+            return {
+                "success": True,
+                "action": action_key,
+                "module": module_name,
+                "message": f"Module refresh prepared for {module_name or 'selected section'}"
+            }
+
+        return {"success": False, "error": f"Unsupported repair action: {action_key}"}
+    except Exception as e:
+        logger.error(f"Error running diagnostic repair: {e}")
+        logger.error(traceback.format_exc())
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/diagnostics/apply-fix")
+async def apply_diagnostic_code_fix(request: Request):
+    """Apply AI-generated code patches, commit to a fix branch, push, and open a GitHub PR."""
+    try:
+        data = await request.json()
+        event_id = (data.get('event_id') or '').strip()
+        approved = bool(data.get('approved', False))
+        code_fixes = data.get('code_fixes')
+        commit_message = (data.get('commit_message') or '').strip()
+        pr_title = (data.get('pr_title') or '').strip()
+        pr_body = (data.get('pr_body') or '').strip()
+
+        if not approved:
+            return {"success": False, "error": "apply-fix must be explicitly approved"}
+
+        # Load fixes from event if not supplied inline
+        if not code_fixes and event_id:
+            target_event = _find_diagnostic_event(event_id)
+            if target_event:
+                diagnosis = target_event.get('diagnosis') or {}
+                code_fixes = diagnosis.get('code_fixes') or []
+                if not commit_message:
+                    commit_message = diagnosis.get('commit_message') or ''
+                if not pr_title:
+                    pr_title = diagnosis.get('pr_title') or target_event.get('title') or 'AI fix'
+                if not pr_body:
+                    pr_body = diagnosis.get('pr_body') or ''
+
+        if not isinstance(code_fixes, list) or not code_fixes:
+            return {"success": False, "error": "No code fixes provided"}
+
+        commit_message = commit_message or f"fix(ai-diag): automated repair for event {event_id or 'unknown'}"
+        pr_title = pr_title or commit_message
+
+        gh = _get_github_token_and_repo()
+        if not gh['token'] or not gh['owner'] or not gh['repo']:
+            return {
+                "success": False,
+                "error": "GitHub credentials or remote origin not configured. Set a GitHub token in Settings → Credentials."
+            }
+
+        base_branch = _get_default_branch()
+
+        # Ensure we're on the default branch before creating fix branch
+        subprocess.run(
+            ['git', 'checkout', base_branch],
+            check=True, capture_output=True, timeout=10,
+            cwd=str(project_root)
+        )
+
+        # Create a stash checkpoint so we can restore if something goes wrong
+        stash_label = f"diag-rollback-{event_id or 'fix'}"
+        subprocess.run(
+            ['git', 'stash', 'push', '-u', '-m', stash_label],
+            capture_output=True, timeout=15, cwd=str(project_root)
+        )
+
+        fix_branch = _create_fix_branch(event_id)
+
+        try:
+            modified_files = _apply_file_patches(code_fixes)
+        except Exception as patch_err:
+            # Roll back: restore stash, return to base branch, delete fix branch
+            subprocess.run(['git', 'checkout', base_branch], capture_output=True, cwd=str(project_root))
+            subprocess.run(['git', 'branch', '-D', fix_branch], capture_output=True, cwd=str(project_root))
+            subprocess.run(['git', 'stash', 'pop'], capture_output=True, cwd=str(project_root))
+            return {"success": False, "error": f"Patch failed: {patch_err}"}
+
+        if not modified_files:
+            subprocess.run(['git', 'checkout', base_branch], capture_output=True, cwd=str(project_root))
+            subprocess.run(['git', 'branch', '-D', fix_branch], capture_output=True, cwd=str(project_root))
+            return {"success": False, "error": "No files were modified (snippets may not match current source)"}
+
+        # Build enriched commit body
+        full_commit_message = commit_message + "\n\n" + "\n".join(
+            f"- {f.get('description') or f.get('file')}" for f in code_fixes if isinstance(f, dict)
+        )
+        full_commit_message += f"\n\nDiagnostic event: {event_id}"
+
+        try:
+            sha = _git_commit_and_push(fix_branch, modified_files, full_commit_message)
+        except subprocess.CalledProcessError as git_err:
+            subprocess.run(['git', 'checkout', base_branch], capture_output=True, cwd=str(project_root))
+            stderr = (git_err.stderr or b'').decode('utf-8', errors='replace')
+            return {"success": False, "error": f"Git commit/push failed: {stderr[:500]}"}
+
+        # Return to base branch so the running server is not on a detached state
+        subprocess.run(['git', 'checkout', base_branch], capture_output=True, cwd=str(project_root))
+
+        # Build PR body
+        if not pr_body:
+            file_list = "\n".join(f"- `{f}`" for f in modified_files)
+            pr_body = (
+                f"## AI-Generated Fix\n\n"
+                f"Diagnostic event: `{event_id}`\n\n"
+                f"### Modified Files\n{file_list}\n\n"
+                f"### Changes\n" +
+                "\n".join(f"- **{f.get('file')}**: {f.get('description')}" for f in code_fixes if isinstance(f, dict)) +
+                f"\n\n### Commit\n`{sha}`\n\n> ⚠️ **Review before merging.** AI-generated changes should be carefully validated."
+            )
+
+        pr_data = _create_github_pr_via_api(
+            token=gh['token'],
+            owner=gh['owner'],
+            repo=gh['repo'],
+            head_branch=fix_branch,
+            base_branch=base_branch,
+            title=pr_title,
+            body=pr_body
+        )
+
+        if 'error' in pr_data and not pr_data.get('html_url'):
+            return {
+                "success": False,
+                "error": f"Code committed to branch '{fix_branch}' (SHA {sha}) but PR creation failed: {pr_data.get('error')}",
+                "branch": fix_branch,
+                "sha": sha,
+                "modified_files": modified_files
+            }
+
+        pr_url = pr_data.get('html_url') or ''
+        pr_number = pr_data.get('number')
+
+        # Update diagnostic event with PR info
+        target_event = _find_diagnostic_event(event_id) if event_id else None
+        if target_event:
+            target_event['pr'] = {
+                "url": pr_url,
+                "number": pr_number,
+                "branch": fix_branch,
+                "sha": sha,
+                "modified_files": modified_files
+            }
+            target_event['status'] = 'pr_created'
+
+        return {
+            "success": True,
+            "pr_url": pr_url,
+            "pr_number": pr_number,
+            "branch": fix_branch,
+            "sha": sha,
+            "modified_files": modified_files,
+            "message": f"PR #{pr_number} created: {pr_url}"
+        }
+    except Exception as e:
+        logger.error(f"Error applying diagnostic code fix: {e}")
+        logger.error(traceback.format_exc())
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/diagnostics/logs")
+async def get_diagnostic_logs(
+    lines: int = Query(150, ge=10, le=2000),
+    level: Optional[str] = Query(None, description="Filter by level: ERROR, WARNING, INFO"),
+    module: Optional[str] = Query(None, description="Filter by module name substring")
+):
+    """Return recent log lines from dashboard.log."""
+    try:
+        log_lines = _get_recent_logs(lines=lines, level_filter=level, module_filter=module)
+        log_files = []
+        if LOG_FILE_PATH.exists():
+            import glob as _glob
+            pattern = str(LOG_FILE_PATH) + "*"
+            for lf in sorted(_glob.glob(pattern)):
+                size = Path(lf).stat().st_size
+                log_files.append({"path": lf, "size_kb": round(size / 1024, 1)})
+        return {
+            "success": True,
+            "lines": log_lines,
+            "count": len(log_lines),
+            "log_files": log_files
+        }
+    except Exception as e:
+        logger.error(f"Error reading logs: {e}")
+        return {"success": False, "lines": [], "error": str(e)}
+
+
+@app.post("/api/diagnostics/logs/clear")
+async def clear_diagnostic_logs(request: Request):
+    """Truncate the active dashboard.log (rotated backups are preserved)."""
+    try:
+        data = await request.json()
+        confirmed = bool(data.get('confirmed', False))
+        if not confirmed:
+            return {"success": False, "error": "Pass confirmed=true to clear logs"}
+        with open(str(LOG_FILE_PATH), "w", encoding="utf-8") as f:
+            f.write(f"{datetime.now().isoformat()} INFO     system: Log cleared by user\n")
+        logger.info("Dashboard log cleared by user via diagnostics API")
+        return {"success": True, "message": "Log cleared"}
+    except Exception as e:
+        logger.error(f"Error clearing log: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/diagnostics/suggest-fix")
+async def suggest_user_fix(request: Request):
+    """User describes how to fix a problem; AI translates into code patches and returns them for approval."""
+    try:
+        data = await request.json()
+        event_id = (data.get('event_id') or '').strip()
+        suggestion = (data.get('suggestion') or '').strip()
+        module_name = (data.get('module') or 'general').strip()
+
+        if not suggestion:
+            return {"success": False, "error": "suggestion text is required"}
+
+        # Pull original event context if available
+        original_message = ""
+        original_stack = ""
+        original_context: Dict[str, Any] = {}
+        if event_id:
+            ev = _find_diagnostic_event(event_id)
+            if ev:
+                original_message = ev.get('message') or ''
+                original_stack = ev.get('stack') or ''
+                original_context = ev.get('context') or {}
+                if not module_name or module_name == 'general':
+                    module_name = ev.get('module') or module_name
+
+        log_context = _get_error_log_context(module_name, lines=80)
+
+        if not AI_ASSISTANT_AVAILABLE:
+            return {"success": False, "error": "AI provider not available"}
+
+        ai_service = get_ai_service(db, settings)
+        prompt = f"""
+You are the dashboard self-diagnostic assistant.
+The user has described how they want to fix a problem. Translate their description into concrete code patches.
+Return STRICT JSON only.
+
+Module: {module_name}
+Original Error: {original_message or 'n/a'}
+Stack Trace: {original_stack or 'n/a'}
+Recent ERROR/WARNING Logs:
+{log_context[:2000]}
+
+User's Suggested Fix:
+{suggestion}
+
+Project source files are under src/ (Python: src/main.py; JS: src/static/dashboard.js; HTML: src/templates/dashboard_modern.html; collectors: src/collectors/; processors: src/processors/).
+
+Return this JSON schema exactly:
+{{
+  "summary": "what this fix does",
+  "code_fixes": [
+    {{
+      "file": "src/relative/path/to/file.py",
+      "description": "what this change does",
+      "old_snippet": "exact existing code to replace",
+      "new_snippet": "replacement code"
+    }}
+  ],
+  "commit_message": "fix(<module>): <description>",
+  "pr_title": "Fix: <short title>",
+  "pr_body": "## Problem\\n...\\n## Solution (user-suggested)\\n...\\n## Testing\\n...",
+  "confidence": "low|medium|high",
+  "risks": ["any risks to be aware of"],
+  "manual_steps": ["anything the user must do manually"]
+}}
+
+Rules:
+- old_snippet must be exact verbatim source text.
+- If you cannot find a safe code change, return code_fixes as empty array and explain in summary.
+- Be conservative and targeted.
+""".strip()
+
+        result = await ai_service.chat(
+            message=prompt,
+            conversation_id=f"suggest_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+            include_context=False,
+            assistant_id=None
+        )
+
+        if not result.get('success'):
+            return {"success": False, "error": "AI failed to generate fix"}
+
+        parsed = _extract_json_from_ai_text(result.get('response', ''))
+        if not parsed or not isinstance(parsed, dict):
+            return {"success": False, "error": "AI response could not be parsed", "raw": result.get('response', '')[:500]}
+
+        # Normalise code_fixes
+        raw_fixes = parsed.get('code_fixes') if isinstance(parsed.get('code_fixes'), list) else []
+        normalized_fixes = [
+            {
+                "file": str(f.get('file') or '').strip(),
+                "description": str(f.get('description') or '').strip(),
+                "old_snippet": str(f.get('old_snippet') or '').strip(),
+                "new_snippet": str(f.get('new_snippet') or '').strip()
+            }
+            for f in raw_fixes
+            if isinstance(f, dict) and f.get('file') and f.get('old_snippet') and f.get('new_snippet')
+        ]
+
+        fix_plan = {
+            "summary": parsed.get('summary') or '',
+            "code_fixes": normalized_fixes,
+            "commit_message": str(parsed.get('commit_message') or f"fix({module_name}): user-suggested repair").strip(),
+            "pr_title": str(parsed.get('pr_title') or f"Fix: {module_name} (user-suggested)").strip(),
+            "pr_body": str(parsed.get('pr_body') or '').strip(),
+            "confidence": parsed.get('confidence') or 'low',
+            "risks": parsed.get('risks') if isinstance(parsed.get('risks'), list) else [],
+            "manual_steps": parsed.get('manual_steps') if isinstance(parsed.get('manual_steps'), list) else []
+        }
+
+        # Attach fix plan to original event for later apply-fix call
+        if event_id:
+            ev = _find_diagnostic_event(event_id)
+            if ev:
+                if not ev.get('diagnosis'):
+                    ev['diagnosis'] = {}
+                ev['diagnosis']['code_fixes'] = normalized_fixes
+                ev['diagnosis']['commit_message'] = fix_plan['commit_message']
+                ev['diagnosis']['pr_title'] = fix_plan['pr_title']
+                ev['diagnosis']['pr_body'] = fix_plan['pr_body']
+                ev['status'] = 'fix_planned'
+
+        return {"success": True, "fix_plan": fix_plan, "event_id": event_id}
+    except Exception as e:
+        logger.error(f"Error in suggest-fix: {e}")
+        logger.error(traceback.format_exc())
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/diagnostics/rollback")
+async def rollback_diagnostic_fix(request: Request):
+    """Pop the latest git stash (diag-rollback-*) to undo a failed/unwanted patch application."""
+    try:
+        data = await request.json()
+        confirmed = bool(data.get('confirmed', False))
+        if not confirmed:
+            return {"success": False, "error": "Pass confirmed=true to rollback"}
+
+        result = subprocess.run(
+            ['git', 'stash', 'list', '--format=%gd %s'],
+            capture_output=True, text=True, timeout=10, cwd=str(project_root)
+        )
+        stash_entries = result.stdout.strip().splitlines()
+        diag_stash = next((e for e in stash_entries if 'diag-rollback' in e), None)
+
+        if not diag_stash:
+            return {"success": False, "error": "No diagnostic rollback stash found"}
+
+        stash_ref = diag_stash.split()[0]  # e.g. stash@{0}
+        pop_result = subprocess.run(
+            ['git', 'stash', 'pop', stash_ref],
+            capture_output=True, text=True, timeout=15, cwd=str(project_root)
+        )
+        if pop_result.returncode != 0:
+            return {"success": False, "error": f"Stash pop failed: {pop_result.stderr.strip()[:300]}"}
+
+        return {"success": True, "message": f"Rolled back using stash: {stash_ref}"}
+    except Exception as e:
+        logger.error(f"Error rolling back: {e}")
+        return {"success": False, "error": str(e)}
 
 
 @app.post("/api/dashboards/add")
@@ -8599,44 +13302,62 @@ async def leads_page():
 
 @app.post("/api/voice/test")
 async def test_voice(request: Request):
-    """Test the voice system - uses current skin's voice settings and signature."""
+    """Test the voice system.
+
+    Family dashboards use the active skin's voice settings and signature; the
+    laptop dashboard (or any request with an ``assistant_id``) uses the
+    assistant profile's voice settings.
+    """
     try:
         data = await request.json()
-        
         import voice as voice_module
-        from config.skin_loader import get_skin_loader, get_active_skin
-        
-        # Get current skin for voice settings
-        skin = get_active_skin()
-        current_skin_name = skin.name
-        
-        # Get skin-specific defaults
-        skin_voice = skin.voice if hasattr(skin, 'voice') else {}
-        skin_identity = skin.identity if hasattr(skin, 'identity') else {}
-        default_style = skin_voice.get('style', 'droid')
-        default_signature = skin_identity.get('signature_phrase', 'Roger, roger.')
-        default_message = skin_identity.get('signature_phrase', 'Voice system operational.')
-        
-        # Use provided values or skin defaults
-        message = data.get('message', default_message)
-        style = data.get('style', default_style)
-        add_signature = data.get('signature', True)
-        
-        # Update voice system from current skin
-        if hasattr(voice_module, '_voice') and voice_module._voice:
-            voice_module._voice.update_from_skin(skin)
-        
+
+        assistant_id = data.get('assistant_id')
+        use_skin = SKIN_SYSTEM_AVAILABLE and is_family_profile() and not assistant_id
+
+        if use_skin:
+            from config.skin_loader import get_active_skin
+
+            # Get current skin for voice settings
+            skin = get_active_skin()
+            current_skin_name = skin.name
+
+            # Get skin-specific defaults
+            skin_voice = skin.voice if hasattr(skin, 'voice') else {}
+            skin_identity = skin.identity if hasattr(skin, 'identity') else {}
+            default_style = skin_voice.get('style', 'droid')
+            default_message = skin_identity.get('signature_phrase', 'Voice system operational.')
+
+            # Use provided values or skin defaults
+            message = data.get('message', default_message)
+            style = data.get('style', default_style)
+            add_signature = data.get('signature', True)
+
+            # Update voice system from current skin
+            if getattr(voice_module, '_voice', None) and hasattr(voice_module._voice, 'update_from_skin'):
+                voice_module._voice.update_from_skin(skin)
+            extra = {"skin": current_skin_name}
+        else:
+            active_assistant = _get_assistant_by_id(assistant_id)
+
+            message = data.get('message') or active_assistant.get('tagline') or 'Roger roger. Voice system operational.'
+            style = data.get('style') or _apply_voice_assistant_profile(active_assistant)
+            add_signature = data.get('signature')
+            if add_signature is None:
+                add_signature = bool(active_assistant.get('signature_enabled', True))
+            extra = {"assistant_id": active_assistant.get('id')}
+
         if add_signature:
             success = voice_module.announce(message, style=style, blocking=False)
         else:
             success = voice_module.say(message, style=style, blocking=False)
-        
+
         return {
             "success": success,
             "message": message,
             "style": style,
             "signature": add_signature,
-            "skin": current_skin_name
+            **extra
         }
     except Exception as e:
         logger.error(f"Voice test error: {e}")
@@ -9642,8 +14363,9 @@ async def startup_event():
     """Initialize services on startup."""
     await initialize_ai_providers()
     
-    # Apply active skin's AI personality to the provider
-    if SKIN_SYSTEM_AVAILABLE and AI_ASSISTANT_AVAILABLE:
+    # Apply active skin's AI personality to the provider (family dashboards; the
+    # laptop dashboard uses its own assistant profiles unless a skin is switched explicitly)
+    if SKIN_SYSTEM_AVAILABLE and AI_ASSISTANT_AVAILABLE and is_family_profile():
         try:
             skin = get_active_skin()
             if skin and hasattr(skin, 'ai_personality') and skin.ai_personality:
@@ -9659,9 +14381,11 @@ async def startup_event():
     # Create data directory for lead generation files
     os.makedirs('data', exist_ok=True)
     
-    # Initialize voice system
+    # Initialize voice system:
+    #   - PersonaPlex (NVIDIA full-duplex) when PERSONAPLEX_ENABLED=true (laptop/master line)
+    #   - otherwise Piper TTS "Roger" voice with skin styles (family line)
     try:
-        # Import voice system from current directory structure
+        import voice_helper
         import voice as voice_module
         
         # Load voice configuration from settings
@@ -9679,32 +14403,70 @@ async def startup_event():
                 logger.warning(f"Could not convert voice settings to dict: {conv_err}")
                 voice_config = {}
         if not voice_config:
-            # Fallback to default config
+            try:
+                runtime_config_path = project_root / 'config' / 'config.yaml'
+                if runtime_config_path.exists():
+                    with open(runtime_config_path, 'r', encoding='utf-8') as f:
+                        runtime_config = yaml.safe_load(f) or {}
+                    voice_config = runtime_config.get('voice', {}) or {}
+            except Exception as config_error:
+                logger.warning(f"Failed to load voice config from config/config.yaml: {config_error}")
+
+        if not voice_config:
+            # Fallback to default config (Piper keys + PersonaPlex keys)
             voice_config = {
                 'enabled': True,
                 'model': 'en_US-ryan-high',
                 'default_style': 'droid',
                 'speed': 0.85,
-                'pitch': 0.85
+                'pitch': 0.85,
+                'voice_preset': 'NATM1',
+                'persona': 'rogr',
+                'server_url': 'wss://localhost:8998',
+                'announce_on_startup': True
             }
         
         if not voice_config.get('enabled', True):
             logger.info("Voice system disabled in configuration")
+        elif voice_helper.VOICE_ENABLED:
+            # ---- PersonaPlex backend ----
+            voice_preset = voice_config.get('voice_preset', 'NATM1')
+            persona = voice_config.get('persona', 'rogr')
+            server_url = voice_config.get('server_url', 'wss://localhost:8998')
+            
+            # Map legacy style to voice preset if needed
+            if 'default_style' in voice_config and 'voice_preset' not in voice_config:
+                style = voice_config.get('default_style', 'droid')
+                voice_preset = voice_helper.STYLE_TO_PRESET.get(style, 'NATM1')
+            
+            voice = voice_helper.VoiceSystem(
+                server_url=server_url,
+                voice_preset=voice_preset,
+                persona=persona
+            )
+            voice_helper._voice = voice
+            try:
+                import voice_personaplex
+                voice_personaplex._voice = voice  # voice.get_voice() delegates here when enabled
+            except ImportError:
+                pass
+            
+            if voice_config.get('announce_on_startup', True):
+                voice_helper.announce("Dashboard initialization complete")
+            
+            logger.info(f"Voice system initialized: PersonaPlex preset={voice_preset}, persona={persona}")
         else:
-            # Get configuration values
+            # ---- Piper "Roger" backend ----
             model_name = voice_config.get('model', 'en_US-ryan-high')
             default_style = voice_config.get('default_style', 'droid')
             speed = voice_config.get('speed', 0.75)
             pitch = voice_config.get('pitch', 0.85)
             
-            # Initialize voice with configuration
             voice = voice_module.VoiceSystem(
                 default_style=default_style,
                 speed=speed,
                 pitch=pitch
             )
-            
-            # Set as global voice instance
             voice_module._voice = voice
             
             # Configure voice system with Piper path
@@ -9719,17 +14481,8 @@ async def startup_event():
                 project_root / "data" / "voice_models" / "piper" / f"{model_name}.onnx",
             ]
             
-            piper_bin = None
-            for loc in piper_locations:
-                if loc.exists():
-                    piper_bin = loc
-                    break
-            
-            model_path = None
-            for loc in model_locations:
-                if loc.exists():
-                    model_path = loc
-                    break
+            piper_bin = next((loc for loc in piper_locations if loc.exists()), None)
+            model_path = next((loc for loc in model_locations if loc.exists()), None)
             
             if piper_bin and model_path:
                 voice.piper_bin = str(piper_bin)
@@ -9748,10 +14501,10 @@ async def startup_event():
                 if voice_config.get('announce_on_startup', True):
                     voice_module.announce("Dashboard initialization complete", blocking=False)
                 
-                logger.info(f"Voice system initialized: {model_name}, style={default_style}, speed={speed}x, pitch={pitch}x")
+                logger.info(f"Voice system initialized: Piper {model_name}, style={default_style}, speed={speed}x, pitch={pitch}x")
             else:
-                logger.warning(f"Voice system not configured. Model not found: {model_path}")
-                logger.warning("Run scripts/setup_voice.sh to install.")
+                logger.info("Piper voice model not found; Roger voice unavailable "
+                            "(run scripts/setup_voice.sh, or set PERSONAPLEX_ENABLED=true for PersonaPlex)")
     except Exception as e:
         logger.warning(f"Voice system initialization failed: {e}")
     
@@ -9770,14 +14523,50 @@ async def shutdown_event():
 # ===================================================================
 
 @app.get("/api/servers")
-async def get_all_servers():
-    """Get all Python web servers running on the system"""
+async def get_all_servers(include_remote: bool = Query(False)):
+    """Get user web servers running on common app ports."""
     try:
         from utils.server_manager import ServerManager
-        
+
         server_manager = ServerManager()
-        servers = server_manager.discover_python_servers()
-        
+        servers = server_manager.discover_web_servers(port_min=8000, port_max=9000)
+
+        if include_remote:
+            remote_servers = server_manager.discover_remote_web_servers(port_min=8000, port_max=9000)
+            servers = servers + remote_servers
+
+        # Self-identify: stamp the entry that matches this running process
+        self_port = int(os.environ.get('PORT', 8008))
+        self_pid  = os.getpid()
+        self_cwd  = str(project_root)
+
+        # Read app name from BUILDLY.yaml if present
+        _self_name = 'Founder Dashboard'
+        try:
+            import yaml as _yaml
+            _buildly = project_root / 'BUILDLY.yaml'
+            if _buildly.exists():
+                with open(_buildly) as _f:
+                    _bd = _yaml.safe_load(_f) or {}
+                    _self_name = _bd.get('name') or _bd.get('title') or _self_name
+        except Exception:
+            pass
+
+        for s in servers:
+            _is_self = (
+                s.get('port') == self_port
+                or s.get('pid') == self_pid
+                or (s.get('working_dir') and str(s['working_dir']).startswith(self_cwd))
+            )
+            if _is_self:
+                s['name']        = f'⭐ {_self_name} (this app)'
+                s['type']        = 'FastAPI / Uvicorn'
+                s['likely_use']  = 'This dashboard application'
+                s['working_dir'] = self_cwd
+                s['is_self']     = True
+                s['port']        = self_port
+                s['url']         = f'http://localhost:{self_port}'
+
         return {"success": True, "servers": servers}
     except Exception as e:
         logger.error(f"Error discovering servers: {e}")
@@ -9804,7 +14593,7 @@ async def stop_server(port: int):
         from utils.server_manager import ServerManager
         
         server_manager = ServerManager()
-        servers = server_manager.discover_python_servers()
+        servers = server_manager.discover_web_servers(port_min=8000, port_max=9000)
         server = next((s for s in servers if s['port'] == port), None)
         
         if not server:
@@ -9826,14 +14615,46 @@ async def stop_server(port: int):
         logger.error(f"Error stopping server on port {port}: {e}")
         return {"success": False, "error": str(e)}
 
+@app.post("/api/servers/{port}/restart")
+async def restart_server(port: int):
+    """Restart a server running on a specific port."""
+    try:
+        from utils.server_manager import ServerManager
+
+        server_manager = ServerManager()
+        servers = server_manager.discover_web_servers(port_min=8000, port_max=9000)
+        server = next((s for s in servers if s['port'] == port), None)
+
+        if not server:
+            raise HTTPException(status_code=404, detail=f"Server on port {port} not found")
+
+        if not server.get('can_restart'):
+            raise HTTPException(status_code=400, detail=f"Cannot restart server on port {port} (no restart command available)")
+
+        success = server_manager.restart_server(server)
+
+        if success:
+            return {"success": True, "message": f"Restart triggered for server on port {port}"}
+        return {"success": False, "error": f"Failed to restart server on port {port}"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error restarting server on port {port}: {e}")
+        return {"success": False, "error": str(e)}
+
 @app.post("/api/servers/refresh")
-async def refresh_servers():
+async def refresh_servers(include_remote: bool = Query(False)):
     """Refresh the list of discovered servers"""
     try:
         from utils.server_manager import ServerManager
         
         server_manager = ServerManager()
-        servers = server_manager.discover_python_servers()
+        servers = server_manager.discover_web_servers(port_min=8000, port_max=9000)
+
+        if include_remote:
+            remote_servers = server_manager.discover_remote_web_servers(port_min=8000, port_max=9000)
+            servers = servers + remote_servers
         
         return {"success": True, "servers": servers, "message": f"Found {len(servers)} servers"}
     except Exception as e:
@@ -9844,6 +14665,13 @@ async def refresh_servers():
 if __name__ == "__main__":
     import socket
     
+    # Bind address: loopback by default (laptop safety). Docker containers start
+    # uvicorn directly with --host 0.0.0.0 (ops/entrypoint*.sh); set
+    # DASHBOARD_HOST=0.0.0.0 explicitly to expose a directly-run server on the network.
+    host = os.environ.get("DASHBOARD_HOST", "127.0.0.1")
+    # Port: DASHBOARD_PORT, else 8020 for family dashboards, 8008 for the laptop dashboard
+    port = int(os.environ.get("DASHBOARD_PORT") or (8020 if is_family_profile() else 8008))
+    
     # Get the local IP address for network access info
     try:
         hostname = socket.gethostname()
@@ -9852,10 +14680,10 @@ if __name__ == "__main__":
         local_ip = "127.0.0.1"
     
     print("🌟 Starting Simple Dashboard Server...")
-    print(f"📍 Dashboard (Local): http://localhost:8020")
-    print(f"📍 Dashboard (Network): http://{local_ip}:8020")
-    print(f"🔧 API Docs: http://localhost:8020/docs")
-    print("🌐 Server accessible from anywhere on the network!")
+    print(f"📍 Dashboard (Local): http://localhost:{port}")
+    if host not in ("127.0.0.1", "localhost", "::1"):
+        print(f"📍 Dashboard (Network): http://{local_ip}:{port}")
+    print(f"🔧 API Docs: http://localhost:{port}/docs")
+    print(f"🔒 Binding to {host}:{port} (set DASHBOARD_HOST to change)")
     
-    # Always run on 0.0.0.0:8020 for network accessibility
-    uvicorn.run(app, host="0.0.0.0", port=8020, log_level="info")
+    uvicorn.run(app, host=host, port=port, log_level="info")

@@ -4,15 +4,32 @@ Application settings and configuration management.
 
 import os
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from pydantic_settings import BaseSettings
 from pydantic import Field
 import yaml
 
 
+class VoiceSettings(BaseSettings):
+    """Voice system configuration for AI assistant."""
+    model_config = {'protected_namespaces': (), 'extra': 'allow'}  # voice FX keys (bit_depth, echo_gain, ...)
+    
+    model: str = Field(default="en_US-ryan-high", description="Voice model name (without extension)")
+    model_path: Optional[str] = Field(default=None, description="Path or directory to Piper voice model. Can be a directory or full file path.")
+    default_style: str = Field(default="droid", description="Default voice style/effect")
+    speed: float = Field(default=0.75, description="Voice speed adjustment")
+    pitch: float = Field(default=0.85, description="Voice pitch adjustment")
+    enabled: bool = Field(default=True, description="Enable voice system")
+    announce_on_startup: bool = Field(default=True, description="Announce on startup")
+    announce_on_collection: bool = Field(default=True, description="Announce on data collection")
+    announce_on_error: bool = Field(default=False, description="Announce on error")
+    wake_words: list = Field(default_factory=lambda: ["rogr", "roger"], description="Wake words for voice commands")
+    signature_phrase: str = Field(default="roger, roger", description="Signature phrase for announcements")
+
+
 class OllamaSettings(BaseSettings):
     """Ollama server configuration."""
-    host: str = Field(default="alderaan.local", description="Ollama server host")
+    host: str = Field(default="alderaan.home", description="Ollama server host")
     port: int = Field(default=11434, description="Ollama server port")
     model: str = Field(default="llama3.2:1b", description="Default model to use")
     
@@ -24,10 +41,18 @@ class OllamaSettings(BaseSettings):
 class GoogleSettings(BaseSettings):
     """Google APIs configuration."""
     credentials_file: Optional[str] = Field(default=None, description="Path to Google credentials JSON")
+    token_file: Optional[str] = Field(default=None, description="Path to Google OAuth token JSON (auto-set)")
     scopes: list = Field(default_factory=lambda: [
         'https://www.googleapis.com/auth/gmail.readonly',
+        'https://www.googleapis.com/auth/gmail.send',
+        'https://www.googleapis.com/auth/gmail.modify',
+        'https://www.googleapis.com/auth/gmail.labels',
         'https://www.googleapis.com/auth/calendar.readonly',
-        'https://www.googleapis.com/auth/drive.readonly'
+        'https://www.googleapis.com/auth/calendar.events',
+        'https://www.googleapis.com/auth/drive.readonly',
+        'https://www.googleapis.com/auth/userinfo.profile',
+        'https://www.googleapis.com/auth/userinfo.email',
+        'openid'
     ])
     drive_notes_folder_id: Optional[str] = Field(default=None, description="Google Drive folder ID for meeting notes")
 
@@ -36,6 +61,7 @@ class AppleSettings(BaseSettings):
     """Apple APIs configuration."""
     # Apple doesn't have a public API for Reminders, we'll use alternative approaches
     reminders_export_path: Optional[str] = Field(default=None, description="Path to exported reminders")
+    icloud_calendar_url: Optional[str] = Field(default=None, description="iCloud public calendar URL")
 
 
 class TodoistSettings(BaseSettings):
@@ -120,6 +146,27 @@ class ObsidianSettings(BaseSettings):
     recent_days: int = Field(default=7, description="Only check notes modified in last N days")
 
 
+class GoogleDriveNotesSettings(BaseSettings):
+    """Google Drive notes configuration."""
+    enabled: bool = Field(default=False, description="Enable Google Drive notes integration")
+    meeting_notes_folder_id: Optional[str] = Field(default=None, description="Google Drive folder ID for meeting notes")
+    credentials_file: Optional[str] = Field(default=None, description="Path to Google credentials JSON")
+
+
+class NotesSettings(BaseSettings):
+    """Notes and knowledge management configuration."""
+    obsidian: ObsidianSettings = Field(default_factory=ObsidianSettings)
+    google_drive: GoogleDriveNotesSettings = Field(default_factory=GoogleDriveNotesSettings)
+    auto_create_tasks: bool = Field(default=True, description="Automatically create tasks from notes TODOs")
+    
+    # Apple Notes collection settings
+    collect_apple_notes: bool = Field(default=False, description="Collect from Apple Notes (can hang if Notes doesn't respond)")
+    apple_notes_timeout: int = Field(default=10, description="Timeout in seconds for Apple Notes collection")
+    
+    class Config:
+        env_prefix = "NOTES_"
+
+
 class MicrosoftSettings(BaseSettings):
     """Microsoft Office 365 configuration."""
     client_id: Optional[str] = Field(default=None, description="Microsoft OAuth client ID")
@@ -140,23 +187,6 @@ class ProtonSettings(BaseSettings):
     
     class Config:
         env_prefix = "PROTON_"
-
-
-class GoogleDriveNotesSettings(BaseSettings):
-    """Google Drive notes configuration."""
-    enabled: bool = Field(default=False, description="Enable Google Drive notes integration")
-    meeting_notes_folder_id: Optional[str] = Field(default=None, description="Google Drive folder ID for meeting notes")
-    credentials_file: Optional[str] = Field(default=None, description="Path to Google credentials JSON")
-
-
-class NotesSettings(BaseSettings):
-    """Notes and knowledge management configuration."""
-    obsidian: ObsidianSettings = Field(default_factory=ObsidianSettings)
-    google_drive: GoogleDriveNotesSettings = Field(default_factory=GoogleDriveNotesSettings)
-    auto_create_tasks: bool = Field(default=True, description="Automatically create tasks from notes TODOs")
-    
-    class Config:
-        env_prefix = "NOTES_"
 
 
 class SkinSettings(BaseSettings):
@@ -193,6 +223,20 @@ class DashboardSettings(BaseSettings):
     })
 
 
+class TaskSyncSettings(BaseSettings):
+    """Task sync provider preferences."""
+    enabled: bool = Field(default=False, description="Enable syncing created tasks to external providers")
+    default_provider: str = Field(default="ticktick", description="Primary task sync provider")
+    provider_order: List[str] = Field(
+        default_factory=lambda: ["ticktick", "apple_reminders", "todoist"],
+        description="Ordered list of task sync providers to try",
+    )
+    apple_reminders_list: Optional[str] = Field(default=None, description="Apple Reminders list name for synced tasks")
+
+    class Config:
+        env_prefix = "TASK_SYNC_"
+
+
 class Settings(BaseSettings):
     """Main application settings."""
     # Environment
@@ -220,7 +264,9 @@ class Settings(BaseSettings):
     ambient_weather: AmbientWeatherSettings = Field(default_factory=AmbientWeatherSettings)
     music: MusicSettings = Field(default_factory=MusicSettings)
     notes: NotesSettings = Field(default_factory=NotesSettings)
+    task_sync: TaskSyncSettings = Field(default_factory=TaskSyncSettings)
     dashboard: DashboardSettings = Field(default_factory=DashboardSettings)
+    voice: VoiceSettings = Field(default_factory=VoiceSettings)
     
     # Music OAuth shortcuts for easier access
     @property

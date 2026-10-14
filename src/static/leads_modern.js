@@ -62,7 +62,8 @@ class LeadManager {
     renderLeads() {
         const grid = document.getElementById('leads-grid');
         if (!grid) {
-            console.error('leads-grid element not found!');
+            // Leads section may not be mounted yet depending on active view.
+            console.debug('leads-grid element not available yet');
             return;
         }
         

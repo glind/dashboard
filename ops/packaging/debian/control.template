@@ -1,0 +1,10 @@
+Package: {{PACKAGE_NAME}}
+Version: {{VERSION}}
+Section: utils
+Priority: optional
+Architecture: {{ARCH}}
+Maintainer: {{MAINTAINER}}
+Depends: libgtk-3-0, libwebkit2gtk-4.0-37, libglib2.0-0, libnss3, libx11-6, libxcomposite1, libxdamage1, libxrandr2, libxtst6, libasound2, libatk1.0-0, libc6
+Description: {{DESCRIPTION}}
+ Self-contained desktop build of Personal Dashboard.
+ Includes bundled Python runtime and application dependencies.

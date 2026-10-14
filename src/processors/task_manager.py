@@ -24,7 +24,9 @@ class TaskManager:
     def create_task(self, title: str, description: str = "", priority: str = "medium",
                    category: str = "general", due_date: datetime = None, 
                    source: str = "manual", source_id: str = None, 
-                   email_id: str = None, sync_to_ticktick: bool = True) -> Dict[str, Any]:
+                   email_id: str = None, sync_to_ticktick: bool = True,
+                   source_title: str = None, source_url: str = None,
+                   source_preview: str = None, creation_reason: str = None) -> Dict[str, Any]:
         """Create a new task in the database."""
         try:
             # Generate task ID
@@ -40,6 +42,10 @@ class TaskManager:
                 'category': category,
                 'source': source,
                 'source_id': source_id,
+                'source_title': source_title,
+                'source_url': source_url,
+                'source_preview': source_preview,
+                'creation_reason': creation_reason,
                 'status': 'pending',
                 'requires_response': 1 if 'reply' in category.lower() or 'email' in source.lower() else 0,
                 'email_id': email_id
@@ -97,6 +103,8 @@ class TaskManager:
                     'source_id': task.get('source_id', ''),
                     'source_title': task.get('source_title', ''),
                     'source_url': task.get('source_url', ''),
+                    'source_preview': task.get('source_preview', ''),
+                    'creation_reason': task.get('creation_reason', ''),
                     'due_date': task.get('due_date', ''),
                     'created_at': task.get('created_at', ''),
                     'completed_at': task.get('completed_at', ''),
@@ -134,6 +142,32 @@ class TaskManager:
                 'success': False,
                 'error': str(e)
             }
+    
+    def get_tasks_by_source(self, source: str, source_id: str, include_deleted: bool = True) -> List[Dict[str, Any]]:
+        """Get tasks by source type and source ID.
+        
+        By default includes deleted tasks to prevent re-creation of dismissed tasks.
+        """
+        try:
+            all_tasks = self.db.get_todos_by_source(source=source)
+            # Filter by source_id
+            matching = [t for t in all_tasks if t.get('source_id') == source_id]
+            
+            if not include_deleted:
+                matching = [t for t in matching if t.get('status') != 'deleted']
+            
+            return matching
+        except Exception as e:
+            logger.error(f"Error getting tasks by source: {e}")
+            return []
+    
+    def is_source_already_processed(self, source: str, source_id: str) -> bool:
+        """Check if a source has already been scanned and had a task created/dismissed.
+        
+        Returns True if we should skip this source (task already exists or was deleted).
+        """
+        existing = self.get_tasks_by_source(source, source_id, include_deleted=True)
+        return len(existing) > 0
     
     def delete_task(self, task_id: str) -> Dict[str, Any]:
         """Delete a task from the database."""

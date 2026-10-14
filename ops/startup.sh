@@ -18,7 +18,18 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 VENV_DIR="$PROJECT_ROOT/.venv"
 PYTHON_CMD="python3"
 SERVER_FILE="$PROJECT_ROOT/src/main.py"
-SERVER_PORT="8020"  # Server runs on 0.0.0.0:8020 (accessible from network)
+# Bind address/port for `python src/main.py` (read via DASHBOARD_HOST / DASHBOARD_PORT).
+# Inside Docker (family dashboards) keep the container-friendly 0.0.0.0:8020 defaults;
+# on a laptop default to loopback-only 127.0.0.1:8008. Override either via env.
+if [ -f /.dockerenv ]; then
+    SERVER_HOST="${DASHBOARD_HOST:-0.0.0.0}"
+    SERVER_PORT="${DASHBOARD_PORT:-8020}"
+else
+    SERVER_HOST="${DASHBOARD_HOST:-127.0.0.1}"
+    SERVER_PORT="${DASHBOARD_PORT:-8008}"
+fi
+export DASHBOARD_HOST="$SERVER_HOST"
+export DASHBOARD_PORT="$SERVER_PORT"
 PID_FILE="$PROJECT_ROOT/dashboard.pid"
 
 echo -e "${BLUE}🚀 Personal Dashboard Startup${NC}"
@@ -207,8 +218,8 @@ install_requirements() {
     fi
 }
 
-# Function to check and install voice system dependencies
-check_voice_system() {
+# Function to check and install Piper TTS (used by the Roger voice / family dashboards)
+check_piper_voice() {
     echo -e "${BLUE}🎙️  Checking voice system dependencies...${NC}"
     
     # Check for Homebrew (macOS only)
@@ -320,45 +331,45 @@ check_voice_system() {
     fi
 }
 
-# Function to check/install Ollama local server
-check_ollama() {
-    echo -e "${BLUE}🧠 Checking for local Ollama...${NC}"
-    if command -v ollama &> /dev/null; then
-        echo -e "${GREEN}   ✅ Ollama CLI found${NC}"
+# Function to check voice system (PersonaPlex)
+# Note: PersonaPlex is optional; Piper TTS (above) remains the default local voice
+check_personaplex_voice() {
+    echo -e "${BLUE}🎙️  Checking voice system (PersonaPlex)...${NC}"
+    
+    # PersonaPlex is optional - check if it's configured
+    if [ -n "${PERSONAPLEX_ENABLED:-}" ] && [ "$PERSONAPLEX_ENABLED" = "true" ]; then
+        echo -e "${GREEN}   ✅ PersonaPlex enabled via environment${NC}"
         
-        # Check if Roger's default model is installed
-        local roger_model="llama3.2:1b"
-        echo -e "${BLUE}   Checking for Roger's AI model ($roger_model)...${NC}"
+        # Check for HuggingFace token (required for PersonaPlex)
+        if [ -z "${HF_TOKEN:-}" ]; then
+            echo -e "${YELLOW}   ⚠️  HF_TOKEN not set - PersonaPlex requires HuggingFace authentication${NC}"
+            echo -e "${BLUE}   ℹ️  Set HF_TOKEN environment variable or run: ./scripts/setup_personaplex.sh${NC}"
+        fi
         
-        if ollama list 2>/dev/null | grep -q "$roger_model"; then
-            echo -e "${GREEN}   ✅ Roger's model ($roger_model) ready${NC}"
+        # Check for websockets package
+        if python -c "import websockets" 2>/dev/null; then
+            echo -e "${GREEN}   ✅ websockets package installed${NC}"
         else
-            echo -e "${YELLOW}   ⚠️  Roger's model not found, downloading...${NC}"
-            echo -e "${BLUE}   This is a one-time download (~1.3GB)...${NC}"
-            if ollama pull "$roger_model"; then
-                echo -e "${GREEN}   ✅ Roger's model downloaded successfully${NC}"
-            else
-                echo -e "${YELLOW}   ⚠️  Model download failed - Roger will use fallback${NC}"
-            fi
+            echo -e "${YELLOW}   ⚠️  Installing websockets for PersonaPlex...${NC}"
+            python -m pip install "websockets>=11.0" -q
         fi
-        return 0
-    fi
-
-    echo -e "${YELLOW}   ⚠️  Ollama not found locally${NC}"
-    # Attempt simple install on Linux via official installer if available
-    local os_type=$(uname -s)
-    if [[ "$os_type" == "Linux" ]]; then
-        echo -e "${BLUE}   Attempting to install Ollama (Linux)...${NC}"
-        if curl -fsSL https://ollama.ai/install.sh | bash; then
-            echo -e "${GREEN}   ✅ Ollama installer finished (check output above)${NC}"
-            return 0
-        else
-            echo -e "${YELLOW}   ⚠️  Ollama automatic install failed. Visit https://ollama.ai for manual install${NC}"
-            return 0
-        fi
+        
+        echo -e "${BLUE}   ℹ️  PersonaPlex server must be started separately${NC}"
+        echo -e "${BLUE}   ℹ️  See: devdocs/VOICE_SYSTEM.md for setup instructions${NC}"
     else
-        echo -e "${YELLOW}   Please install Ollama manually from https://ollama.ai${NC}"
+        echo -e "${BLUE}   ℹ️  Voice system (PersonaPlex) not enabled${NC}"
+        echo -e "${BLUE}   ℹ️  To enable: export PERSONAPLEX_ENABLED=true${NC}"
+        echo -e "${BLUE}   ℹ️  See: devdocs/VOICE_SYSTEM.md for full setup${NC}"
     fi
+    
+    # Create voice cache directory (still used for any audio caching)
+    mkdir -p "$PROJECT_ROOT/data/voice_cache"
+}
+
+# Function to check all voice backends (Piper for Roger, optional PersonaPlex)
+check_voice_system() {
+    check_piper_voice
+    check_personaplex_voice
 }
 
 # Function to verify configuration
@@ -373,19 +384,119 @@ check_config() {
     
     # Create config directories if they don't exist
     mkdir -p "$PROJECT_ROOT/config" "$PROJECT_ROOT/tokens" "$PROJECT_ROOT/data"
-    
-    # Check for example config files
-    if [ ! -f "$PROJECT_ROOT/config/config.yaml" ] && [ -f "$PROJECT_ROOT/config/config.yaml.example" ]; then
-        echo -e "${YELLOW}   ⚠️  Copying example config (please customize)${NC}"
-        cp "$PROJECT_ROOT/config/config.yaml.example" "$PROJECT_ROOT/config/config.yaml"
+
+    # Check for required config files
+    if [ ! -f "$PROJECT_ROOT/config/config.yaml" ]; then
+        echo -e "${RED}❌ config.yaml not found in $PROJECT_ROOT/config${NC}"
+        echo -e "${YELLOW}   Please copy config.yaml.example to config.yaml and customize it manually.${NC}"
+        exit 1
     fi
-    
-    if [ ! -f "$PROJECT_ROOT/config/credentials.yaml" ] && [ -f "$PROJECT_ROOT/config/credentials.yaml.example" ]; then
-        echo -e "${YELLOW}   ⚠️  Copying example credentials (please add your API keys)${NC}"
-        cp "$PROJECT_ROOT/config/credentials.yaml.example" "$PROJECT_ROOT/config/credentials.yaml"
+
+    if [ ! -f "$PROJECT_ROOT/config/credentials.yaml" ]; then
+        echo -e "${RED}❌ credentials.yaml not found in $PROJECT_ROOT/config${NC}"
+        echo -e "${YELLOW}   Please copy credentials.yaml.example to credentials.yaml and add your API keys manually.${NC}"
+        exit 1
     fi
-    
+
+    # Restrict permissions on credentials.yaml
+    chmod 600 "$PROJECT_ROOT/config/credentials.yaml" 2>/dev/null || true
+
     echo -e "${GREEN}   ✅ Configuration ready${NC}"
+}
+
+# Function to check Ollama and recommended model
+check_ollama() {
+    echo -e "${BLUE}🤖 Checking Ollama AI server...${NC}"
+    
+    # Get Ollama host from config (default to localhost)
+    local ollama_host="localhost"
+    local ollama_port="11434"
+    
+    # Try to read from config.yaml if yq is available
+    if command -v yq &> /dev/null && [ -f "$PROJECT_ROOT/config/config.yaml" ]; then
+        ollama_host=$(yq -r '.ollama.host // "localhost"' "$PROJECT_ROOT/config/config.yaml" 2>/dev/null || echo "localhost")
+        ollama_port=$(yq -r '.ollama.port // "11434"' "$PROJECT_ROOT/config/config.yaml" 2>/dev/null || echo "11434")
+    fi
+    
+    # Check for database setting override (more reliable)
+    if [ -f "$PROJECT_ROOT/dashboard.db" ]; then
+        local db_host=$(sqlite3 "$PROJECT_ROOT/dashboard.db" "SELECT setting_value FROM settings WHERE setting_key='ollama_host';" 2>/dev/null | tr -d '"')
+        local db_port=$(sqlite3 "$PROJECT_ROOT/dashboard.db" "SELECT setting_value FROM settings WHERE setting_key='ollama_port';" 2>/dev/null | tr -d '"')
+        [ -n "$db_host" ] && ollama_host="$db_host"
+        [ -n "$db_port" ] && ollama_port="$db_port"
+    fi
+    
+    local preferred_url="http://${ollama_host}:${ollama_port}"
+    local fallback_localhost="http://localhost:${ollama_port}"
+    local fallback_loopback="http://127.0.0.1:${ollama_port}"
+    local ollama_url=""
+
+    if curl -s --connect-timeout 5 "${preferred_url}/api/tags" > /dev/null 2>&1; then
+        ollama_url="$preferred_url"
+    elif curl -s --connect-timeout 5 "${fallback_localhost}/api/tags" > /dev/null 2>&1; then
+        ollama_url="$fallback_localhost"
+        echo -e "${YELLOW}   ⚠️  Configured Ollama host unavailable (${preferred_url})${NC}"
+        echo -e "${GREEN}   ✅ Using local fallback: ${fallback_localhost}${NC}"
+    elif curl -s --connect-timeout 5 "${fallback_loopback}/api/tags" > /dev/null 2>&1; then
+        ollama_url="$fallback_loopback"
+        echo -e "${YELLOW}   ⚠️  Configured Ollama host unavailable (${preferred_url})${NC}"
+        echo -e "${GREEN}   ✅ Using loopback fallback: ${fallback_loopback}${NC}"
+    else
+        echo -e "${YELLOW}   ⚠️  Ollama server not reachable at configured or fallback URLs${NC}"
+        echo -e "${YELLOW}      Tried: ${preferred_url}, ${fallback_localhost}, ${fallback_loopback}${NC}"
+        echo -e "${YELLOW}   AI assistant features may be limited${NC}"
+        echo -e "${BLUE}   To install Ollama: curl -fsSL https://ollama.com/install.sh | sh${NC}"
+        # Family/Roger installs: attempt automatic install on Linux when no CLI is present
+        if ! command -v ollama &> /dev/null && [[ "$(uname -s)" == "Linux" ]]; then
+            echo -e "${BLUE}   Attempting to install Ollama (Linux)...${NC}"
+            if curl -fsSL https://ollama.ai/install.sh | bash; then
+                echo -e "${GREEN}   ✅ Ollama installer finished (check output above)${NC}"
+            else
+                echo -e "${YELLOW}   ⚠️  Ollama automatic install failed. Visit https://ollama.ai for manual install${NC}"
+            fi
+        fi
+        return 0
+    fi
+    
+    echo -e "${GREEN}   ✅ Ollama server reachable at ${ollama_url}${NC}"
+    
+    # Ensure Roger's default model is present when the local CLI is available
+    if command -v ollama &> /dev/null; then
+        local roger_model="llama3.2:1b"
+        if ollama list 2>/dev/null | grep -q "$roger_model"; then
+            echo -e "${GREEN}   ✅ Roger's model ($roger_model) ready${NC}"
+        else
+            echo -e "${YELLOW}   ⚠️  Roger's model ($roger_model) not found, downloading (~1.3GB, one-time)...${NC}"
+            if ollama pull "$roger_model"; then
+                echo -e "${GREEN}   ✅ Roger's model downloaded successfully${NC}"
+            else
+                echo -e "${YELLOW}   ⚠️  Model download failed - Roger will use fallback${NC}"
+            fi
+        fi
+    fi
+
+    # Check for recommended model (deepseek-r1)
+    local recommended_model="deepseek-r1:latest"
+    local models=$(curl -s "${ollama_url}/api/tags" 2>/dev/null)
+    
+    if echo "$models" | grep -q "deepseek-r1"; then
+        echo -e "${GREEN}   ✅ Recommended model (deepseek-r1) is installed${NC}"
+    else
+        echo -e "${YELLOW}   ⚠️  Recommended model not found: ${recommended_model}${NC}"
+        echo -e "${YELLOW}   The deepseek-r1 model provides best context-awareness for the AI assistant${NC}"
+        echo -e "${BLUE}   To install: ollama pull deepseek-r1${NC}"
+        echo ""
+        
+        # List available models
+        local available=$(echo "$models" | grep -o '"name":"[^"]*"' | cut -d'"' -f4 | head -5)
+        if [ -n "$available" ]; then
+            echo -e "${BLUE}   Currently installed models:${NC}"
+            echo "$available" | while read -r model; do
+                echo -e "${BLUE}     - $model${NC}"
+            done
+        fi
+        echo ""
+    fi
 }
 
 # Function to check database integrity
@@ -554,8 +665,8 @@ case "${1:-start}" in
         setup_venv
         install_requirements
         check_voice_system
-        check_ollama
         check_config
+        check_ollama
         check_database
         start_server
         ;;
@@ -570,8 +681,8 @@ case "${1:-start}" in
         setup_venv
         install_requirements
         check_voice_system
-        check_ollama
         check_config
+        check_ollama
         check_database
         start_server
         ;;

@@ -295,10 +295,10 @@ journalctl -u dashboard -f
 **Database:**
 ```bash
 # Backup
-cp data/dashboard.db data/dashboard.db.backup-$(date +%Y%m%d)
+cp dashboard.db dashboard.db.backup-$(date +%Y%m%d)
 
 # Restore
-cp data/dashboard.db.backup-YYYYMMDD data/dashboard.db
+cp dashboard.db.backup-YYYYMMDD dashboard.db
 ```
 
 **Configuration:**
@@ -363,10 +363,10 @@ collectors:
 
 ```bash
 # Vacuum database (reduces size)
-sqlite3 data/dashboard.db "VACUUM;"
+sqlite3 dashboard.db "VACUUM;"
 
 # Analyze (optimizes queries)
-sqlite3 data/dashboard.db "ANALYZE;"
+sqlite3 dashboard.db "ANALYZE;"
 ```
 
 ---

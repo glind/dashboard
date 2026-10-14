@@ -3,6 +3,7 @@ Trust Layer REST API Endpoints
 """
 
 import logging
+import json
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 
@@ -30,6 +31,46 @@ def set_db_connection(conn):
     """Set database connection (called from main.py)."""
     global _db_conn
     _db_conn = conn
+
+
+def _extract_domain(sender_email: str, fallback: str = "") -> str:
+    """Extract a domain from raw sender text like 'Name <user@example.com>'."""
+    if fallback:
+        return fallback
+    if not sender_email:
+        return ""
+
+    candidate = sender_email.strip()
+    if "<" in candidate and ">" in candidate:
+        candidate = candidate.split("<")[-1].split(">", 1)[0].strip()
+    if "@" not in candidate:
+        return ""
+    return candidate.split("@", 1)[1].strip().lower()
+
+
+def _report_timestamp_iso(report: Any) -> str:
+    """Return a report timestamp regardless of model version."""
+    timestamp = getattr(report, 'generated_at', None) or getattr(report, 'created_at', None) or datetime.utcnow()
+    return timestamp.isoformat() if hasattr(timestamp, 'isoformat') else str(timestamp)
+
+
+def _build_report_response(report: Any, sender_email: str = '', sender_domain: str = '') -> 'TrustReportResponse':
+    """Normalize trust report model variants into API response shape."""
+    raw_risk_level = getattr(report, 'risk_level', 'caution')
+    risk_level = raw_risk_level.value if hasattr(raw_risk_level, 'value') else str(raw_risk_level)
+    findings = [f.to_dict() if hasattr(f, 'to_dict') else f for f in (getattr(report, 'findings', []) or [])]
+
+    return TrustReportResponse(
+        report_id=getattr(report, 'report_id', ''),
+        thread_id=getattr(report, 'thread_id', None),
+        sender_email=sender_email or '',
+        sender_domain=_extract_domain(sender_email, sender_domain),
+        score=getattr(report, 'score', 0),
+        risk_level=risk_level,
+        summary=getattr(report, 'summary', ''),
+        findings=findings,
+        generated_at=_report_timestamp_iso(report)
+    )
 
 
 # Pydantic models for API
@@ -82,52 +123,98 @@ async def get_report(thread_id: str, db=Depends(get_db)):
     If report doesn't exist and email is in database, generates new report.
     """
     generator = ReportGenerator(db)
+    sender_email = ''
+    sender_domain = ''
     
     # Try to get existing report
-    report = generator.get_report(thread_id)
+    try:
+        report = generator.get_report(thread_id)
+    except Exception as e:
+        logger.warning(f"Trust report lookup failed for thread {thread_id}: {e}")
+        report = None
     
     if not report:
         # Try to get email from database and generate report
         with db.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('''
-                SELECT thread_id, message_id, sender, sender_name, subject,
-                       body_text, body_html, snippet, headers, received_date
+
+            cursor.execute("PRAGMA table_info(emails)")
+            email_columns = {row[1] for row in cursor.fetchall()}
+
+            thread_col = 'thread_id' if 'thread_id' in email_columns else 'id'
+
+            select_fields = {
+                'thread_id': 'thread_id' if 'thread_id' in email_columns else 'id',
+                'message_id': 'message_id' if 'message_id' in email_columns else 'id',
+                'sender': 'sender' if 'sender' in email_columns else "''",
+                'sender_name': 'sender_name' if 'sender_name' in email_columns else "''",
+                'subject': 'subject' if 'subject' in email_columns else "''",
+                'body_text': (
+                    'body_text' if 'body_text' in email_columns
+                    else ('body' if 'body' in email_columns else "''")
+                ),
+                'body_html': 'body_html' if 'body_html' in email_columns else "''",
+                'snippet': (
+                    'snippet' if 'snippet' in email_columns
+                    else ("substr(body, 1, 240)" if 'body' in email_columns else "''")
+                ),
+                'headers': 'headers' if 'headers' in email_columns else "''",
+                'received_date': (
+                    'received_date' if 'received_date' in email_columns
+                    else ('created_at' if 'created_at' in email_columns else "''")
+                ),
+            }
+
+            select_sql = ', '.join([f"{expr} AS {alias}" for alias, expr in select_fields.items()])
+            query = f"""
+                SELECT {select_sql}
                 FROM emails
-                WHERE thread_id = ?
+                WHERE {thread_col} = ?
                 LIMIT 1
-            ''', (thread_id,))
+            """
+            cursor.execute(query, (thread_id,))
             
             row = cursor.fetchone()
             if not row:
                 raise HTTPException(status_code=404, detail="Email not found")
             
             # Generate report
+            raw_headers = row['headers'] if 'headers' in row.keys() else ''
+            parsed_headers = {}
+            if raw_headers:
+                try:
+                    parsed_headers = json.loads(raw_headers)
+                except Exception:
+                    try:
+                        parsed_headers = eval(raw_headers)
+                    except Exception:
+                        parsed_headers = {}
+
             email_dict = {
-                'thread_id': row[0],
-                'message_id': row[1],
-                'sender': row[2],
-                'sender_name': row[3],
-                'subject': row[4],
-                'body_text': row[5],
-                'body_html': row[6],
-                'snippet': row[7],
-                'headers': eval(row[8]) if row[8] else {},
-                'received_date': row[9]
+                'thread_id': row['thread_id'] or thread_id,
+                'message_id': row['message_id'] or thread_id,
+                'sender': row['sender'] or '',
+                'sender_name': row['sender_name'] or '',
+                'subject': row['subject'] or '',
+                'body_text': row['body_text'] or '',
+                'body_html': row['body_html'] or '',
+                'snippet': row['snippet'] or '',
+                'headers': parsed_headers,
+                'received_date': row['received_date'] or ''
             }
+            sender_email = email_dict['sender']
+            sender_domain = email_dict['sender'].split('@')[-1] if '@' in email_dict['sender'] else ''
             
-            report = await generator.generate_report_from_email(email_dict)
-    
-    return TrustReportResponse(
-        report_id=report.report_id,
-        thread_id=report.context.thread_id,
-        sender_email=report.context.sender_email,
-        sender_domain=report.context.sender_domain,
-        score=report.score,
-        risk_level=report.risk_level.value,
-        summary=report.summary,
-        findings=[f.to_dict() for f in report.findings],
-        generated_at=report.generated_at.isoformat()
+            try:
+                report = await generator.generate_report_from_email(email_dict)
+            except Exception as e:
+                logger.warning(f"Trust report generation failed for thread {thread_id}: {e}")
+                raise HTTPException(status_code=404, detail="Trust report unavailable for this email")
+
+    return _build_report_response(
+        report,
+        sender_email=sender_email,
+        sender_domain=sender_domain
     )
 
 
@@ -152,17 +239,11 @@ async def create_report(request: GenerateReportRequest, db=Depends(get_db)):
     # Generate report
     generator = ReportGenerator(db)
     report = await generator.generate_report(context)
-    
-    return TrustReportResponse(
-        report_id=report.report_id,
-        thread_id=report.context.thread_id,
-        sender_email=report.context.sender_email,
-        sender_domain=report.context.sender_domain,
-        score=report.score,
-        risk_level=report.risk_level.value,
-        summary=report.summary,
-        findings=[f.to_dict() for f in report.findings],
-        generated_at=report.generated_at.isoformat()
+
+    return _build_report_response(
+        report,
+        sender_email=request.sender_email,
+        sender_domain=request.sender_domain or ''
     )
 
 

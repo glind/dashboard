@@ -168,10 +168,10 @@ class JokesCollector(BaseCollector):
             from database import get_db
             
             db = get_db()
-            cursor = db.cursor()
-            cursor.execute("SELECT is_liked FROM jokes WHERE joke_id = ?", (joke_id,))
-            result = cursor.fetchone()
-            cursor.close()
+            with db.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT is_liked FROM jokes WHERE joke_id = ?", (joke_id,))
+                result = cursor.fetchone()
             
             return result[0] if result else False
             
@@ -185,20 +185,17 @@ class JokesCollector(BaseCollector):
             from database import get_db
             
             db = get_db()
-            cursor = db.cursor()
-            
-            cursor.execute("""
-                INSERT OR REPLACE INTO jokes (joke_id, is_liked, liked_at, fetched_at) 
-                VALUES (?, ?, ?, ?)
-            """, (
-                joke_id, 
-                is_liked, 
-                datetime.now().isoformat() if is_liked else None,
-                datetime.now().isoformat()
-            ))
-            
-            db.commit()
-            cursor.close()
+            with db.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT OR REPLACE INTO jokes (joke_id, is_liked, liked_at, fetched_at) 
+                    VALUES (?, ?, ?, ?)
+                """, (
+                    joke_id, 
+                    is_liked, 
+                    datetime.now().isoformat() if is_liked else None,
+                    datetime.now().isoformat()
+                ))
             
             return {
                 'success': True,
@@ -219,15 +216,15 @@ class JokesCollector(BaseCollector):
             from database import get_db
             
             db = get_db()
-            cursor = db.cursor()
-            cursor.execute("""
-                SELECT joke_id, liked_at, fetched_at 
-                FROM jokes 
-                WHERE is_liked = 1 
-                ORDER BY liked_at DESC
-            """)
-            results = cursor.fetchall()
-            cursor.close()
+            with db.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT joke_id, liked_at, fetched_at 
+                    FROM jokes 
+                    WHERE is_liked = 1 
+                    ORDER BY liked_at DESC
+                """)
+                results = cursor.fetchall()
             
             return [
                 {

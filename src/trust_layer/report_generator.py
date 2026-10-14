@@ -113,40 +113,42 @@ class ReportGenerator:
         Returns:
             TrustReport if found, None otherwise
         """
-        with self.db_manager.get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute('''
-                SELECT id, thread_id, primary_message_id, score, risk_level,
-                       summary, findings_json, signals_json, created_at
-                FROM trust_reports
-                WHERE thread_id = ?
-                ORDER BY created_at DESC
-                LIMIT 1
-            ''', (thread_id,))
-            
-            row = cursor.fetchone()
-            if not row:
-                return None
-            
-            # Reconstruct report from database row
-            findings_json = json.loads(row[6]) if row[6] else []
-            findings = [Finding(**f) for f in findings_json]
-            
-            # Create TrustReport from database data
-            from .models import TrustReport, RiskLevel
-            report = TrustReport(
-                report_id=row[0],
-                thread_id=row[1],
-                primary_message_id=row[2],
-                score=row[3],
-                risk_level=RiskLevel(row[4]),
-                summary=row[5] or '',
-                findings=findings,
-                signals=json.loads(row[7]) if row[7] else {},
-                created_at=datetime.fromisoformat(row[8])
-            )
-            
-            return report
+        try:
+            with self.db_manager.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT id, thread_id, primary_message_id, score, risk_level,
+                           summary, findings_json, signals_json, created_at
+                    FROM trust_reports
+                    WHERE thread_id = ?
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                ''', (thread_id,))
+                
+                row = cursor.fetchone()
+                if not row:
+                    return None
+                
+                findings_json = json.loads(row[6]) if row[6] else []
+                findings = [Finding(**f) for f in findings_json]
+                
+                from .models import TrustReport, RiskLevel
+                report = TrustReport(
+                    report_id=row[0],
+                    thread_id=row[1],
+                    primary_message_id=row[2],
+                    score=row[3],
+                    risk_level=RiskLevel(row[4]),
+                    summary=row[5] or '',
+                    findings=findings,
+                    signals=json.loads(row[7]) if row[7] else {},
+                    created_at=datetime.fromisoformat(row[8])
+                )
+                
+                return report
+        except Exception as e:
+            logger.warning(f"Unable to read trust report for thread {thread_id}: {e}")
+            return None
     
     def _save_report(self, report: TrustReport, claims: List[TrustClaim], context: VerificationContext):
         """Save report and claims to database."""
@@ -212,7 +214,7 @@ class ReportGenerator:
             except Exception as e:
                 conn.rollback()
                 logger.error(f"Failed to save report: {e}")
-                raise
+                return
     
     def list_reports(self, limit: int = 100, risk_level: Optional[str] = None) -> List[Dict[str, Any]]:
         """
@@ -225,7 +227,6 @@ class ReportGenerator:
         Returns:
             List of report summaries
         """
-        cursor = self.db_conn.cursor()
         with self.db_manager.get_connection() as conn:
             cursor = conn.cursor()
             
@@ -254,7 +255,9 @@ class ReportGenerator:
                     'risk_level': row[4],
                     'created_at': row[5]
                 })
-            
+            return reports
+        
+        return []
         
     def get_stats(self) -> Dict[str, Any]:
         with self.db_manager.get_connection() as conn:

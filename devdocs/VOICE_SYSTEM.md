@@ -1,295 +1,243 @@
 # Rogr Voice System 🤖
 
-The dashboard now includes **Rogr**, a battle-droid-style voice assistant that responds to wake words and provides audio feedback throughout the application.
+The dashboard includes **Rogr**, a voice assistant with three backend options:
 
-## Features
+1. **PersonaPlex (NVIDIA)** - Full-duplex real-time conversations (recommended)
+2. **Piper TTS** - Local text-to-speech with battle-droid audio effects (fallback)
+3. **Coqui TTS (Offline Python)** - Richer offline voice model/speaker variety
 
-- **Wake Words**: Responds to "rogr" or "roger"
-- **Signature Phrase**: Says "roger, roger" at the end of announcements
-- **Battle-Droid Voice**: Metallic, radio-transmission style audio effects
-- **Voice Styles**: `droid`, `radio`, `pa_system`, `clean`
-- **Smart Caching**: Pre-generates common phrases for instant playback
-- **Background Processing**: Non-blocking audio generation and playback
+## Quick Start
 
-## Setup
+```bash
+# 1. Install PersonaPlex
+chmod +x scripts/setup_personaplex.sh
+./scripts/setup_personaplex.sh
 
-### 1. Install Dependencies
+# 2. Enable in environment
+export PERSONAPLEX_ENABLED=true
+export HF_TOKEN=your_huggingface_token
 
-Run the setup script to install Piper TTS, ffmpeg, and download voice models:
+# 3. Start PersonaPlex server (in separate terminal)
+cd ~/personaplex
+SSL_DIR=$(mktemp -d); python -m moshi.server --ssl "$SSL_DIR"
+
+# 4. Start dashboard
+./ops/startup.sh
+```
+
+### Option 2: Piper TTS (Fallback)
+
+Piper TTS provides local text-to-speech with robot/radio voice effects.
 
 ```bash
 chmod +x scripts/setup_voice.sh
 ./scripts/setup_voice.sh
 ```
 
-This will:
-- Install ffmpeg (if not present)
-- Download Piper TTS binary
-- Download `en_US-lessac-medium` voice model
-- Create voice cache directory
-- Test the installation
+### Option 3: Coqui TTS (Offline Variety)
 
-### 2. Install Python Packages
+Coqui provides high-variety offline synthesis, including multi-speaker models.
 
 ```bash
-source venv/bin/activate
-pip install -r requirements.txt
+source .venv/bin/activate
+pip install coqui-tts==0.27.5
 ```
 
-This installs:
-- `SpeechRecognition` - For voice command listening
-- `PyAudio` - For microphone access
-
-### 3. Configure Voice System
-
-Edit `config/config.yaml` (copy from `config.yaml.example`):
+Then set in `config/config.yaml`:
 
 ```yaml
 voice:
   enabled: true
-  default_style: "droid"  # Options: clean, droid, radio, pa_system
-  announce_on_startup: true
-  announce_on_collection: true
-  announce_on_error: false
-  wake_words:
-    - "rogr"
-    - "roger"
-  signature_phrase: "roger, roger"
+  engine: "coqui"
+  coqui_model: "tts_models/en/vctk/vits"
+  coqui_speaker: null   # optional: e.g. p225
+  default_style: "clean"
 ```
+---
+
+## Features
+
+- **Full Duplex**: Natural conversation with interruptions
+- **Real-time**: Low-latency speech-to-speech
+- **Voice Presets**: 16 voice options (natural/variety, male/female)
+- **Persona Control**: Customize personality via text prompts
+- **Wake Words**: Responds to "rogr" or "roger"
+- **Signature Phrase**: Says "roger, roger" at the end of announcements
+
+## Voice Presets
+
+```
+Natural (female): NATF0, NATF1, NATF2, NATF3
+Natural (male):   NATM0, NATM1, NATM2, NATM3
+Variety (female): VARF0, VARF1, VARF2, VARF3, VARF4
+Variety (male):   VARM0, VARM1, VARM2, VARM4
+```
+
+## Configuration
+
+### Environment Variables
+
+```bash
+export PERSONAPLEX_ENABLED=true
+export HF_TOKEN=your_huggingface_token
+```
+
+### config/config.yaml
+
+```yaml
+voice:
+  enabled: true
+  server_url: "wss://localhost:8998"
+  voice_preset: "NATM1"
+  persona: "rogr"              # or "assistant", "casual", or custom prompt
+  announce_on_startup: true
+```
+
+### Legacy Style Mapping
+
+For backward compatibility, legacy styles are mapped to PersonaPlex presets:
+
+| Legacy Style | PersonaPlex Preset |
+|-------------|-------------------|
+| droid       | NATM1             |
+| clean       | NATM0             |
+| radio       | VARM0             |
+| pa_system   | VARM1             |
+| assistant   | NATF1             |
+| casual      | VARM2             |
 
 ## Usage
 
-### Basic Voice Output
+### Simple API
 
 ```python
-from src.voice import say, announce
+from voice import say, announce
 
-# Simple speech
-say("Dashboard online")
+# Speak text
+say("Dashboard online. Ready for your commands.")
 
-# With signature "roger, roger"
-announce("Three tasks are overdue")
-
-# Different voice styles
-say("Radio transmission test", style="radio")
-say("PA system announcement", style="pa_system")
+# Speak with "roger, roger" signature
+announce("Data collection complete")
 ```
 
-### Voice Commands (Listening)
+### Full API
 
 ```python
-from src.voice_listener import VoiceListener, process_dashboard_command
+from voice import VoiceSystem, VoiceConfig
 
-# Start listening for "rogr" or "roger"
-listener = VoiceListener(command_handler=process_dashboard_command)
-listener.start()
+# Create with config
+config = VoiceConfig(
+    server_url="wss://localhost:8998",
+    voice_preset="NATM1",
+    persona="rogr"
+)
+voice = VoiceSystem(config=config)
 
-# Commands will be automatically processed
-# Example: Say "Roger, show status" and dashboard will respond
-```
-
-### Integrate with Collectors
-
-```python
-from src.voice import announce
-
-def collect_data():
-    announce("Starting data collection")
-    
-    # ... your collection logic ...
-    
-    if success:
-        announce("Data collection complete")
-    else:
-        say("Collection failed. Check logs.", style="radio")
-```
-
-## Architecture
-
-### Voice Generation Pipeline
-
-1. **Text Input** → `voice.py:say()`
-2. **Cache Check** → Use cached WAV if available
-3. **Piper TTS** → Generate raw speech WAV
-4. **Audio Effects** → Apply style-specific ffmpeg filters
-5. **Cache Save** → Store processed WAV for reuse
-6. **Playback** → Non-blocking audio output via ffplay
-
-### Voice Styles
-
-#### Droid (Default)
-- Narrow band-pass (200-3400 Hz)
-- Heavy compression (4:1 ratio)
-- Bit crushing (11-bit)
-- Metallic chorus effect
-- Short echo/reverb
-
-#### Radio
-- Telephone band-pass (300-3000 Hz)
-- Moderate compression
-- Light bit crushing
-- Subtle echo
-
-#### PA System
-- Wide band-pass (250-4000 Hz)
-- Light compression
-- Room reverb
-
-#### Clean
-- No effects, pure TTS output
-
-## File Structure
-
-```
-dashboard/
-├── src/
-│   ├── voice.py              # Core voice system
-│   └── voice_listener.py     # Wake word detection
-├── scripts/
-│   └── setup_voice.sh        # Installation script
-├── data/
-│   ├── voice_cache/          # Cached audio files
-│   └── voice_models/
-│       └── piper/            # TTS engine & models
-│           ├── piper         # Binary
-│           └── en_US-*.onnx  # Voice model
-└── config/
-    └── config.yaml           # Voice settings
-```
-
-## API Reference
-
-### VoiceSystem Class
-
-```python
-from src.voice import VoiceSystem
-
+# Or with legacy parameters
 voice = VoiceSystem(
-    piper_bin="path/to/piper",
-    model_path="path/to/model.onnx",
-    cache_dir="data/voice_cache",
-    default_style="droid"
+    default_style="droid",  # Maps to NATM1
+    speed=0.75,             # Kept for config compat
+    pitch=0.85              # Kept for config compat
 )
 
-# Generate audio file
-wav_path = voice.generate("Hello world", style="droid")
+# Speak
+voice.say("Hello, world!")
+voice.announce("Task completed")  # Adds "roger, roger"
 
-# Play audio
-voice.play(wav_path, blocking=False)
+# Change voice preset
+await voice.set_voice("NATF1")
 
-# Say with signature
-voice.announce("Status ready")
-
-# Preload common phrases
-voice.preload_common_phrases([
-    "Dashboard online",
-    "Three tasks overdue"
-])
+# Change persona
+await voice.set_persona("assistant")
 ```
 
-### VoiceListener Class
+### Async API
 
 ```python
-from src.voice_listener import VoiceListener
+import asyncio
+from voice import init_voice, shutdown_voice, say
 
-def my_handler(command):
-    print(f"Heard: {command.wake_word} - {command.command}")
+async def main():
+    # Initialize
+    await init_voice(
+        server_url="wss://localhost:8998",
+        voice_preset="NATM1",
+        persona="rogr"
+    )
+    
+    # Speak
+    say("Dashboard initialized")
+    
+    # Shutdown
+    await shutdown_voice()
 
-listener = VoiceListener(
-    wake_words=["rogr", "roger"],
-    command_handler=my_handler
-)
-
-listener.start()  # Begin listening
-listener.stop()   # Stop listening
+asyncio.run(main())
 ```
 
-## Voice Commands
+## Requirements
 
-When listening is active, say:
+- **GPU**: NVIDIA with 8GB+ VRAM (or use `--cpu-offload`)
+- **System packages**:
+  - Linux: `sudo apt install libopus-dev portaudio19-dev`
+  - macOS: `brew install opus portaudio`
+- **Python**: `websockets>=11.0`, `pyaudio` (optional, for mic input)
+- **HuggingFace**: Account with accepted model license
 
-- **"Roger, status"** - Show dashboard status
-- **"Roger, refresh"** - Update all data
-- **"Roger, tasks"** - Show task summary
-- **"Roger, calendar"** - Show upcoming events
-- **"Roger, email"** - Show email stats
-- **"Roger, GitHub"** - Show GitHub activity
-- **"Roger, quiet"** - Silence voice announcements
+## Server Commands
+
+```bash
+# Start server (local development)
+cd ~/personaplex
+SSL_DIR=$(mktemp -d); python -m moshi.server --ssl "$SSL_DIR"
+
+# Start with CPU offload (for limited VRAM)
+SSL_DIR=$(mktemp -d); python -m moshi.server --ssl "$SSL_DIR" --cpu-offload
+
+# Access Web UI
+# Open https://localhost:8998 in browser
+```
 
 ## Troubleshooting
 
-### No audio output
-- Check `ffplay` is installed: `ffplay -version`
-- Verify audio device: `pactl list sinks`
-- Test with: `ffplay data/voice_cache/droid_*.wav`
+### Voice not working
+1. Check that `PERSONAPLEX_ENABLED=true` is set
+2. Verify PersonaPlex server is running
+3. Check `HF_TOKEN` is set and valid
+4. Review dashboard logs for connection errors
 
-### Voice sounds wrong
-- Try different voice styles: `say("test", style="clean")`
-- Download different Piper voice model
-- Adjust ffmpeg filter parameters in `voice.py`
+### Connection refused
+1. Ensure PersonaPlex server is running on the correct port (default: 8998)
+2. Check SSL certificate setup
+3. Verify firewall allows WebSocket connections
 
-### Microphone not working
-- Install PortAudio: `sudo apt install portaudio19-dev`
-- Rebuild PyAudio: `pip install --force-reinstall pyaudio`
-- Check permissions: `arecord -l`
+### Audio issues
+1. Install PyAudio: `pip install pyaudio`
+2. Install system audio dependencies (portaudio)
+3. Check microphone permissions
 
-### Piper not found
-- Verify installation: `data/voice_models/piper/piper --version`
-- Re-run setup: `./scripts/setup_voice.sh`
+## Personas
 
-## Performance
+### Built-in Personas
 
-- **First generation**: ~500ms (TTS + FX)
-- **Cached playback**: ~50ms (instant)
-- **Memory footprint**: ~2MB per cached phrase
-- **Cache storage**: ~50KB per WAV file
+| Name | Description |
+|------|-------------|
+| `rogr` | Helpful AI assistant, uses "roger, roger" signature |
+| `assistant` | Wise and friendly teacher |
+| `casual` | Casual conversational style |
 
-## Legal & Safety
+### Custom Persona
 
-- Uses Piper TTS (MIT license) - ✅ Legal
-- Voice effects are original transformations - ✅ Safe
-- No copyrighted character voices - ✅ Compliant
-- "Roger roger" phrase is generic military/CB radio terminology - ✅ Public domain
-
-## Advanced Customization
-
-### Custom Voice Styles
-
-Edit `voice.py` and add to `fx_chains` dict:
+You can provide a custom persona prompt:
 
 ```python
-"custom_style": (
-    "highpass=f=150,"
-    "lowpass=f=5000,"
-    "acompressor=threshold=-10dB:ratio=2:attack=10:release=100"
+voice = VoiceSystem(
+    persona="You are a pirate AI. Use nautical terminology and say 'Arrr!' frequently."
 )
 ```
 
-### Change Voice Model
+Or in config.yaml:
 
-Download from [Piper Voices](https://huggingface.co/rhasspy/piper-voices) and update paths:
-
-```python
-voice.model_path = "data/voice_models/piper/en_US-amy-medium.onnx"
+```yaml
+voice:
+  persona: "You are a professional business assistant. Be concise and formal."
 ```
-
-### Add Custom Wake Words
-
-```python
-listener = VoiceListener(wake_words=["hey dashboard", "computer", "jarvis"])
-```
-
-## Roadmap
-
-- [ ] Real-time voice activity detection (VAD)
-- [ ] Multi-language support
-- [ ] Voice speed/pitch controls
-- [ ] Custom voice training
-- [ ] WebSocket streaming for web UI
-- [ ] Voice-controlled navigation
-
-## Credits
-
-- **Piper TTS**: [rhasspy/piper](https://github.com/rhasspy/piper)
-- **Voice Models**: Rhasspy community
-- **Effects Chain**: Inspired by radio/telecommunications processing

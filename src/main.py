@@ -14115,10 +14115,44 @@ async def prefetch_garfield_archive(request: Request):
         return {"success": False, "error": str(e)}
 
 
+# GoComics strips are fetched straight from gocomics.com by their collectors (which also
+# save each day's strip to the archive). comicsrss.com stopped updating in June 2025, so
+# RSS is only a fallback now, then the local archive.
+_GOCOMICS_COLLECTORS = {
+    "calvin": ("collectors.calvin_collector", "CalvinCollector"),
+    "calvinandhobbes": ("collectors.calvin_collector", "CalvinCollector"),
+    "peanuts": ("collectors.peanuts_collector_v2", "PeanutsCollectorV2"),
+    "foxtrot": ("collectors.foxtrot_collector", "FoxTrotCollector"),
+    "bloomcounty": ("collectors.bloomcounty_collector", "BloomCountyCollector"),
+    "bloom-county": ("collectors.bloomcounty_collector", "BloomCountyCollector"),
+}
+
+
+async def _gocomics_daily(comic_id: str) -> Optional[Dict[str, Any]]:
+    """Today's strip via the GoComics collector (archived on success), or None."""
+    target = _GOCOMICS_COLLECTORS.get(comic_id)
+    if not target:
+        return None
+    try:
+        import importlib
+
+        cls = getattr(importlib.import_module(target[0]), target[1])
+        res = await asyncio.to_thread(lambda: cls().get_daily())
+        if res and res.get("success") and (res.get("comic") or {}).get("image_url"):
+            return res
+        logger.warning(f"GoComics collector for {comic_id} returned no comic: {res}")
+    except Exception as e:  # noqa: BLE001 - fall back to RSS/archive
+        logger.warning(f"GoComics collector for {comic_id} failed: {e}")
+    return None
+
+
 @app.get("/api/comics/{comic_id}/daily")
 async def get_comic_daily(comic_id: str):
     """Generic endpoint to get daily comic from any configured comic."""
     try:
+        fresh = await _gocomics_daily(comic_id)
+        if fresh:
+            return fresh
         # Route to appropriate handler based on comic ID
         if comic_id == "garfield":
             return await get_random_garfield()
@@ -14240,6 +14274,10 @@ async def get_peanuts(date: Optional[str] = None, save: bool = False):
                 dt = datetime.strptime(date, "%Y-%m-%d")
             except Exception:
                 dt = None
+        if dt is None:
+            fresh = await _gocomics_daily("peanuts")
+            if fresh:
+                return fresh
         collector = PeanutsCollector()
         res = await collector.get_comic(date=dt, save=save)
         if res.get("success") and res.get("comic", {}).get("image_url"):

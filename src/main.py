@@ -13656,7 +13656,7 @@ async def get_garfield_daily():
         if favorites_file.exists():
             with open(favorites_file, 'r') as f:
                 favorites = json.load(f)
-                is_favorite = any(fav['id'] == comic_id for fav in favorites)
+                is_favorite = any(fav.get('id') == comic_id for fav in favorites)
 
         comic = {
             "id": comic_id,
@@ -13711,7 +13711,7 @@ async def toggle_garfield_favorite(request: Request):
             with open(favorites_file, 'r') as f:
                 favorites = json.load(f)
 
-        existing_idx = next((i for i, fav in enumerate(favorites) if fav['id'] == comic_id), None)
+        existing_idx = next((i for i, fav in enumerate(favorites) if fav.get('id') == comic_id), None)
 
         if existing_idx is not None:
             favorites.pop(existing_idx)
@@ -13752,7 +13752,7 @@ async def remove_garfield_favorite(request: Request):
         with open(favorites_file, 'r') as f:
             favorites = json.load(f)
 
-        favorites = [fav for fav in favorites if fav['id'] != comic_id]
+        favorites = [fav for fav in favorites if fav.get('id') != comic_id]
 
         with open(favorites_file, 'w') as f:
             json.dump(favorites, f, indent=2)

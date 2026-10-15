@@ -121,7 +121,7 @@ class BloomCountyCollector:
     
     def _add_to_cache(self, comic: Dict[str, Any]):
         """Add comic to cache if not already present."""
-        existing_ids = {c['id'] for c in self.cache.get('comics', [])}
+        existing_ids = {c.get('id') or c.get('date') for c in self.cache.get('comics', [])}
         if comic['id'] not in existing_ids:
             self.cache['comics'].append(comic)
             self._save_cache()
@@ -186,7 +186,7 @@ class BloomCountyCollector:
         skipped = 0
         
         # Get existing comic IDs
-        existing_ids = {c['id'] for c in self.cache.get('comics', [])}
+        existing_ids = {c.get('id') or c.get('date') for c in self.cache.get('comics', [])}
         
         current_date = end_date
         while current_date >= start_date:

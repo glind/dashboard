@@ -3,6 +3,7 @@ AI Provider implementations for multiple backends (Ollama, OpenAI, Gemini).
 """
 
 import json
+import os
 import logging
 import hashlib
 import asyncio
@@ -78,6 +79,14 @@ class OllamaProvider(AIProvider):
 
 Keep answers concise (2-3 sentences). Be helpful and friendly."""
     
+    def _think(self) -> bool:
+        """Thinking models (gemma4, qwen3, deepseek-r1) spend the reply-token budget on
+        hidden reasoning — with a short cap the answer comes back empty. Off by default;
+        enable with provider config {"think": true} or OLLAMA_THINK=true."""
+        if isinstance(self.config, dict) and 'think' in self.config:
+            return bool(self.config['think'])
+        return os.getenv('OLLAMA_THINK', '').lower() in ('1', 'true', 'yes')
+
     def _chat_options(self) -> Optional[Dict[str, Any]]:
         """Ollama generation options.
 
@@ -131,6 +140,7 @@ Keep answers concise (2-3 sentences). Be helpful and friendly."""
                     'model': self.model_name,
                     'messages': messages,
                     'stream': stream,
+                    'think': self._think(),
                 }
                 chat_options = self._chat_options()
                 if chat_options:
@@ -164,7 +174,8 @@ Keep answers concise (2-3 sentences). Be helpful and friendly."""
                                     retry_payload = {
                                         'model': fallback_model,
                                         'messages': messages,
-                                        'stream': stream
+                                        'stream': stream,
+                                        'think': self._think(),
                                     }
                                     async with session.post(self._endpoint_url('api/chat'), json=retry_payload) as retry_response:
                                         if retry_response.status == 200:
@@ -236,7 +247,8 @@ Keep answers concise (2-3 sentences). Be helpful and friendly."""
                         retry_payload = {
                             'model': fallback_model,
                             'messages': messages,
-                            'stream': stream
+                            'stream': stream,
+                            'think': self._think(),
                         }
                         async with retry_session.post(self._endpoint_url('api/chat'), json=retry_payload) as retry_response:
                             if retry_response.status == 200:
@@ -294,7 +306,8 @@ Keep answers concise (2-3 sentences). Be helpful and friendly."""
             payload = {
                 'model': model_name or self.model_name,
                 'prompt': prompt,
-                'stream': stream
+                'stream': stream,
+                'think': self._think(),
             }
             
             generate_urls = [self._endpoint_url('api/generate'), self._endpoint_url('generate')]

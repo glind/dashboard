@@ -465,28 +465,26 @@ async def delete_voice_settings():
     db.delete_setting('voice_model_path')
     return {"success": True, "message": "Voice model and model_path deleted."}
 
-# Register remaining custom module routers
-try:
-    from modules.music_news.endpoints import router as music_news_router
-    from modules.vanity_alerts.endpoints import router as vanity_alerts_router
-    from modules.comms.endpoints import router as comms_router
-    from modules.foundershield.endpoints import router as foundershield_router
-    from modules.leads.endpoints import router as leads_router
-    from modules.ai_summarizer.endpoints import router as ai_summarizer_router
-    from modules.providers.endpoints import router as providers_router
-    from modules.providers.oauth import router as providers_oauth_router
-    
-    app.include_router(music_news_router)
-    app.include_router(vanity_alerts_router)
-    app.include_router(comms_router)
-    app.include_router(foundershield_router, prefix="/foundershield")
-    app.include_router(leads_router)
-    app.include_router(ai_summarizer_router)
-    app.include_router(providers_router)
-    app.include_router(providers_oauth_router)
-    logging.info("✅ Custom modules registered (music_news, vanity_alerts, comms, foundershield, leads, ai_summarizer, providers)")
-except ImportError as e:
-    logging.warning(f"Could not load non-task custom modules: {e}")
+# Register remaining custom module routers — each on its own, so one missing
+# optional dependency (e.g. email-validator for comms) can't take the others down.
+import importlib as _importlib
+
+for _mod_path, _prefix in (
+    ("modules.music_news.endpoints", ""),
+    ("modules.vanity_alerts.endpoints", ""),
+    ("modules.comms.endpoints", ""),
+    ("modules.foundershield.endpoints", "/foundershield"),
+    ("modules.leads.endpoints", ""),
+    ("modules.ai_summarizer.endpoints", ""),
+    ("modules.providers.endpoints", ""),
+    ("modules.providers.oauth", ""),
+):
+    try:
+        _router = _importlib.import_module(_mod_path).router
+        app.include_router(_router, prefix=_prefix) if _prefix else app.include_router(_router)
+        logging.info(f"✅ Registered {_mod_path}")
+    except Exception as e:  # noqa: BLE001 - optional module
+        logging.warning(f"Could not load {_mod_path}: {e}")
 
 # Register Trust Layer API
 try:

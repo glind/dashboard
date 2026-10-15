@@ -54,3 +54,7 @@ youtube-search-python>=1.6.6
 # - requests (using httpx instead)
 # - schedule (cron handles scheduling in Docker)
 # - pytest, pytest-asyncio (testing - not needed in production)
+
+# Needed by modules.comms (EmailStr) and the focus-playlists router
+email-validator==2.1.1
+rapidfuzz==3.9.7

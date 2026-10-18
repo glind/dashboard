@@ -14164,6 +14164,34 @@ async def _gocomics_daily(comic_id: str) -> Optional[Dict[str, Any]]:
     return None
 
 
+_ARCHIVE_ALIASES = {"calvinandhobbes": "calvin", "bloom-county": "bloomcounty"}
+
+
+@app.get("/api/comics/{comic_id}/history")
+async def get_comic_history(comic_id: str, limit: int = 200):
+    """Archived strips for a comic, oldest → newest, for paging back in the viewer."""
+    series = _ARCHIVE_ALIASES.get(comic_id, comic_id)
+    archive_file = project_root / "data" / f"{series}_archive.json"
+    if not archive_file.exists():
+        return {"success": True, "comics": []}
+    try:
+        payload = json.loads(archive_file.read_text())
+    except Exception as e:  # noqa: BLE001
+        return {"success": False, "error": f"archive unreadable: {e}", "comics": []}
+    entries = payload.get("comics", []) if isinstance(payload, dict) else payload
+    by_date: Dict[str, Dict[str, Any]] = {}
+    for c in entries:
+        if isinstance(c, dict) and c.get("image_url") and c.get("date"):
+            by_date[str(c["date"])] = {  # newer entry for the same date wins
+                "title": c.get("title") or f"{series.title()} {c['date']}",
+                "image_url": c["image_url"],
+                "link": c.get("link") or c.get("page_url") or "",
+                "date": str(c["date"]),
+            }
+    comics = [by_date[d] for d in sorted(by_date)][-max(1, min(limit, 2000)):]
+    return {"success": True, "series": series, "comics": comics}
+
+
 @app.get("/api/comics/{comic_id}/daily")
 async def get_comic_daily(comic_id: str):
     """Generic endpoint to get daily comic from any configured comic."""

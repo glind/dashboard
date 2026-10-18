@@ -3843,7 +3843,7 @@
                 if (image) {
                     // Make comic clickable to open viewer
                     display.innerHTML = `
-                        <div onclick="openComicViewer('${comic.title || choice}', '${image}', '${link}', '${comic.date || ''}')" class="cursor-pointer hover:opacity-90 transition-opacity">
+                        <div onclick="openComicWithHistory('${choice}', '${comic.title || choice}', '${image}', '${link}', '${comic.date || ''}')" class="cursor-pointer hover:opacity-90 transition-opacity">
                             <img src="${image}" alt="Comic" class="w-full rounded-lg border border-orange-600 max-h-64 object-contain bg-gray-900">
                             <p class="text-xs text-center text-gray-400 mt-2"><i class="fas fa-expand mr-1"></i>Click to view full size</p>
                         </div>`;
@@ -3856,11 +3856,43 @@
             }
         }
 
+        // Open the viewer on a strip with that comic's archive loaded, so ◀ pages back in time.
+        async function openComicWithHistory(choice, title, image, link, date) {
+            let list = [];
+            try {
+                const resp = await fetch(`/api/comics/${encodeURIComponent(choice)}/history`);
+                const data = await resp.json();
+                list = (data.comics || []);
+            } catch (e) { console.warn('Comic history unavailable:', e); }
+            let idx = list.findIndex(c => c.date === date);
+            if (idx < 0) { list.push({ title, image_url: image, link, date }); idx = list.length - 1; }
+            openComicViewer(title, image, link, date, list, idx);
+        }
+
         async function showComicsArchive() {
             const modal = document.getElementById('garfield-archive-modal');
             const content = document.getElementById('garfield-archive-content');
             modal.classList.remove('hidden');
             content.innerHTML = '<div class="col-span-full text-gray-400 text-center py-8">Loading...</div>';
+            const sel = document.getElementById('comic-select');
+            const choice = sel ? sel.value : 'favorites';
+            if (choice && choice !== 'favorites' && choice !== 'garfield') {
+                // The selected comic's own archive, newest first; click to page through it.
+                try {
+                    const resp = await fetch(`/api/comics/${encodeURIComponent(choice)}/history`);
+                    const data = await resp.json();
+                    const oldestFirst = data.comics || [];
+                    if (oldestFirst.length) {
+                        window.comicArchiveList = oldestFirst;
+                        content.innerHTML = oldestFirst.map((comic, i) => ({ comic, i })).reverse().map(({ comic, i }) => `
+                            <div class="bg-gray-900 rounded-lg border border-orange-600 overflow-hidden cursor-pointer hover:opacity-90 transition-opacity" onclick="openComicFromArchive(${i})">
+                                <img src="${comic.image_url}" alt="Comic" loading="lazy" class="w-full h-40 object-cover">
+                                <div class="p-2 text-xs text-orange-300">${comic.date || ''}</div>
+                            </div>`).join('');
+                        return;
+                    }
+                } catch (e) { console.error('Archive error:', e); }
+            }
             try {
                 const resp = await fetch('/api/comics/favorites');
                 const data = await resp.json();

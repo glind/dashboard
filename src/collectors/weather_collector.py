@@ -59,11 +59,89 @@ class WeatherCollector:
         self.location_name = self.settings.weather.location
         self.units = self.settings.weather.units
     
+    # -- Open-Meteo: free, keyless, used when no OpenWeather key is configured --------
+
+    _WMO = {  # WMO weather code → (description, OpenWeather-style icon for the UI)
+        0: ("Clear Sky", "01"), 1: ("Mainly Clear", "02"), 2: ("Partly Cloudy", "03"),
+        3: ("Overcast", "04"), 45: ("Fog", "50"), 48: ("Freezing Fog", "50"),
+        51: ("Light Drizzle", "09"), 53: ("Drizzle", "09"), 55: ("Heavy Drizzle", "09"),
+        56: ("Freezing Drizzle", "09"), 57: ("Freezing Drizzle", "09"),
+        61: ("Light Rain", "10"), 63: ("Rain", "10"), 65: ("Heavy Rain", "10"),
+        66: ("Freezing Rain", "13"), 67: ("Freezing Rain", "13"),
+        71: ("Light Snow", "13"), 73: ("Snow", "13"), 75: ("Heavy Snow", "13"),
+        77: ("Snow Grains", "13"), 80: ("Rain Showers", "09"), 81: ("Rain Showers", "09"),
+        82: ("Violent Rain Showers", "09"), 85: ("Snow Showers", "13"),
+        86: ("Heavy Snow Showers", "13"), 95: ("Thunderstorm", "11"),
+        96: ("Thunderstorm with Hail", "11"), 99: ("Thunderstorm with Hail", "11"),
+    }
+
+    def _has_openweather_key(self) -> bool:
+        return bool(self.api_key) and self.api_key != 'your_openweather_api_key'
+
+    async def _open_meteo(self) -> Optional[tuple]:
+        """(WeatherData, [ForecastData]) from Open-Meteo, cached for 10 minutes."""
+        cached = getattr(self, '_om_cache', None)
+        if cached and (datetime.now() - cached[0]).total_seconds() < 600:
+            return cached[1]
+        imperial = str(getattr(self, 'units', 'imperial')).lower() == 'imperial'
+        params = {
+            'latitude': self.lat, 'longitude': self.lon, 'timezone': 'auto', 'forecast_days': 5,
+            'current': 'temperature_2m,apparent_temperature,relative_humidity_2m,pressure_msl,'
+                       'weather_code,wind_speed_10m,wind_direction_10m,uv_index,visibility,is_day',
+            'daily': 'temperature_2m_max,temperature_2m_min,weather_code,'
+                     'precipitation_probability_max',
+            'temperature_unit': 'fahrenheit' if imperial else 'celsius',
+            'wind_speed_unit': 'mph' if imperial else 'kmh',
+        }
+        try:
+            timeout = aiohttp.ClientTimeout(total=15)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get('https://api.open-meteo.com/v1/forecast',
+                                       params=params) as response:
+                    if response.status != 200:
+                        logger.warning(f"Open-Meteo returned status {response.status}")
+                        return None
+                    data = await response.json()
+        except Exception as e:
+            logger.warning(f"Open-Meteo request failed: {e}")
+            return None
+        cur = data.get('current', {})
+        desc, icon = self._WMO.get(int(cur.get('weather_code', 0)), ("Unknown", "03"))
+        current = WeatherData(
+            temperature=round(cur.get('temperature_2m', 0), 1),
+            feels_like=round(cur.get('apparent_temperature', 0), 1),
+            humidity=int(cur.get('relative_humidity_2m', 0)),
+            pressure=int(round(cur.get('pressure_msl', 0))),
+            description=desc,
+            icon=icon + ('d' if cur.get('is_day', 1) else 'n'),
+            wind_speed=round(cur.get('wind_speed_10m', 0), 1),
+            wind_direction=int(cur.get('wind_direction_10m', 0)),
+            visibility=round(cur.get('visibility', 10000) / 1000, 1),
+            uv_index=cur.get('uv_index'),
+            location=self.location_name,
+            timestamp=datetime.now(),
+        )
+        daily = data.get('daily', {})
+        forecast = []
+        for i, day in enumerate(daily.get('time', [])[:5]):
+            d_desc, d_icon = self._WMO.get(int(daily['weather_code'][i]), ("Unknown", "03"))
+            forecast.append(ForecastData(
+                date=datetime.strptime(day, '%Y-%m-%d'),
+                temperature_high=daily['temperature_2m_max'][i],
+                temperature_low=daily['temperature_2m_min'][i],
+                description=d_desc, icon=d_icon + 'd',
+                precipitation_chance=int(daily['precipitation_probability_max'][i] or 0),
+            ))
+        self._om_cache = (datetime.now(), (current, forecast))
+        return current, forecast
+
     async def get_current_weather(self) -> Optional[WeatherData]:
         """Get current weather data."""
-        if not self.api_key or self.api_key == 'your_openweather_api_key':
-            # Return mock data if no API key
-            return self._get_mock_weather()
+        if not self._has_openweather_key():
+            om = await self._open_meteo()
+            self._source = 'open-meteo' if om else 'mock'
+            return om[0] if om else self._get_mock_weather()
+        self._source = 'openweather'
         
         try:
             async with aiohttp.ClientSession() as session:
@@ -89,9 +167,9 @@ class WeatherCollector:
     
     async def get_forecast(self, days: int = 5) -> list[ForecastData]:
         """Get weather forecast for the next few days."""
-        if not self.api_key or self.api_key == 'your_openweather_api_key':
-            # Return mock data if no API key
-            return self._get_mock_forecast()
+        if not self._has_openweather_key():
+            om = await self._open_meteo()
+            return om[1] if om else self._get_mock_forecast()
         
         try:
             async with aiohttp.ClientSession() as session:
@@ -256,9 +334,11 @@ class WeatherCollector:
                 }
                 
                 # Add API status info
-                if not self.api_key or self.api_key == 'your_openweather_api_key':
+                source = getattr(self, '_source', 'openweather')
+                result['source'] = source
+                if source == 'mock':
                     result['api_status'] = 'mock_data'
-                    result['setup_note'] = 'Get a free API key from https://openweathermap.org/api and set OPENWEATHER_API_KEY environment variable for real weather data'
+                    result['setup_note'] = 'Weather service unreachable — showing placeholder data'
                 else:
                     result['api_status'] = 'live_data'
                 

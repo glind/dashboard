@@ -14128,21 +14128,35 @@ _GOCOMICS_COLLECTORS = {
 }
 
 
+_GOCOMICS_BACKOFF: Dict[str, datetime] = {}  # series → don't hit GoComics again before this
+
+
 async def _gocomics_daily(comic_id: str) -> Optional[Dict[str, Any]]:
-    """Today's strip via the GoComics collector (archived on success), or None."""
+    """Today's strip: from the archive if already fetched today, else from GoComics once.
+
+    GoComics rate-limits (HTTP 429) clients that fetch on every page load, so each
+    strip is fetched at most once a day and failures back off for 30 minutes.
+    """
     target = _GOCOMICS_COLLECTORS.get(comic_id)
     if not target:
         return None
     try:
         import importlib
 
-        cls = getattr(importlib.import_module(target[0]), target[1])
-        res = await asyncio.to_thread(lambda: cls().get_daily())
+        collector = getattr(importlib.import_module(target[0]), target[1])()
+        today = datetime.now().strftime("%Y-%m-%d")
+        for entry in reversed((getattr(collector, "cache", {}) or {}).get("comics", [])):
+            if entry.get("date") == today and entry.get("image_url"):
+                return {"success": True, "comic": entry, "cached": True}
+        if _GOCOMICS_BACKOFF.get(comic_id, datetime.min) > datetime.now():
+            return None
+        res = await asyncio.to_thread(collector.get_daily)
         if res and res.get("success") and (res.get("comic") or {}).get("image_url"):
             return res
         logger.warning(f"GoComics collector for {comic_id} returned no comic: {res}")
     except Exception as e:  # noqa: BLE001 - fall back to RSS/archive
         logger.warning(f"GoComics collector for {comic_id} failed: {e}")
+    _GOCOMICS_BACKOFF[comic_id] = datetime.now() + timedelta(minutes=30)
     return None
 
 

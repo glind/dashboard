@@ -47,7 +47,7 @@ class PeanutsCollector:
 
     async def get_comic(self, date: Optional[datetime] = None, save: bool = False) -> Dict[str, Any]:
         url = self._build_url(date)
-        async with httpx.AsyncClient(timeout=self.timeout, headers={'User-Agent': UA, 'Accept-Language': 'en-US,en;q=0.9'}) as client:
+        async with httpx.AsyncClient(timeout=self.timeout, headers={'User-Agent': UA, 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8', 'Accept-Language': 'en-US,en;q=0.9'}) as client:
             r = await client.get(url, follow_redirects=True)
             r.raise_for_status()
             image_url = self._extract_image_url(r.text)

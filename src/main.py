@@ -14145,18 +14145,22 @@ async def _gocomics_daily(comic_id: str) -> Optional[Dict[str, Any]]:
 
         collector = getattr(importlib.import_module(target[0]), target[1])()
         today = datetime.now().strftime("%Y-%m-%d")
-        for entry in reversed((getattr(collector, "cache", {}) or {}).get("comics", [])):
-            if entry.get("date") == today and entry.get("image_url"):
-                return {"success": True, "comic": entry, "cached": True}
-        if _GOCOMICS_BACKOFF.get(comic_id, datetime.min) > datetime.now():
-            return None
-        res = await asyncio.to_thread(collector.get_daily)
-        if res and res.get("success") and (res.get("comic") or {}).get("image_url"):
-            return res
-        logger.warning(f"GoComics collector for {comic_id} returned no comic: {res}")
+        archived = [c for c in (getattr(collector, "cache", {}) or {}).get("comics", [])
+                    if c.get("image_url") and c.get("date")]
+        newest = max(archived, key=lambda c: str(c["date"]), default=None)
+        if newest and newest["date"] == today:
+            return {"success": True, "comic": newest, "cached": True}
+        if _GOCOMICS_BACKOFF.get(comic_id, datetime.min) <= datetime.now():
+            res = await asyncio.to_thread(collector.get_daily)
+            if res and res.get("success") and (res.get("comic") or {}).get("image_url"):
+                return res
+            logger.warning(f"GoComics collector for {comic_id} returned no comic: {res}")
+            _GOCOMICS_BACKOFF[comic_id] = datetime.now() + timedelta(minutes=30)
+        if newest:  # GoComics unavailable/rate-limited: the most recent strip we have
+            return {"success": True, "comic": newest, "cached": True, "stale": True}
     except Exception as e:  # noqa: BLE001 - fall back to RSS/archive
         logger.warning(f"GoComics collector for {comic_id} failed: {e}")
-    _GOCOMICS_BACKOFF[comic_id] = datetime.now() + timedelta(minutes=30)
+        _GOCOMICS_BACKOFF[comic_id] = datetime.now() + timedelta(minutes=30)
     return None
 
 

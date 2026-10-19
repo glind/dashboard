@@ -248,7 +248,9 @@ app.add_middleware(
 # Serve static files for PWA and frontend assets from both locations
 from fastapi.staticfiles import StaticFiles
 import os
-static_dirs = ["static", "src/static"]
+# src/static first: the first /static mount wins, and the old root static/ only
+# holds a few legacy copies (it shadowed dashboard.js etc. when run from the repo root).
+static_dirs = ["src/static", "static"]
 for static_dir in static_dirs:
     if os.path.isdir(static_dir):
         app.mount(f"/static", StaticFiles(directory=static_dir), name=f"static-{static_dir}")

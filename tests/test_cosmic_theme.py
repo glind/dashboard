@@ -19,7 +19,9 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from config import theme  # noqa: E402
 from config.buster_seasons import DEFAULT_WINDOWS, resolve_season  # noqa: E402
-from config.skin_loader import BUILTIN_SKINS_DIR, SkinLoader  # noqa: E402
+from config.skin_loader import (  # noqa: E402
+    BUILTIN_SKINS_DIR, DEFAULT_SKIN, SUPPORTED_SKINS, SkinLoader, resolve_skin_name,
+)
 
 DS_DIR = ROOT / "src" / "static" / "ds"
 SEASONS = ["none", "halloween", "thanksgiving", "winter", "newyear"]
@@ -45,7 +47,7 @@ def test_cosmic_is_a_builtin_skin(tmp_path):
     assert data["quotes"]["greetings"]
 
 
-def test_personal_skins_still_load_and_can_override_builtin(tmp_path):
+def test_personal_cosmic_overrides_builtin_and_old_skins_are_hidden(tmp_path):
     personal = tmp_path / "skins"
     (personal / "roger").mkdir(parents=True)
     (personal / "roger" / "skin.yaml").write_text(yaml.safe_dump({"identity": {"display_name": "R0-GR"}}))
@@ -53,18 +55,25 @@ def test_personal_skins_still_load_and_can_override_builtin(tmp_path):
     (personal / "cosmic" / "skin.yaml").write_text(yaml.safe_dump({"identity": {"display_name": "My Cosmic"}}))
     loader = SkinLoader(skins_dir=personal)
     names = {s["name"]: s for s in loader.list_available_skins()}
-    assert names["roger"]["builtin"] is False
+    assert list(names) == ["cosmic"]  # Cosmic is the only theme
     assert names["cosmic"]["display_name"] == "My Cosmic" and names["cosmic"]["builtin"] is False
     assert loader.load_skin("cosmic").builtin is False
-    assert loader.load_skin("../etc") is None
+    assert loader.load_skin("../etc").name == "cosmic"
 
 
-def test_repo_skins_plus_builtin():
-    loader = SkinLoader(skins_dir=ROOT / "data" / "skins")
-    names = [s["name"] for s in loader.list_available_skins()]
-    for name in ("roger", "alice", "dracula", "jedi", "cosmic"):
-        assert name in names
-    assert BUILTIN_SKINS_DIR.is_dir()
+@pytest.mark.parametrize("old", ["roger", "dracula", "alice", "jedi", "demon", "", None, "../etc"])
+def test_removed_skins_resolve_to_cosmic(tmp_path, old):
+    loader = SkinLoader(skins_dir=tmp_path / "personal")
+    assert resolve_skin_name(old) == "cosmic"
+    assert loader.load_skin(old).name == "cosmic"
+    assert loader.set_active_skin(old) and loader.active_skin_name == "cosmic"
+    assert loader.get_active_skin().name == "cosmic"
+
+
+def test_default_skin_is_cosmic(tmp_path):
+    assert DEFAULT_SKIN == "cosmic" and SUPPORTED_SKINS == ("cosmic",)
+    assert SkinLoader(skins_dir=tmp_path / "p").get_active_skin().name == "cosmic"
+    assert theme.UI_THEMES == ("cosmic",)
 
 
 # ---------------------------------------------------------------- seasons
@@ -143,7 +152,8 @@ def test_inject_theme_sets_html_attributes_and_calendar():
         "ui": "family", "season": {"season": "winter", "variant": "newyear", "source": "query", "choice": "auto"},
         "windows": theme.default_windows(), "enabled": True, "skin": "cosmic",
     })
-    assert '<html lang="en" class="h-full" data-ui="family" data-season="winter" data-season-variant="newyear" data-season-lock>' in out
+    assert ('<html lang="en" class="h-full" data-ui="family" data-theme="cosmic" data-season="winter" '
+            'data-season-variant="newyear" data-season-lock>') in out
     assert 'id="buster-seasons"' in out and '"requestedSkin": "cosmic"' in out
     assert "<!--DASH_THEME-->" not in out
     assert theme.safe_name('cosmic"><script>') is None
@@ -206,3 +216,49 @@ def test_thanksgiving_window_ends_on_thanksgiving_day(year, day):
     on = theme.resolve(today=dt.date(year, 11, day), windows=windows)
     after = theme.resolve(today=dt.date(year, 11, day) + dt.timedelta(days=1), windows=windows)
     assert on["season"] == "thanksgiving" and after["season"] == "none"
+
+
+# ---------------------------------------------------------------- cosmic only
+def test_theme_layer_is_cosmic_only_and_migrates_stored_picks():
+    js = (ROOT / "src" / "static" / "theme" / "dash-theme.js").read_text()
+    css = (ROOT / "src" / "static" / "theme" / "dash-theme.css").read_text()
+    # stored picks of removed skins/themes are rewritten to cosmic at load
+    assert 'if (read("dashboard_skin") !== THEME) store("dashboard_skin", THEME);' in js
+    assert 'if (read("dashboard_modern_theme") !== THEME) store("dashboard_modern_theme", THEME);' in js
+    for gone in ('"classic"', "mountSeasonLite", "garlandSVG", "dash-skin-select", '["classic", "Classic"]'):
+        assert gone not in js, gone
+    assert 'data-theme="classic"' not in css
+
+
+def test_family_template_has_no_theme_picker_or_theme_gating():
+    html = (ROOT / "src" / "templates" / "dashboard_family.html").read_text()
+    for gone in ('id="skin-select"', 'id="skin-select-header"', 'id="bg-select"', ".themes.includes",
+                 "themes: [", "|| 'roger'", "/api/auth/microsoft/status", "/api/auth/proton/status", 'href="/trust"'):
+        assert gone not in html, gone
+    assert "switchSkin(COSMIC_SKIN, false)" in html
+
+
+def test_pages_render_cosmic_without_picker(client):
+    fam = client.get("/?ui=family&skin=roger").text
+    assert 'data-theme="cosmic"' in fam and 'id="skin-select' not in fam
+    mod = client.get("/?ui=modern&theme=classic").text
+    assert 'data-theme="cosmic"' in mod and '"requestedTheme": null' in mod
+
+
+def test_old_skin_requests_answer_with_cosmic(client):
+    assert [s["name"] for s in client.get("/api/skins").json()["skins"]] == ["cosmic"]
+    r = client.post("/api/skins/switch/roger").json()
+    assert r["success"] and r["skin"]["name"] == "cosmic"
+    assert client.get("/api/skins/active").json()["skin"]["name"] == "cosmic"
+
+
+def test_email_link_opens_modern_email_section(client):
+    r = client.get("/email", follow_redirects=False)
+    assert r.status_code in (302, 307) and r.headers["location"] == "/?ui=modern&section=emails"
+
+
+def test_garfield_history_pages_through_the_archive_sample(client):
+    data = client.get("/api/comics/garfield/history?limit=20").json()
+    assert data["success"] and len(data["comics"]) == 20
+    dates = [c["date"] for c in data["comics"]]
+    assert dates == sorted(dates) and all(c["image_url"] for c in data["comics"])

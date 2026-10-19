@@ -6,6 +6,9 @@
     <title id="page-title">Assistant</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Cosmic (Buster design system): tokens + the companion element -->
+    <link rel="stylesheet" href="/static/ds/tokens.css">
+    <script type="module" src="/static/ds/buster.js"></script>
     <style id="skin-css">
         :root {
             --skin-primary: #9333ea;
@@ -95,7 +98,7 @@
         <div class="text-center mb-8">
             <div class="relative inline-block">
                 <div class="absolute inset-0 rounded-full pulse-ring" style="background-color: color-mix(in srgb, var(--skin-primary) 20%, transparent);"></div>
-                <img id="assistant-avatar" src="/assets/images/rogr.gif" alt="Assistant" class="w-32 h-32 rounded-full border-4 relative z-10 mx-auto" style="border-color: var(--skin-primary);">
+                <buster-companion id="assistant-avatar" size="md" accent="violet" name="Buster" class="relative z-10 mx-auto"></buster-companion>
             </div>
             <h2 id="greeting-title" class="text-2xl font-bold mt-4" style="color: var(--skin-primary-light);">Hello!</h2>
             <p id="greeting-subtitle" class="text-gray-400 text-sm mt-1">How can I assist you today?</p>
@@ -608,9 +611,18 @@
             document.getElementById('header-title').textContent = `${skin.display_name} Assistant`;
             document.getElementById('header-subtitle').textContent = skin.tagline || 'AI Assistant • Always ready to help';
             
-            // Update avatar
+            // Update avatar: the Cosmic skin is the Buster companion, not an image
             const avatar = document.getElementById('assistant-avatar');
-            if (avatar && skin.avatar) {
+            const companion = (skin.theme || {}).companion;
+            if (avatar && companion) {
+                const el = document.createElement('buster-companion');
+                el.id = 'assistant-avatar';
+                el.setAttribute('size', 'md');
+                el.setAttribute('accent', companion.accent || 'violet');
+                el.setAttribute('name', companion.name || 'Buster');
+                el.className = 'relative z-10 mx-auto';
+                avatar.replaceWith(el);
+            } else if (avatar && skin.avatar) {
                 avatar.src = skin.avatar;
                 avatar.alt = skin.display_name;
             }
@@ -628,9 +640,7 @@
                 greetingTitle.textContent = skin.signature_phrase || 'Hello!';
             }
             if (greetingSubtitle) {
-                greetingSubtitle.textContent = skin.name === 'dracula' ? 
-                    'What chaos shall we create together?' : 
-                    'How can I assist you today, Commander?';
+                greetingSubtitle.textContent = 'How can I help you today?';
             }
             
             // Update auto-speak label

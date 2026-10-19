@@ -4,15 +4,14 @@
  * Loaded as a classic script at the top of <head> in both dashboard templates, right after
  * the server-rendered window.__DASH_THEME__ block (src/config/theme.py).
  *
- *  - Decides the theme before first paint: <html data-theme="cosmic|classic">.
- *      family UI: Cosmic when the active skin is "cosmic" (localStorage dashboard_skin, ?skin=cosmic)
- *      modern UI: Cosmic when the user picked it (localStorage dashboard_modern_theme, ?theme=cosmic)
- *  - Cosmic: loads the Buster design system runtime (ds/buster.js: <buster-space>,
+ *  - Cosmic is the only theme: <html data-theme="cosmic"> before first paint, in both UIs.
+ *    Old per-browser picks of removed themes/skins (localStorage dashboard_skin = roger, dracula,
+ *    alice, jedi...; dashboard_modern_theme = classic) are migrated to "cosmic" at load.
+ *  - Loads the Buster design system runtime (ds/buster.js: <buster-space>,
  *    <buster-companion>, motion controller, seasonal decorations), adds the cosmic backdrop,
  *    the greeting hero and the companion, and lets the companion react to dashboard events.
- *  - Every theme: seasons. The server renders data-season(+variant) on <html> with
- *    data-season-lock; classic themes get an accent tint (dash-theme.css) and a small
- *    garland + badge drawn here.
+ *  - Seasons (holiday variants of Cosmic): the server renders data-season(+variant) on <html>
+ *    with data-season-lock; ds/seasons.js draws the decorations.
  *
  * Public API: window.DashTheme
  */
@@ -27,22 +26,20 @@
   function read(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
   function store(k, v) { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) { /* storage blocked */ } }
 
-  // ---- URL requests (validated server-side) become the stored preference ----
-  if (ui === "family" && cfg.requestedSkin) store("dashboard_skin", cfg.requestedSkin);
-  if (ui === "modern" && cfg.requestedTheme) store("dashboard_modern_theme", cfg.requestedTheme);
+  // ---- Cosmic is the only theme: migrate stored picks of removed themes/skins ----
+  var THEME = "cosmic";
+  if (read("dashboard_skin") !== THEME) store("dashboard_skin", THEME);
+  if (read("dashboard_modern_theme") !== THEME) store("dashboard_modern_theme", THEME);
   if (cfg.requestedDensity) store("dashboard_density", cfg.requestedDensity);
 
-  function wantsCosmic() {
-    return ui === "family" ? read("dashboard_skin") === "cosmic" : read("dashboard_modern_theme") === "cosmic";
-  }
-  var cosmic = wantsCosmic();
-  root.setAttribute("data-theme", cosmic ? "cosmic" : "classic");
+  var cosmic = true;
+  root.setAttribute("data-theme", THEME);
 
   var season = (cfg.season && cfg.season.season) || root.getAttribute("data-season") || "none";
   var variant = (cfg.season && cfg.season.variant) || root.getAttribute("data-season-variant") || "";
 
   function density() { return read("dashboard_density") === "operations" ? "operations" : "companion"; }
-  if (cosmic) {
+  {
     root.setAttribute("data-mode", density());
     root.classList.add("bds-themed");
     // Registers <buster-space>, <buster-companion>, <buster-icon>, motion + seasons (lazy fx).
@@ -291,54 +288,6 @@
     wrapFetch();
   }
 
-  // ------------------------------------------------- classic: seasonal garland
-  var BULB = function (x, y, c) { return '<g><path d="M' + x + ' ' + (y - 6) + 'v3" stroke="#334" stroke-width="2"/><ellipse cx="' + x + '" cy="' + (y + 3) + '" rx="4.2" ry="6" fill="' + c + '"/><ellipse cx="' + (x - 1.3) + '" cy="' + (y + 1) + '" rx="1.2" ry="2" fill="#fff" opacity=".55"/></g>'; };
-  function garlandSVG(key, layer) {
-    var wire = '<path d="M0 6 Q30 18 60 6 T120 6" fill="none" stroke="rgba(30,30,40,.9)" stroke-width="1.6"/>';
-    var out = "";
-    if (key === "winter") {
-      out = layer === 0 ? BULB(15, 12, "#ef4444") + BULB(75, 12, "#fbbf24") : BULB(45, 12, "#22c55e") + BULB(105, 12, "#60a5fa");
-      return '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="26">' + (layer === 0 ? wire : "") + out + "</svg>";
-    }
-    if (key === "halloween") {
-      out = wire +
-        '<path d="M8 9 L22 9 L15 22 Z" fill="#f97316"/><path d="M38 13 L52 13 L45 25 Z" fill="#7e22ce"/>' +
-        '<path d="M68 9 L82 9 L75 22 Z" fill="#f97316"/>' +
-        '<path d="M93 12 c3 -3 6 -3 8 0 c1 -2 2 -3 3 -3 l1 2 1 -2 c1 0 2 1 3 3 c2 -3 5 -3 8 0 c-3 0 -5 2 -6 5 c-2 -2 -4 -2 -6 0 c-2 -2 -4 -2 -6 0 c-1 -3 -3 -5 -6 -5z" fill="#2e1065" stroke="#c084fc" stroke-width=".7"/>';
-      return '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="26">' + out + "</svg>";
-    }
-    if (key === "thanksgiving") {
-      var leaf = function (x, y, c, r) { return '<path transform="translate(' + x + " " + y + ") rotate(" + r + ')" d="M0 -8 C3 -6 6 -5 6 -2 C4 -1 4 1 6 2 C4 3 2 4 1 7 L0 9 L-1 7 C-2 4 -4 3 -6 2 C-4 1 -4 -1 -6 -2 C-6 -5 -3 -6 0 -8Z" fill="' + c + '"/>'; };
-      out = wire + leaf(15, 15, "#f97316", 20) + leaf(45, 17, "#b45309", -15) + leaf(75, 15, "#facc15", 10) + leaf(105, 17, "#c2410c", -25);
-      return '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="26">' + out + "</svg>";
-    }
-    if (key === "newyear") {
-      out = '<rect x="10" y="6" width="5" height="3" fill="#fde047" transform="rotate(30 12 7)"/><rect x="40" y="14" width="5" height="3" fill="#f472b6" transform="rotate(-20 42 15)"/>' +
-        '<rect x="70" y="8" width="5" height="3" fill="#22d3ee" transform="rotate(45 72 9)"/><rect x="100" y="16" width="5" height="3" fill="#a3e635" transform="rotate(-35 102 17)"/>' +
-        '<path d="M58 4 l1.6 3.4 3.6.4 -2.7 2.4 .8 3.6 -3.3 -1.9 -3.3 1.9 .8 -3.6 -2.7 -2.4 3.6 -.4z" fill="#fbbf24"/>';
-      return '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="26">' + out + "</svg>";
-    }
-    return "";
-  }
-
-  function mountSeasonLite() {
-    var key = seasonKey();
-    var info = seasonInfo();
-    if (!info || document.getElementById("dash-season-garland")) return;
-    var g = h("div", { id: "dash-season-garland", class: "dash-season-garland", "aria-hidden": "true" });
-    [0, 1].forEach(function (layer) {
-      var svg = garlandSVG(key, layer);
-      if (!svg) return;
-      var strip = h("div", { class: "dash-season-garland__strip dash-season-garland__strip--" + layer });
-      strip.style.backgroundImage = 'url("data:image/svg+xml,' + encodeURIComponent(svg) + '")';
-      g.appendChild(strip);
-    });
-    document.body.appendChild(g);
-    var badge = h("div", { id: "dash-season-badge", class: "dash-season-badge", role: "note", title: "Holiday theme: change it in Settings" },
-      '<span class="dash-season-badge__emoji" aria-hidden="true">' + info.emoji + "</span><span>" + esc(info.title) + "</span>");
-    document.body.appendChild(badge);
-  }
-
   // ------------------------------------------------------- settings card
   var SEASON_LABELS = {
     auto: "Automatic (holiday calendar)", none: "Off", halloween: "🎃 Halloween",
@@ -379,39 +328,15 @@
     opts = opts || {};
     el.innerHTML = "";
     el.classList.add("dash-theme-settings");
-    if (ui === "family") {
-      var current = read("dashboard_skin") || "roger";
-      var skinSel = selectEl("dash-skin-select", [[current, current]], current);
-      el.appendChild(row("Skin", skinSel, "🪐 <b>Cosmic</b> is the Buster design system: space backdrop, glass cards and a companion that reacts to the dashboard."));
-      fetch("/api/skins").then(function (r) { return r.json(); }).then(function (d) {
-        var skins = (d && d.skins) || [];
-        if (!skins.length) return;
-        skinSel.innerHTML = "";
-        skins.forEach(function (s) {
-          var opt = h("option", { value: s.name }, esc((s.name === "cosmic" ? "🪐 " : "") + s.display_name + (s.builtin ? " (built-in)" : "")));
-          if (s.name === current) opt.selected = true;
-          skinSel.appendChild(opt);
-        });
-      }).catch(function () {});
-      skinSel.addEventListener("change", function () {
-        if (opts.onSkin) opts.onSkin(skinSel.value);
-        else { store("dashboard_skin", skinSel.value); location.reload(); }
-      });
-    } else {
-      el.appendChild(row("Theme", seg("Theme", [["classic", "Classic"], ["cosmic", "🪐 Cosmic"]], cosmic ? "cosmic" : "classic", api.setModernTheme),
-        "Cosmic is the Buster design system: space backdrop, glass cards and a companion in the header and assistant."));
-    }
     var s = api.season;
     var choices = api.seasonChoices.map(function (c) { return [c, SEASON_LABELS[c] || c]; });
     var seasonSel = selectEl("dash-season-select", choices, s.choice || "auto");
     var nowLabel = s.season === "none" ? "no holiday right now" : (SEASON_LABELS[seasonKey()] || s.season);
-    el.appendChild(row("Holiday theme", seasonSel, "In effect now: <b>" + esc(nowLabel) + "</b> (" + esc(s.source) + "). Works with every skin; add <code>?season=winter</code> to the URL for a preview."));
+    el.appendChild(row("Holiday theme", seasonSel, "In effect now: <b>" + esc(nowLabel) + "</b> (" + esc(s.source) + "). Holidays are seasonal variants of Cosmic; add <code>?season=winter</code> to the URL for a preview."));
     seasonSel.addEventListener("change", function () { api.setSeason(seasonSel.value); });
     var dens = seg("Density", [["companion", "Companion"], ["operations", "Operations"]], density(), api.setDensity);
-    if (!cosmic) { dens.querySelectorAll("button").forEach(function (b) { b.disabled = true; b.style.opacity = "0.5"; }); }
-    el.appendChild(row("Cosmic density", dens, cosmic
-      ? "Companion is expressive (big greeting, glow, seasonal particles). Operations is calm and dense with minimal motion."
-      : "Available with the Cosmic " + (ui === "family" ? "skin" : "theme") + "."));
+    el.appendChild(row("Cosmic density", dens,
+      "Companion is expressive (big greeting, glow, seasonal particles). Operations is calm and dense with minimal motion."));
   }
 
   // ------------------------------------------------------------------ API
@@ -422,8 +347,8 @@
     get season() { return { season: season, variant: variant, source: (cfg.season && cfg.season.source) || "server", choice: (cfg.season && cfg.season.choice) || "auto" }; },
     seasonChoices: cfg.seasonChoices || ["auto", "none", "halloween", "thanksgiving", "winter", "newyear"],
     density: density,
-    /** Family UI: true when switching to/from the Cosmic skin needs a page reload. */
-    needsReloadFor: function (skinName) { return ui === "family" && (skinName === "cosmic") !== cosmic; },
+    /** Kept for older callers: Cosmic is always loaded, so a skin change never needs a reload. */
+    needsReloadFor: function () { return false; },
     /** Family UI: called by applySkin() so the companion follows the skin's theme block. */
     onSkin: function (skin) {
       var c = skin && skin.theme && skin.theme.companion;
@@ -432,16 +357,13 @@
       var n = document.getElementById("dash-brand-name"); if (n) n.textContent = companionCfg.name || "Buster";
       var t = document.getElementById("dash-brand-tag"); if (t && skin && skin.tagline) t.textContent = skin.tagline;
     },
-    /** Modern UI: "classic" | "cosmic" (reloads). */
-    setModernTheme: function (t) {
-      store("dashboard_modern_theme", t === "cosmic" ? "cosmic" : "classic");
-      if ((t === "cosmic") !== cosmic) location.reload();
-    },
+    /** Kept for older callers: Cosmic is the only theme. */
+    setModernTheme: function () { store("dashboard_modern_theme", THEME); },
     /** Cosmic density: "companion" (expressive) | "operations" (calm, dense). Live. */
     setDensity: function (d) {
       var m = d === "operations" ? "operations" : "companion";
       store("dashboard_density", m);
-      if (cosmic) root.setAttribute("data-mode", m);
+      root.setAttribute("data-mode", m);
     },
     /** Save the per-user season choice on the server, then re-render. */
     setSeason: function (choice) {
@@ -466,10 +388,7 @@
   };
   window.DashTheme = api;
 
-  function onReady() {
-    if (cosmic) mountCosmic();
-    else mountSeasonLite();
-  }
+  function onReady() { mountCosmic(); }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", onReady, { once: true });
   else onReady();
 })();

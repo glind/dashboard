@@ -2,7 +2,7 @@
 <html lang="en" class="h-full">
 <head>
     <!--DASH_THEME-->
-    <script src="/static/theme/dash-theme.js?v=1"></script>
+    <script src="/static/theme/dash-theme.js?v=2"></script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title id="page-title">Personal Assistant</title>
@@ -45,7 +45,7 @@
     <link rel="stylesheet" href="/static/ds/background.css">
     <link rel="stylesheet" href="/static/ds/components.css">
     <link rel="stylesheet" href="/static/ds/seasons.css">
-    <link rel="stylesheet" href="/static/theme/dash-theme.css?v=1">
+    <link rel="stylesheet" href="/static/theme/dash-theme.css?v=2">
     <script>
         // ========================================
         // MODULE REGISTRY SYSTEM
@@ -60,7 +60,6 @@
                 category: 'environment',
                 description: 'Current weather, forecast, and ambient weather station',
                 defaultEnabled: true,
-                themes: ['roger', 'dracula', 'alice', 'jedi']
             },
             
             // Entertainment - Both Themes
@@ -71,7 +70,6 @@
                 category: 'entertainment',
                 description: 'Programming and dad jokes',
                 defaultEnabled: true,
-                themes: ['roger', 'dracula', 'alice', 'jedi']
             },
             quote: {
                 id: 'quote',
@@ -80,7 +78,6 @@
                 category: 'entertainment',
                 description: 'Inspirational and motivational quotes',
                 defaultEnabled: true,
-                themes: ['roger', 'dracula', 'alice', 'jedi']
             },
             
             // Entertainment - Roger Theme
@@ -91,7 +88,6 @@
                 category: 'entertainment',
                 description: 'Garfield and other daily comics',
                 defaultEnabled: true,
-                themes: ['roger', 'alice', 'jedi']
             },
             ebay: {
                 id: 'ebay',
@@ -100,7 +96,6 @@
                 category: 'shopping',
                 description: 'Retro tech and collectible auctions',
                 defaultEnabled: true,
-                themes: ['roger', 'jedi']
             },
             parts_search: {
                 id: 'parts_search',
@@ -109,7 +104,6 @@
                 category: 'utility',
                 description: 'Search for electronic parts',
                 defaultEnabled: false,
-                themes: ['roger']
             },
             history_fact: {
                 id: 'history_fact',
@@ -118,7 +112,6 @@
                 category: 'entertainment',
                 description: 'Historical facts and events',
                 defaultEnabled: false,
-                themes: ['roger']
             },
             starwars: {
                 id: 'starwars',
@@ -127,7 +120,6 @@
                 category: 'entertainment',
                 description: 'Star Wars trivia and facts',
                 defaultEnabled: true,
-                themes: ['roger', 'jedi']
             },
             communities: {
                 id: 'communities',
@@ -136,16 +128,14 @@
                 category: 'social',
                 description: 'Tech and maker communities',
                 defaultEnabled: false,
-                themes: ['roger']
             },
             roger_quotes: {
                 id: 'roger_quotes',
-                name: 'Roger Quotes',
+                name: 'Buster Quotes',
                 icon: '🤖',
                 category: 'entertainment',
-                description: 'Battle droid quotes and phrases',
+                description: 'Quotes and phrases from your companion',
                 defaultEnabled: false,
-                themes: ['roger']
             },
             
             // Entertainment - Demon/Dracula Theme
@@ -156,7 +146,6 @@
                 category: 'entertainment',
                 description: 'Last.fm radio with YouTube playback',
                 defaultEnabled: true,
-                themes: ['dracula', 'alice']
             },
             dark_news: {
                 id: 'dark_news',
@@ -165,7 +154,6 @@
                 category: 'news',
                 description: 'Gothic, horror, fantasy and 90s music news from real feeds',
                 defaultEnabled: false,  // Disabled by default - use News section filter instead
-                themes: ['dracula']
             },
             art_communities: {
                 id: 'art_communities',
@@ -174,7 +162,6 @@
                 category: 'social',
                 description: 'Art and creative communities',
                 defaultEnabled: true,
-                themes: ['dracula', 'alice']
             },
             music_communities: {
                 id: 'music_communities',
@@ -183,16 +170,14 @@
                 category: 'social',
                 description: 'Music and band communities',
                 defaultEnabled: true,
-                themes: ['dracula']
             },
             dracula_quotes: {
                 id: 'dracula_quotes',
-                name: 'Demon Quotes',
+                name: 'Gothic Quotes',
                 icon: '😈',
                 category: 'entertainment',
                 description: 'Gothic wisdom and dark humor',
                 defaultEnabled: false,
-                themes: ['dracula']
             },
             
             // ================================
@@ -207,7 +192,6 @@
                 category: 'productivity',
                 description: 'AI-generated tasks from calendar and email',
                 defaultEnabled: true,
-                themes: ['roger', 'dracula', 'alice', 'jedi'],
                 isSection: true
             },
             calendar: {
@@ -217,7 +201,6 @@
                 category: 'productivity',
                 description: 'Family schedule and upcoming events',
                 defaultEnabled: true,
-                themes: ['roger', 'dracula', 'alice', 'jedi'],
                 isSection: true
             },
             news: {
@@ -227,7 +210,6 @@
                 category: 'news',
                 description: 'Curated news with calm tips',
                 defaultEnabled: true,
-                themes: ['roger', 'dracula', 'alice', 'jedi'],
                 isSection: true
             },
             
@@ -239,7 +221,6 @@
                 category: 'entertainment',
                 description: 'Your saved favorite tracks',
                 defaultEnabled: true,
-                themes: ['dracula', 'alice']
             },
             calm_tips: {
                 id: 'calm_tips',
@@ -248,7 +229,6 @@
                 category: 'wellness',
                 description: 'Anxiety-calming tips and reminders',
                 defaultEnabled: true,
-                themes: ['roger', 'dracula', 'alice', 'jedi']
             },
             ambient_weather: {
                 id: 'ambient_weather',
@@ -257,7 +237,6 @@
                 category: 'environment',
                 description: 'Data from personal weather station',
                 defaultEnabled: false,
-                themes: ['roger', 'dracula', 'alice', 'jedi']
             },
             
             // ================================
@@ -271,7 +250,6 @@
                 category: 'productivity',
                 description: 'Gmail inbox with AI analysis',
                 defaultEnabled: true,
-                themes: ['roger'],  // More suited to work/productivity theme
                 isExternalPage: true,
                 url: '/email'
             },
@@ -282,20 +260,8 @@
                 category: 'business',
                 description: 'AI-generated business leads',
                 defaultEnabled: true,
-                themes: ['roger'],  // Business module for work theme
                 isExternalPage: true,
                 url: '/leads'
-            },
-            trust_layer: {
-                id: 'trust_layer',
-                name: 'Trust Layer',
-                icon: '🛡️',
-                category: 'productivity',
-                description: 'AI trust and approval system',
-                defaultEnabled: false,
-                themes: ['roger'],  // Technical module
-                isExternalPage: true,
-                url: '/trust'
             },
             homeassistant: {
                 id: 'homeassistant',
@@ -304,16 +270,11 @@
                 category: 'smart_home',
                 description: 'Smart home control and automation',
                 defaultEnabled: true,
-                themes: ['roger', 'dracula', 'alice', 'jedi'],
                 isSection: true
             }
         };
         
-        // The built-in Cosmic skin shows the family's everyday modules.
-        ['weather', 'jokes', 'quote', 'comics', 'history_fact', 'tasks', 'calendar', 'news',
-         'calm_tips', 'ambient_weather', 'homeassistant'].forEach(id => {
-            if (MODULE_REGISTRY[id] && !MODULE_REGISTRY[id].themes.includes('cosmic')) MODULE_REGISTRY[id].themes.push('cosmic');
-        });
+        // Cosmic is the only theme: every module is available; the Settings toggles decide.
 
         // Module categories for organization
         const MODULE_CATEGORIES = {
@@ -374,13 +335,11 @@
         
         // Apply module visibility to the DOM
         function applyModuleVisibility() {
-            const currentTheme = localStorage.getItem('dashboard_skin') || 'roger';
-            
             Object.keys(MODULE_REGISTRY).forEach(moduleId => {
                 const module = MODULE_REGISTRY[moduleId];
                 const elements = document.querySelectorAll(`[data-widget="${moduleId}"]`);
                 const isEnabled = isModuleEnabled(moduleId);
-                const isForTheme = module.themes.includes(currentTheme);
+                const isForTheme = true;
                 
                 elements.forEach(el => {
                     if (isEnabled && isForTheme) {
@@ -412,7 +371,7 @@
                 const moduleId = navItem.dataset.navModule;
                 const isEnabled = isModuleEnabled(moduleId);
                 const module = MODULE_REGISTRY[moduleId];
-                const isForTheme = module ? module.themes.includes(currentTheme) : true;
+                const isForTheme = true;
                 
                 if (isEnabled && isForTheme) {
                     navItem.classList.remove('hidden');
@@ -431,19 +390,15 @@
         
         // Get modules available for a theme
         function getModulesForTheme(theme) {
-            return Object.values(MODULE_REGISTRY).filter(m => m.themes.includes(theme));
+            return Object.values(MODULE_REGISTRY);
         }
         
         // Reset modules to theme defaults
         function resetModulesToThemeDefaults() {
-            const currentTheme = localStorage.getItem('dashboard_skin') || 'roger';
             const settings = {};
             Object.keys(MODULE_REGISTRY).forEach(id => {
                 const mod = MODULE_REGISTRY[id];
-                // Enable if it's a default for this theme
-                settings[id] = { 
-                    enabled: mod.defaultEnabled && mod.themes.includes(currentTheme)
-                };
+                settings[id] = { enabled: mod.defaultEnabled };
             });
             saveModuleSettings(settings);
             applyModuleVisibility();
@@ -453,14 +408,8 @@
         
         // Enable all modules for current theme
         function enableAllModules() {
-            const currentTheme = localStorage.getItem('dashboard_skin') || 'roger';
             const settings = getModuleSettings();
-            Object.keys(MODULE_REGISTRY).forEach(id => {
-                const mod = MODULE_REGISTRY[id];
-                if (mod.themes.includes(currentTheme)) {
-                    settings[id] = { enabled: true };
-                }
-            });
+            Object.keys(MODULE_REGISTRY).forEach(id => { settings[id] = { enabled: true }; });
             saveModuleSettings(settings);
             applyModuleVisibility();
             loadSettings();
@@ -504,14 +453,6 @@
                     <button onclick="stopAllAudio()" id="mute-btn" class="px-3 py-2 rounded text-xs" style="background-color: var(--skin-bg-tertiary);" title="Stop all audio">🔇 Mute</button>
                 </div>
                 <a id="assistant-link" href="/assistant" class="block text-xs underline" style="color: var(--skin-primary-light);">Open Assistant</a>
-                <!-- Skin Switcher -->
-                <div class="pt-2 border-t" style="border-color: var(--skin-border-primary);">
-                    <label class="text-xs" style="color: var(--skin-text-muted);">Theme:</label>
-                    <select id="skin-select" onchange="switchSkin(this.value)" class="w-full mt-1 px-2 py-1 rounded text-sm" style="background-color: var(--skin-bg-primary); border: 1px solid var(--skin-border-primary); color: var(--skin-text-secondary);">
-                        <option value="roger">🤖 Roger (Battle Droid)</option>
-                        <option value="dracula">😈 Demon (Gothic)</option>
-                    </select>
-                </div>
             </div>
             <nav id="sidebar-nav" class="space-y-2 px-4 py-4">
                 <button onclick="showSection('overview')" class="nav-link w-full text-left px-4 py-3 rounded-lg bg-gray-700 text-white transition-colors hover:bg-gray-600">
@@ -536,9 +477,6 @@
                 <a href="/leads" data-nav-module="leads" class="nav-link w-full text-left px-4 py-3 rounded-lg text-gray-300 transition-colors hover:bg-gray-700 block">
                     <i class="fas fa-bullseye mr-2"></i>Leads
                 </a>
-                <a href="/trust" data-nav-module="trust_layer" class="nav-link w-full text-left px-4 py-3 rounded-lg text-gray-300 transition-colors hover:bg-gray-700 block">
-                    <i class="fas fa-shield-alt mr-2"></i>Trust Layer
-                </a>
                 <!-- External Wiki Link (Kiwix) -->
                 <a href="http://wiki.hoth.home" target="_blank" class="nav-link w-full text-left px-4 py-3 rounded-lg text-gray-300 transition-colors hover:bg-gray-700 block">
                     <i class="fas fa-book mr-2"></i>Wiki
@@ -562,25 +500,6 @@
                 <div class="px-6 py-3 flex items-center justify-between">
                     <div id="header-title" class="text-xl font-bold text-white">Dashboard</div>
                     <div class="flex items-center gap-3 text-sm">
-                        <!-- Theme Switcher - Prominent Position -->
-                        <div class="flex items-center gap-2 px-3 py-1 rounded-lg" style="background-color: var(--skin-bg-tertiary);">
-                            <span style="color: var(--skin-accent);">🎨 Theme:</span>
-                            <select id="skin-select-header" onchange="switchSkin(this.value)" class="px-2 py-1 rounded text-sm font-semibold" style="background-color: var(--skin-bg-primary); border: 2px solid var(--skin-primary); color: var(--skin-text-primary);">
-                                <option value="roger">🤖 Roger</option>
-                                <option value="dracula">😈 Demon</option>
-                            </select>
-                        </div>
-                        <span class="dash-classic-only" style="color: var(--skin-text-muted);">|</span>
-                        <span class="dash-classic-only" style="color: var(--skin-text-secondary);">Background:</span>
-                        <select id="bg-select" class="dash-classic-only px-2 py-1 rounded text-sm" style="background-color: var(--skin-bg-primary); border: 1px solid var(--skin-border-primary); color: var(--skin-text-secondary);">
-                            <option value="bg1">Background 1</option>
-                            <option value="bg2">Background 2</option>
-                            <option value="bg3">Background 3</option>
-                        </select>
-                        <button id="bg-prev" class="dash-classic-only px-2 py-1 rounded" style="background-color: var(--skin-bg-tertiary);" title="Previous">⟨</button>
-                        <button id="bg-next" class="dash-classic-only px-2 py-1 rounded" style="background-color: var(--skin-bg-tertiary);" title="Next">⟩</button>
-                        <input id="bg-url" type="url" placeholder="Paste image URL" class="dash-classic-only hidden md:block w-48 px-2 py-1 rounded text-sm" style="background-color: var(--skin-bg-primary); border: 1px solid var(--skin-border-primary); color: var(--skin-text-secondary);"/>
-                        <button id="bg-url-set" class="dash-classic-only hidden md:block px-2 py-1 rounded" style="background-color: var(--skin-secondary);">Set</button>
                     </div>
                 </div>
             </div>
@@ -1035,29 +954,27 @@
                     <div class="text-3xl font-extrabold text-white drop-shadow">🏠 Home Assistant</div>
                     <div class="text-xs text-gray-300">Smart home control center</div>
                 </div>
-                <div class="bg-gray-800 rounded-lg border border-gray-700 overflow-hidden" style="height: calc(100vh - 200px);">
+                <div class="bg-gray-800 rounded-lg border border-gray-700 overflow-hidden">
                     <div class="flex items-center justify-between p-3 border-b border-gray-700 bg-gray-900/50">
                         <div class="flex items-center gap-2">
                             <i class="fas fa-home text-cyan-400"></i>
                             <span class="font-semibold">Home Assistant</span>
-                            <span id="ha-connection-status" class="text-xs px-2 py-0.5 rounded bg-gray-700">Connecting...</span>
+                            <span id="ha-connection-status" class="text-xs px-2 py-0.5 rounded bg-gray-700">homeassistant.home</span>
                         </div>
                         <div class="flex gap-2">
-                            <button onclick="refreshHomeAssistant()" class="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-sm">
-                                <i class="fas fa-sync-alt"></i>
-                            </button>
                             <a href="http://homeassistant.home:8123" target="_blank" class="px-3 py-1 bg-cyan-600 hover:bg-cyan-700 rounded text-sm">
                                 <i class="fas fa-external-link-alt mr-1"></i>Open Full UI
                             </a>
                         </div>
                     </div>
-                    <iframe 
-                        id="ha-iframe" 
-                        src="http://homeassistant.home:8123/lovelace/0" 
-                        class="w-full h-full border-0"
-                        onload="document.getElementById('ha-connection-status').textContent = 'Connected'; document.getElementById('ha-connection-status').className = 'text-xs px-2 py-0.5 rounded bg-green-700';"
-                        onerror="document.getElementById('ha-connection-status').textContent = 'Offline'; document.getElementById('ha-connection-status').className = 'text-xs px-2 py-0.5 rounded bg-red-700';"
-                    ></iframe>
+                    <div id="ha-launcher" class="p-8 text-center">
+                        <i class="fas fa-home text-5xl text-cyan-400 mb-4"></i>
+                        <p class="text-gray-300 mb-2">Home Assistant opens in its own tab.</p>
+                        <p class="text-xs text-gray-500 mb-6">It can't be shown inside the dashboard: Home Assistant blocks being embedded (X-Frame-Options).</p>
+                        <a href="http://homeassistant.home:8123" target="_blank" rel="noopener" class="inline-block px-6 py-3 bg-cyan-600 hover:bg-cyan-700 rounded-lg font-semibold">
+                            <i class="fas fa-external-link-alt mr-2"></i>Open Home Assistant
+                        </a>
+                    </div>
                 </div>
                 <div class="mt-4 grid grid-cols-2 md:grid-cols-4 gap-4" id="ha-quick-controls">
                     <button onclick="haQuickAction('lights')" class="p-4 bg-gray-800 hover:bg-gray-700 rounded-lg border border-gray-700 text-center">
@@ -1277,6 +1194,7 @@
         // SKIN/THEME SYSTEM
         // =====================================================
         
+        const COSMIC_SKIN = 'cosmic';
         let currentSkin = null;
         let availableSkins = [];
         
@@ -1327,19 +1245,14 @@
             await loadAvailableSkins();
             
             // Load saved skin preference or get active from server
-            const savedSkin = localStorage.getItem('dashboard_skin') || 'roger';
-            await switchSkin(savedSkin, false);
-            
-            // Update skin selector
-            const skinSelect = document.getElementById('skin-select');
-            if (skinSelect) {
-                skinSelect.value = savedSkin;
-            }
+            // Cosmic is the only skin (older stored picks are migrated by theme/dash-theme.js)
+            await switchSkin(COSMIC_SKIN, false);
             
             console.log('✅ Skin system initialized');
         }
         
         async function switchSkin(skinName, animate = true) {
+            skinName = COSMIC_SKIN;  // the other skins were removed
             try {
                 console.log(`🎨 Switching to skin: ${skinName}`);
                 
@@ -2413,6 +2326,8 @@
                         loadWeather();
                         mirrorWeatherToSection();
                     }
+                } else if (sectionName === 'tasks') {
+                    loadTasks();
                 } else if (sectionName === 'news') {
                     loadNews();
                     loadCalmTips();
@@ -2661,7 +2576,7 @@
             
             // Save to server (per-user preference)
             try {
-                const skinName = localStorage.getItem('dashboard_skin') || 'roger';
+                const skinName = COSMIC_SKIN;
                 await fetch('/api/settings/avatar', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -2684,17 +2599,10 @@
         // =====================================================
         // HOME ASSISTANT INTEGRATION
         // =====================================================
-        function refreshHomeAssistant() {
-            const iframe = document.getElementById('ha-iframe');
-            if (iframe) {
-                iframe.src = iframe.src;
-            }
-        }
+        function refreshHomeAssistant() { /* nothing embedded to refresh */ }
 
         function haQuickAction(action) {
-            const iframe = document.getElementById('ha-iframe');
-            if (!iframe) return;
-            
+
             const routes = {
                 'lights': '/lovelace/lights',
                 'climate': '/lovelace/climate', 
@@ -2702,9 +2610,8 @@
                 'security': '/lovelace/security'
             };
             
-            // Try to navigate within the iframe
             const route = routes[action] || '/lovelace/0';
-            iframe.src = `http://homeassistant.home:8123${route}`;
+            window.open(`http://homeassistant.home:8123${route}`, '_blank', 'noopener');
         }
 
         async function loadVoiceSettings() {
@@ -3014,27 +2921,14 @@
                 
                 // Check auth status for each provider
                 let googleStatus = { authenticated: false };
-                let microsoftStatus = { authenticated: false };
-                let protonStatus = { authenticated: false };
                 
                 try {
                     const gResp = await fetch('/api/auth/google/status');
                     googleStatus = await gResp.json();
                 } catch (e) { console.log('Google auth check skipped'); }
                 
-                try {
-                    const mResp = await fetch('/api/auth/microsoft/status');
-                    microsoftStatus = await mResp.json();
-                } catch (e) { console.log('Microsoft auth check skipped'); }
-                
-                try {
-                    const pResp = await fetch('/api/auth/proton/status');
-                    protonStatus = await pResp.json();
-                } catch (e) { console.log('Proton auth check skipped'); }
-                
                 // Get saved preferences from localStorage
-                const bgKey = localStorage.getItem('dashboard_bg_key') || 'bg1';
-                const weatherLoc = JSON.parse(localStorage.getItem('weather_selected') || '{}');
+                                const weatherLoc = JSON.parse(localStorage.getItem('weather_selected') || '{}');
                 
                 container.innerHTML = `
                     <h2 class="text-2xl font-bold mb-6">Settings</h2>
@@ -3054,32 +2948,6 @@
                                 <p class="text-xs text-gray-500 mb-3">Gmail, Calendar, Drive</p>
                                 <button onclick="connectGoogle()" class="w-full px-3 py-2 ${googleStatus.authenticated ? 'bg-green-700 hover:bg-green-600' : 'bg-blue-600 hover:bg-blue-700'} rounded text-sm">
                                     ${googleStatus.authenticated ? '✓ Reconnect' : 'Connect Google'}
-                                </button>
-                            </div>
-                            <div class="bg-gray-900 rounded-lg border border-gray-700 p-4">
-                                <div class="flex items-center justify-between mb-3">
-                                    <div class="flex items-center gap-2">
-                                        <img src="https://www.microsoft.com/favicon.ico" class="w-5 h-5" alt="Microsoft">
-                                        <span class="font-semibold">Microsoft 365</span>
-                                    </div>
-                                    <span class="text-xs ${microsoftStatus.authenticated ? 'text-green-400' : 'text-gray-500'}">${microsoftStatus.authenticated ? '✓ Connected' : 'Not connected'}</span>
-                                </div>
-                                <p class="text-xs text-gray-500 mb-3">Outlook, OneDrive, Teams</p>
-                                <button onclick="connectMicrosoft()" class="w-full px-3 py-2 ${microsoftStatus.authenticated ? 'bg-green-700 hover:bg-green-600' : 'bg-blue-600 hover:bg-blue-700'} rounded text-sm">
-                                    ${microsoftStatus.authenticated ? '✓ Reconnect' : 'Connect Microsoft'}
-                                </button>
-                            </div>
-                            <div class="bg-gray-900 rounded-lg border border-gray-700 p-4">
-                                <div class="flex items-center justify-between mb-3">
-                                    <div class="flex items-center gap-2">
-                                        <span class="text-lg">🔒</span>
-                                        <span class="font-semibold">Proton</span>
-                                    </div>
-                                    <span class="text-xs ${protonStatus.authenticated ? 'text-green-400' : 'text-gray-500'}">${protonStatus.authenticated ? '✓ Connected' : 'Not connected'}</span>
-                                </div>
-                                <p class="text-xs text-gray-500 mb-3">ProtonMail via Bridge</p>
-                                <button onclick="connectProton()" class="w-full px-3 py-2 ${protonStatus.authenticated ? 'bg-green-700 hover:bg-green-600' : 'bg-purple-600 hover:bg-purple-700'} rounded text-sm">
-                                    ${protonStatus.authenticated ? '✓ Reconnect' : 'Connect Proton'}
                                 </button>
                             </div>
                         </div>
@@ -3116,19 +2984,10 @@
                         <div id="dash-theme-settings" class="dash-theme-settings bg-gray-900 rounded-lg border border-gray-700 p-4"></div>
                     </div>
                     
-                    <!-- Appearance -->
+                    <!-- Location -->
                     <div class="mb-8">
-                        <h3 class="text-lg font-semibold text-purple-300 mb-4"><i class="fas fa-palette mr-2"></i>Appearance</h3>
+                        <h3 class="text-lg font-semibold text-purple-300 mb-4"><i class="fas fa-location-dot mr-2"></i>Location</h3>
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div class="bg-gray-900 rounded-lg border border-gray-700 p-4">
-                                <label class="block text-sm font-semibold mb-2">Background Theme</label>
-                                <div class="text-sm text-gray-400 mb-2">Current: ${bgKey}</div>
-                                <div class="flex gap-2">
-                                    <button onclick="setBackgroundByKey('bg1')" class="px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm">Theme 1</button>
-                                    <button onclick="setBackgroundByKey('bg2')" class="px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm">Theme 2</button>
-                                    <button onclick="setBackgroundByKey('bg3')" class="px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm">Theme 3</button>
-                                </div>
-                            </div>
                             <div class="bg-gray-900 rounded-lg border border-gray-700 p-4">
                                 <label class="block text-sm font-semibold mb-2">Default Weather Location</label>
                                 <div class="text-sm text-gray-400">${weatherLoc.name || 'Not set - using current location'}</div>
@@ -3139,19 +2998,16 @@
                     <!-- Module Settings -->
                     <div class="mb-8">
                         <h3 class="text-lg font-semibold text-purple-300 mb-4"><i class="fas fa-th-large mr-2"></i>Dashboard Modules</h3>
-                        <p class="text-sm text-gray-400 mb-4">Enable or disable modules for your dashboard. Modules marked with 🤖 are Roger-themed, 😈 are Demon-themed.</p>
+                        <p class="text-sm text-gray-400 mb-4">Enable or disable modules for your dashboard.</p>
                         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                             ${Object.values(MODULE_REGISTRY).map(mod => {
                                 const enabled = isModuleEnabled(mod.id);
-                                const themeIcon = mod.themes.includes('roger') && mod.themes.includes('dracula') ? '🌍' :
-                                                  mod.themes.includes('roger') ? '🤖' : '😈';
                                 return `
                                     <div class="bg-gray-900 rounded-lg border border-gray-700 p-4">
                                         <div class="flex items-center justify-between mb-2">
                                             <div class="flex items-center gap-2">
                                                 <span class="text-lg">${mod.icon}</span>
                                                 <span class="font-semibold text-sm">${mod.name}</span>
-                                                <span class="text-xs" title="${mod.themes.join(', ')}">${themeIcon}</span>
                                             </div>
                                             <label class="relative inline-flex items-center cursor-pointer">
                                                 <input type="checkbox" ${enabled ? 'checked' : ''} onchange="toggleModule('${mod.id}')" class="sr-only peer">
@@ -3164,7 +3020,7 @@
                             }).join('')}
                         </div>
                         <div class="mt-4 flex gap-2">
-                            <button onclick="resetModulesToThemeDefaults()" class="px-4 py-2 bg-purple-600 hover:bg-purple-700 rounded-lg text-sm">Reset to Theme Defaults</button>
+                            <button onclick="resetModulesToThemeDefaults()" class="px-4 py-2 bg-purple-600 hover:bg-purple-700 rounded-lg text-sm">Reset to Defaults</button>
                             <button onclick="enableAllModules()" class="px-4 py-2 bg-green-600 hover:bg-green-700 rounded-lg text-sm">Enable All</button>
                             <button onclick="disableAllModules()" class="px-4 py-2 bg-gray-600 hover:bg-gray-700 rounded-lg text-sm">Disable All</button>
                         </div>
@@ -3417,7 +3273,7 @@
                 `;
                 
                 // Theme & Holidays card
-                if (window.DashTheme) DashTheme.renderSettings(document.getElementById('dash-theme-settings'), { onSkin: (name) => switchSkin(name) });
+                if (window.DashTheme) DashTheme.renderSettings(document.getElementById('dash-theme-settings'));
                 
                 // Load API keys section
                 loadApiKeysSection();
@@ -3913,7 +3769,7 @@
             content.innerHTML = '<div class="col-span-full text-gray-400 text-center py-8">Loading...</div>';
             const sel = document.getElementById('comic-select');
             const choice = sel ? sel.value : 'favorites';
-            if (choice && choice !== 'favorites' && choice !== 'garfield') {
+            if (choice && choice !== 'favorites') {
                 // The selected comic's own archive, newest first; click to page through it.
                 try {
                     const resp = await fetch(`/api/comics/${encodeURIComponent(choice)}/history`);
@@ -4127,7 +3983,14 @@
                 const resp = await fetch('/api/ebay/auctions?category=retro_tech');
                 const data = await resp.json();
                 console.log('eBay response:', data);
-                if (data.success && data.auctions && data.auctions.length > 0) {
+                if (data.success && data.sample) {
+                    // Live listings unavailable: offer the searches, not made-up prices
+                    list.innerHTML = `<div class="col-span-full text-sm text-gray-400 mb-1">Live eBay listings aren't available right now. Browse these searches on eBay:</div>` +
+                        data.auctions.map(auction => `
+                        <a href="${auction.link}" target="_blank" rel="noopener" class="block bg-gray-900 rounded-lg border border-yellow-600 p-3 text-sm text-yellow-300 hover:opacity-90">
+                            🔎 ${(auction.title || '').split(' - ')[0]}
+                        </a>`).join('');
+                } else if (data.success && data.auctions && data.auctions.length > 0) {
                     list.innerHTML = data.auctions.map(auction => `
                         <div class="bg-gray-900 rounded-lg border border-yellow-600 overflow-hidden flex flex-col">
                             <img src="${auction.image_url}" alt="${auction.title}" class="w-full h-40 object-cover">
@@ -4880,6 +4743,7 @@
                 loadComicDropdown().then(() => reloadComic());
             }
             if (isWidgetEnabled('ebay')) loadEbayAuctions();
+            if (isWidgetEnabled('tasks')) loadTasks();  // the Tasks list was never loaded (stuck on "Loading tasks...")
             if (isWidgetEnabled('roger_quotes') || isWidgetEnabled('communities') || 
                 isWidgetEnabled('starwars') || isWidgetEnabled('parts_search') || 
                 isWidgetEnabled('history_fact')) {

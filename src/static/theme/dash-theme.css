@@ -1,8 +1,8 @@
 /*!
- * Dashboard theme layer: Cosmic (Buster design system) for the family + modern UIs,
- * and the seasonal tint/garland for classic skins.
+ * Dashboard theme layer: Cosmic (Buster design system) — the only theme — for the family +
+ * modern UIs. Holiday seasons are Cosmic variants drawn by ds/seasons.css + ds/seasons.js.
  * Requires ds/tokens.css, ds/background.css, ds/components.css, ds/seasons.css (loaded first).
- *   <html data-ui="family|modern" data-theme="cosmic|classic" data-season="…" data-mode="companion|operations">
+ *   <html data-ui="family|modern" data-theme="cosmic" data-season="…" data-mode="companion|operations">
  */
 
 /* =====================================================================
@@ -28,8 +28,7 @@ html[data-theme="cosmic"] ::selection { background: rgba(139, 92, 246, 0.45); co
 html[data-theme="cosmic"] ::-webkit-scrollbar { width: 8px; height: 8px; }
 html[data-theme="cosmic"] ::-webkit-scrollbar-track { background: transparent; }
 html[data-theme="cosmic"] ::-webkit-scrollbar-thumb { background: rgba(148, 163, 255, 0.22); border-radius: 8px; }
-html[data-theme="cosmic"] #app-bg,
-html[data-theme="cosmic"] .dash-classic-only { display: none !important; }
+html[data-theme="cosmic"] #app-bg { display: none !important; }
 
 /* glass panels: sidebar + sticky header */
 html[data-theme="cosmic"] aside {
@@ -209,53 +208,12 @@ html[data-theme="cosmic"][data-ui="modern"] main .text-blue-400 { color: var(--c
 html[data-theme="cosmic"][data-ui="modern"] main .text-green-400 { color: var(--c-green) !important; }
 html[data-theme="cosmic"][data-ui="modern"] main .text-purple-400 { color: var(--c-violet-soft) !important; }
 
+/* settings toggles (tailwind "peer" switches): keep the on/off track readable on glass */
+html[data-theme="cosmic"] main input.peer + div { background: rgba(148, 163, 255, 0.18) !important; }
+html[data-theme="cosmic"] main input.peer:checked + div { background: var(--c-green, #22c55e) !important; }
+
 /* the theme picker (settings) */
 .dash-theme-settings .dash-seg { display: inline-flex; gap: 4px; padding: 3px; border-radius: 12px; background: rgba(0, 0, 0, 0.25); border: 1px solid rgba(148, 163, 255, 0.18); flex-wrap: wrap; }
 .dash-theme-settings .dash-seg button { padding: 6px 12px; border-radius: 9px; font-size: 13px; color: inherit; background: transparent; border: 0; cursor: pointer; }
 .dash-theme-settings .dash-seg button[aria-pressed="true"] { background: var(--gradient-nav-active, #6d4aff); color: #fff; }
 .dash-theme-settings .dash-help { font-size: 12px; opacity: 0.7; margin-top: 6px; }
-
-/* =====================================================================
-   SEASONS for classic skins: accent tint + garland + badge
-   (Cosmic gets the design system's full seasonal backdrop + companion accessories.)
-   --season-a/b/c come from ds/seasons.css.
-   ===================================================================== */
-html[data-theme="classic"][data-season="halloween"],
-html[data-theme="classic"][data-season="thanksgiving"],
-html[data-theme="classic"][data-season="winter"] {
-  --dash-season-ring: color-mix(in srgb, var(--season-a) 45%, transparent);
-}
-html[data-theme="classic"][data-season]:not([data-season="none"]) .widget-container,
-html[data-theme="classic"][data-season]:not([data-season="none"]) main .bg-gray-800.rounded-xl {
-  box-shadow: 0 0 0 1px var(--dash-season-ring, transparent), 0 14px 34px -22px var(--season-a, transparent);
-}
-html[data-theme="classic"][data-season]:not([data-season="none"]) main > .sticky,
-html[data-theme="classic"][data-season]:not([data-season="none"]) aside > div:first-child {
-  border-image: linear-gradient(90deg, var(--season-a), var(--season-b), var(--season-c)) 1;
-}
-html[data-theme="classic"][data-season]:not([data-season="none"]) main > .sticky { border-bottom-width: 2px; }
-.dash-season-garland {
-  position: fixed; top: 0; left: 0; right: 0; height: 26px; z-index: 60; pointer-events: none;
-}
-.dash-season-garland__strip { position: absolute; inset: 0; background-repeat: repeat-x; background-size: 120px 26px; }
-html[data-season="winter"]:not([data-season-variant]) .dash-season-garland__strip { filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.35)); }
-@media (prefers-reduced-motion: no-preference) {
-  html[data-season="winter"]:not([data-season-variant]) .dash-season-garland__strip--0 { animation: dash-twinkle 2.6s ease-in-out infinite; }
-  html[data-season="winter"]:not([data-season-variant]) .dash-season-garland__strip--1 { animation: dash-twinkle 2.6s ease-in-out -1.3s infinite; }
-  .dash-season-badge__emoji { animation: dash-bob 3.2s ease-in-out infinite; display: inline-block; }
-}
-@keyframes dash-twinkle { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
-@keyframes dash-bob { 0%, 100% { transform: translateY(0) rotate(-4deg); } 50% { transform: translateY(-3px) rotate(4deg); } }
-.dash-season-badge {
-  position: fixed; right: 16px; bottom: 16px; z-index: 60;
-  display: inline-flex; align-items: center; gap: 8px;
-  padding: 7px 14px 7px 10px; border-radius: 999px;
-  font: 600 13px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-  color: #fff;
-  background: color-mix(in srgb, var(--season-a, #8b5cf6) 22%, rgba(10, 12, 30, 0.82));
-  border: 1px solid color-mix(in srgb, var(--season-a, #8b5cf6) 55%, transparent);
-  box-shadow: 0 8px 24px -10px var(--season-a, #000);
-  pointer-events: none;
-}
-.dash-season-badge__emoji { font-size: 18px; }
-html[data-season-variant="newyear"] .dash-season-badge { --season-a: #fbbf24; }

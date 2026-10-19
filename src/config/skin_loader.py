@@ -12,8 +12,17 @@ import yaml
 
 logger = logging.getLogger(__name__)
 
-# Default skin if none specified
-DEFAULT_SKIN = "roger"
+# Cosmic (the Buster design system) is the only dashboard theme. The older skins
+# (roger, dracula, alice, jedi, ...) were removed from the UI; any request for them —
+# a stored browser preference, an old link, /api/skins/switch/<name> — resolves to Cosmic.
+DEFAULT_SKIN = "cosmic"
+SUPPORTED_SKINS = ("cosmic",)
+
+
+def resolve_skin_name(name: Optional[str]) -> str:
+    """Map any requested skin name to a supported one (always Cosmic today)."""
+    n = (name or "").strip().lower()
+    return n if n in SUPPORTED_SKINS else DEFAULT_SKIN
 
 # Base path for skins - check Docker shared mount first, then local dev path
 _DOCKER_SKINS_PATH = Path("/app/shared/skins")
@@ -168,7 +177,7 @@ class SkinLoader:
         return None
 
     def list_available_skins(self) -> List[Dict[str, Any]]:
-        """List all available skins (personal + built-in) with basic info including voice."""
+        """List the supported skins (personal override first, then built-in) with basic info."""
         skins = []
         seen = set()
 
@@ -180,7 +189,7 @@ class SkinLoader:
                 continue
             builtin = base == self.builtin_dir
             for skin_dir in sorted(base.iterdir()):
-                if not skin_dir.is_dir() or skin_dir.name in seen:
+                if not skin_dir.is_dir() or skin_dir.name in seen or skin_dir.name not in SUPPORTED_SKINS:
                     continue
                 skin_yaml = skin_dir / "skin.yaml"
                 if skin_yaml.exists():
@@ -204,7 +213,8 @@ class SkinLoader:
         return skins
     
     def load_skin(self, skin_name: str) -> Optional[Skin]:
-        """Load a skin by name."""
+        """Load a skin by name (removed skins resolve to Cosmic)."""
+        skin_name = resolve_skin_name(skin_name)
         # Check cache first
         if skin_name in self._skins_cache:
             logger.debug(f"Returning cached skin: {skin_name}")
@@ -258,7 +268,8 @@ class SkinLoader:
         return self._active_skin
     
     def set_active_skin(self, skin_name: str) -> bool:
-        """Set the active skin by name."""
+        """Set the active skin by name (removed skins resolve to Cosmic)."""
+        skin_name = resolve_skin_name(skin_name)
         skin = self.load_skin(skin_name)
         if skin:
             self._active_skin_name = skin_name

@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 
 SEASON_SETTING_KEY = "season_override"
 SEASON_CHOICES = ("auto", "none", "halloween", "thanksgiving", "winter", "newyear")
-UI_THEMES = ("classic", "cosmic")
+UI_THEMES = ("cosmic",)  # Cosmic is the only theme; holiday seasons are its variants
 DENSITIES = ("companion", "operations")
 
 DS_SEASONS_JSON = Path(__file__).resolve().parent.parent / "static" / "ds" / "seasons.json"
@@ -134,13 +134,14 @@ def _json_for_script(data: Any) -> str:
 def inject_theme(page: str, ctx: Mapping[str, Any]) -> str:
     """Render the theme context into a dashboard template.
 
-    * ``<html ...>`` gets ``data-ui``, ``data-season`` (+ variant) and ``data-season-lock``.
+    * ``<html ...>`` gets ``data-ui``, ``data-theme="cosmic"``, ``data-season`` (+ variant) and ``data-season-lock``.
     * ``<!--DASH_THEME-->`` (right after ``<head>`` in both templates) becomes the
       calendar JSON for ds/seasons.js and ``window.__DASH_THEME__`` for theme/dash-theme.js.
     """
     season = ctx.get("season") or {}
     attrs = [
         f'data-ui="{_html.escape(str(ctx.get("ui", "")))}"',
+        'data-theme="cosmic"',
         f'data-season="{_html.escape(season.get("season", "none"))}"',
     ]
     if season.get("variant"):

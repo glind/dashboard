@@ -101,7 +101,14 @@ class OllamaProvider(AIProvider):
                 payload = {
                     'model': self.model_name,
                     'messages': messages,
-                    'stream': stream
+                    'stream': stream,
+                    # Dashboard chat should answer promptly and concisely. A hard
+                    # generation ceiling prevents local models from spending a
+                    # minute producing an unnecessarily long dashboard brief.
+                    'options': {
+                        'temperature': 0.35,
+                        'num_predict': 320,
+                    },
                 }
                 
                 async with session.post(self._endpoint_url('api/chat'), json=payload) as response:

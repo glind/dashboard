@@ -2,8 +2,10 @@
 Task Collection API Endpoints
 """
 
+import json
 import logging
 import os
+from pathlib import Path
 from fastapi import APIRouter, HTTPException, Query
 from datetime import datetime, timedelta
 
@@ -21,6 +23,7 @@ router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
 # Initialize database
 db = DatabaseManager()
+project_root = Path(__file__).resolve().parents[3]
 
 # Settings import is optional here so task collection API stays available
 # even when external config module wiring is temporarily broken.
@@ -303,3 +306,33 @@ async def get_task_stats():
     except Exception as e:
         logger.error(f"Error getting task stats: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/scheduled")
+async def get_scheduled_tasks():
+    """Return the scheduled task registry, if present."""
+    try:
+        registry_path = project_root / "tasks" / "tasks.json"
+        if not registry_path.exists():
+            return {
+                "success": True,
+                "tasks": [],
+                "source": str(registry_path),
+                "updated_at": None,
+            }
+        data = json.loads(registry_path.read_text(encoding="utf-8"))
+        tasks = data.get("tasks", []) if isinstance(data, dict) else []
+        return {
+            "success": True,
+            "tasks": tasks,
+            "source": str(registry_path),
+            "updated_at": data.get("updated_at"),
+        }
+    except Exception as e:
+        logger.error(f"Error loading scheduled tasks: {e}")
+        return {
+            "success": False,
+            "tasks": [],
+            "source": str(project_root / "tasks" / "tasks.json"),
+            "error": str(e),
+        }

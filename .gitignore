@@ -91,3 +91,6 @@ data/voice_models/
 data/voice_cache/
 *.onnx
 *.onnx.json
+# Local runtime data and logs (personal; never commit)
+data/assistant_memory/
+*.err

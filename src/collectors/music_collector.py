@@ -107,15 +107,16 @@ class MusicCollector:
         ]
         
         # RSS feeds for indie electronic music news and zines
+        # Removed Oct 2026 (dead: NXDOMAIN / parked / no response, logged errors every run):
+        # blog.beatport.com, weirdaudio.com, industrialmusic.com, a-closer-listen.com,
+        # blog.kahvi.org, newmusicalexpress.com
         self.music_news_feeds = [
             # Indie Electronic & Experimental
             'https://www.residentadvisor.net/xml/rss.aspx',  # Essential for electronic music
             'https://www.factmag.com/feed/',  # Essential for electronic/experimental
             'https://www.xlr8r.com/feed/',  # Electronic music focus
             'https://www.beatportal.com/feed/',  # Electronic/dance music
-            'https://blog.beatport.com/feed/',  # Beatport blog
             'https://feeds.feedburner.com/traxsource',  # House/techno
-            'https://www.weirdaudio.com/feed/',  # Weird/experimental electronic
             
             # Underground & Indie Zines
             'https://www.tinymixtapes.com/feed',  # Experimental/indie focus
@@ -128,7 +129,6 @@ class MusicCollector:
             'https://crackmagazine.net/feed/',  # Underground electronic
             
             # Industrial & Dark Electronic (relevant to your style)
-            'https://www.industrialmusic.com/feed/',  # Industrial music news
             'https://www.side-line.com/feed/',  # Dark electronic/industrial
             'https://www.reflectionsofdarkness.com/feed/',  # Dark/industrial music
             'https://electricityclub.co.uk/feed/',  # Electronic music club
@@ -136,12 +136,9 @@ class MusicCollector:
             # Ambient & Experimental (for your atmospheric work)
             'https://ambientblog.net/feed/',  # Ambient music blog
             'https://www.textura.org/feed/',  # Ambient/electronic reviews
-            'https://www.a-closer-listen.com/feed/',  # Experimental/ambient focus
             
             # Netlabel & DIY Scene
-            'http://blog.kahvi.org/feeds/posts/default',  # Netlabel collective
             'https://feeds.feedburner.com/electronicexplorations',  # Electronic exploration
-            'https://www.newmusicalexpress.com/feed',  # NME (has good indie coverage)
             
             # Keep a few mainstream for balance but focus on indie
             'https://pitchfork.com/rss/reviews/albums/',  # Albums only, not news
@@ -993,7 +990,6 @@ class MusicCollector:
                 "https://electricityclub.co.uk/feed/",
                 
                 # Netlabel and DIY scene
-                "http://blog.kahvi.org/feeds/posts/default",
                 "https://feeds.feedburner.com/electronicexplorations"
             ]
             

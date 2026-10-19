@@ -35,6 +35,19 @@ def get_database_path():
 DATABASE_PATH = get_database_path()
 
 
+
+# user_profile columns added after the original schema; migrated at startup.
+USER_PROFILE_EXTRA_COLUMNS = (
+    ("github_username", "TEXT"),
+    ("soundcloud_url", "TEXT"),
+    ("bandcamp_url", "TEXT"),
+    ("music_artist_name", "TEXT"),
+    ("music_label_name", "TEXT"),
+    ("book_title", "TEXT"),
+    ("project_paths", "TEXT"),
+    ("vanity_search_terms", "TEXT"),
+)
+
 class DatabaseManager:
     """Manages SQLite database operations for the dashboard."""
     
@@ -609,6 +622,13 @@ class DatabaseManager:
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+            # Columns added after the table was first created (older databases lack them:
+            # "no such column: github_username" broke the profile, GitHub and vanity features).
+            cursor.execute("PRAGMA table_info(user_profile)")
+            _profile_cols = {r[1] for r in cursor.fetchall()}
+            for _col, _decl in USER_PROFILE_EXTRA_COLUMNS:
+                if _col not in _profile_cols:
+                    cursor.execute(f"ALTER TABLE user_profile ADD COLUMN {_col} {_decl}")
             
             # AI message feedback table
             cursor.execute("""

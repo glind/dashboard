@@ -238,6 +238,6 @@ _collector: Optional[LastFMCollector] = None
 def get_lastfm_collector() -> LastFMCollector:
     """Get the Last.fm collector singleton"""
     global _collector
-    if _collector is None:
+    if _collector is None or not _collector.api_key:  # re-read creds until a key is configured
         _collector = LastFMCollector()
     return _collector

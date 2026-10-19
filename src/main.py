@@ -3205,7 +3205,7 @@ async def update_avatar_setting(request: Request):
     """Update user's avatar preference for a skin."""
     try:
         data = await request.json()
-        skin_name = data.get('skin', 'roger')
+        skin_name = data.get('skin', 'cosmic')
         avatar_path = data.get('avatar', '')
         
         if not avatar_path:
@@ -3227,7 +3227,7 @@ async def update_avatar_setting(request: Request):
 
 
 @app.get("/api/settings/avatar")
-async def get_avatar_setting(skin: str = "roger"):
+async def get_avatar_setting(skin: str = "cosmic"):
     """Get user's avatar preference for a skin."""
     try:
         from database import DatabaseManager
@@ -4627,7 +4627,13 @@ async def get_station_data(station_id: str):
     
     try:
         collector = get_lastfm_collector()
+        if not getattr(collector, "api_key", ""):
+            # Without a key every Last.fm call returns nothing and the player sat on "Loading..."
+            return {"success": False, "needs_setup": True,
+                    "error": "Last.fm API key not configured (app config lastfm.api_key or LASTFM_API_KEY)"}
         data = await collector.get_station_data(station_id)
+        if not data.get("tracks"):
+            return {"success": False, "data": data, "error": "Last.fm returned no tracks for this station right now"}
         return {"success": True, "data": data}
     except Exception as e:
         logger.error(f"Error fetching station data: {e}")
@@ -4994,7 +5000,11 @@ async def get_ebay_auctions(category: str = "retro_tech"):
         else:
             auctions = []
         
-        return {"success": True, "auctions": auctions[:20]}
+        auctions = auctions[:20]
+        # The collector falls back to made-up sample listings when eBay blocks the scrape
+        # (it always does from hoth): say so instead of showing fake prices as real auctions.
+        sample = bool(auctions) and all(a.get("source") == "ebay_sample" for a in auctions)
+        return {"success": True, "auctions": auctions, "sample": sample}
     except Exception as e:
         logger.error(f"Error fetching eBay auctions: {e}")
         return {"success": False, "auctions": [], "error": str(e)}
@@ -7247,6 +7257,29 @@ async def get_hacker_news_articles():
     
     return articles
 
+_MUSIC_CACHE: Dict[str, Any] = {"at": None, "data": None}
+_MUSIC_TTL = timedelta(minutes=30)
+_MUSIC_TIMEOUT_S = 20
+
+
+async def _cached_music_data():
+    """Music collector output, cached for 30 min. The collector walks many feeds (some dead),
+    which took >45 s per request and timed out the Music section; a slow refresh now
+    returns the previous data (or nothing) after 20 s instead of hanging the request."""
+    now = datetime.now()
+    if _MUSIC_CACHE["data"] is not None and _MUSIC_CACHE["at"] and now - _MUSIC_CACHE["at"] < _MUSIC_TTL:
+        return _MUSIC_CACHE["data"]
+    from collectors.music_collector import MusicCollector
+    try:
+        data = await asyncio.wait_for(MusicCollector().collect_all_music_data(), timeout=_MUSIC_TIMEOUT_S)
+    except asyncio.TimeoutError:
+        logger.warning(f"Music collection took over {_MUSIC_TIMEOUT_S}s; serving cached data")
+        _MUSIC_CACHE["at"] = now - _MUSIC_TTL + timedelta(minutes=5)  # retry in 5 min
+        return _MUSIC_CACHE["data"]
+    _MUSIC_CACHE.update(at=now, data=data)
+    return data
+
+
 @app.get("/api/music")
 async def get_music():
     """Get music trends for user's music projects"""
@@ -7257,11 +7290,7 @@ async def get_music():
         
         if COLLECTORS_AVAILABLE:
             try:
-                from collectors.music_collector import MusicCollector
-                music_collector = MusicCollector()
-                
-                # Get music data for the user's record label and band
-                music_data = await music_collector.collect_all_music_data()
+                music_data = await _cached_music_data()
                 
                 if music_data:
                     # Format the data for the dashboard
@@ -13365,6 +13394,12 @@ async def open_terminal(request: Request):
 
 
 
+@app.get("/email")
+async def email_page():
+    """The family UI's Email link: the full (modern) UI's email section."""
+    return RedirectResponse("/?ui=modern&section=emails")
+
+
 @app.get("/leads")
 async def leads_page():
     """Serve the leads dashboard page."""
@@ -14247,6 +14282,9 @@ async def get_comic_history(comic_id: str, limit: int = 200):
     """Archived strips for a comic, oldest → newest, for paging back in the viewer."""
     series = _ARCHIVE_ALIASES.get(comic_id, comic_id)
     archive_file = project_root / "data" / f"{series}_archive.json"
+    if not archive_file.exists() and series == "garfield":
+        # Garfield is served from the archive.org sample (see get_random_garfield), not a daily archive
+        archive_file = project_root / "data" / "garfield_archive_images.json"
     if not archive_file.exists():
         return {"success": True, "comics": []}
     try:

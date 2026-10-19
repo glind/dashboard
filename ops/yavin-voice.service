@@ -1,0 +1,14 @@
+[Unit]
+Description=Yavin local speech recognition and synthesis
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/glind
+ExecStart=/home/glind/venvs/yavin-voice/bin/uvicorn yavin_voice_service:app --host 0.0.0.0 --port 8766
+Restart=on-failure
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target

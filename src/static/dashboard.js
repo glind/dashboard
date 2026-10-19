@@ -459,6 +459,11 @@ try {
         this.clockTimer = null;
         this.voiceRecognition = null;
         this.speechSynthesis = window.speechSynthesis;
+        this.localVoiceAvailable = false;
+        this.voiceRecorder = null;
+        this.voiceStream = null;
+        this.voiceAudio = null;
+        this.voiceSilenceTimer = null;
         this.alertedEvents = new Set();
         this.feedbackData = {}; // Store feedback for AI training
         this.dismissedSuggestions = new Set(); // Track dismissed AI suggestions
@@ -517,6 +522,7 @@ try {
         
         try {
             this.initVoiceRecognition();
+            this.checkLocalVoiceStatus();
             this.initAudioControlPanel();
             this.loadDashboardConfig();
             this.loadAutoRefreshSettings();
@@ -546,6 +552,26 @@ try {
         } catch (error) {
             console.warn('Voice recognition not available:', error);
         }
+    }
+
+    async checkLocalVoiceStatus() {
+        try {
+            const response = await fetch('/api/voice/status', { cache: 'no-store' });
+            const status = await response.json();
+            this.localVoiceAvailable = !!status.available;
+            this.updateVoicePromptButton();
+        } catch (error) {
+            this.localVoiceAvailable = false;
+        }
+    }
+
+    updateVoicePromptButton(label = null) {
+        document.querySelectorAll('[data-voice-prompt]').forEach(btn => {
+            btn.textContent = label || (this.voiceRecorder ? '⏹ Stop' : '🎙 Talk');
+            btn.title = this.localVoiceAvailable
+                ? 'Private local voice via Alderraan'
+                : 'Browser speech fallback';
+        });
     }
     
     updateGlobalMuteButton() {
@@ -3188,9 +3214,21 @@ try {
                 this.notesStats = {
                     obsidian_count: data.obsidian_count || 0,
                     gdrive_count: data.gdrive_count || 0,
+                    apple_notes_count: data.apple_notes_count || 0,
+                    google_keep_count: data.google_keep_count || 0,
                     total_todos_found: data.total_todos_found || 0,
                     tasks_created: data.tasks_created || 0
                 };
+                const sourceBadges = {
+                    'obsidian-count-badge': this.notesStats.obsidian_count,
+                    'gdrive-count-badge': this.notesStats.gdrive_count,
+                    'apple-notes-count-badge': this.notesStats.apple_notes_count,
+                    'google-keep-count-badge': this.notesStats.google_keep_count
+                };
+                Object.entries(sourceBadges).forEach(([id, count]) => {
+                    const badge = document.getElementById(id);
+                    if (badge) badge.textContent = String(count);
+                });
                 this.renderNotes();
             } else {
                 this.setSectionError('notes-grid', 'Unable to load notes right now.');
@@ -3349,12 +3387,12 @@ try {
                     <div class="text-2xl font-bold text-white">${this.notesStats.gdrive_count}</div>
                 </div>
                 <div class="bg-gray-800 rounded-lg p-4">
-                    <div class="text-gray-400 text-sm">TODOs Found</div>
-                    <div class="text-2xl font-bold text-purple-400">${this.notesStats.total_todos_found}</div>
+                    <div class="text-gray-400 text-sm">Apple Notes</div>
+                    <div class="text-2xl font-bold text-white">${this.notesStats.apple_notes_count}</div>
                 </div>
                 <div class="bg-gray-800 rounded-lg p-4">
-                    <div class="text-gray-400 text-sm">Tasks Created</div>
-                    <div class="text-2xl font-bold text-green-400">${this.notesStats.tasks_created}</div>
+                    <div class="text-gray-400 text-sm">Google Keep</div>
+                    <div class="text-2xl font-bold text-white">${this.notesStats.google_keep_count}</div>
                 </div>
             `;
         }
@@ -3368,9 +3406,18 @@ try {
         container.innerHTML = this.notes.map(note => {
             const isObsidian = note.source === 'obsidian';
             const isGoogleDrive = note.source === 'google_drive' || note.source === 'gdrive';
-            const sourceIcon = isObsidian ? '📓' : '📄';
-            const sourceLabel = isObsidian ? 'Obsidian' : 'Google Drive';
-            const sourceColor = isObsidian ? 'purple' : 'blue';
+            const sourceDetails = {
+                obsidian: ['📓', 'Obsidian', 'purple'],
+                google_drive: ['📄', 'Google Drive', 'blue'],
+                gdrive: ['📄', 'Google Drive', 'blue'],
+                apple_notes: ['🍎', 'Apple Notes', 'green'],
+                google_keep: ['💡', 'Google Keep', 'yellow']
+            }[note.source] || ['📝', note.source || 'Notes', 'gray'];
+            const [sourceIcon, sourceLabel, sourceColor] = sourceDetails;
+            const changedAt = note.modified_at || note.created_at;
+            const changedLabel = changedAt && !Number.isNaN(Date.parse(changedAt))
+                ? new Date(changedAt).toLocaleDateString([], {month: 'short', day: 'numeric', year: 'numeric'})
+                : 'Recently updated';
             
             // Resolve note link for all connected sources
             let noteLink = '';
@@ -3396,11 +3443,11 @@ try {
                             </span>
                             ${note.todo_count ? `<span class="px-2 py-1 rounded text-xs font-medium bg-yellow-500/20 text-yellow-400">${note.todo_count} TODOs</span>` : ''}
                         </div>
-                        <span class="text-xs text-gray-500">${note.modified || 'Recently updated'}</span>
+                        <span class="text-xs text-gray-500">${changedLabel}</span>
                     </div>
                     
                     <h3 class="text-lg font-semibold text-white mb-2 line-clamp-2">
-                        ${note.title || 'Untitled Note'}
+                        ${this.escapeHtml(note.title || note.name || 'Untitled Note')}
                     </h3>
                     
                     ${note.tags && note.tags.length > 0 ? `
@@ -5183,33 +5230,33 @@ Then ask me: "What would you like to do with this email?"`,
         this.showAudioControlPanel('ai-voice', 'Rogr speaking...');
         
         try {
-            const response = await fetch('/api/voice/test', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    message: text,
-                    style: style,
-                    signature: addSignature,
-                    assistant_id: this.activeAssistantId
-                })
-            });
-            
-            const result = await response.json();
-            if (!result.success) {
-                console.error('Voice system error:', result.error);
-                this.showNotification('Rogr voice unavailable, using browser voice fallback.', 'warning');
+            const spokenText = addSignature ? `${text}. Roger, roger.` : text;
+            const form = new FormData();
+            form.append('text', spokenText);
+            form.append('speed', String(this.getActiveAssistant()?.voice_speed || 1.0));
+            const response = await fetch('/api/voice/synthesize', { method: 'POST', body: form });
+            if (!response.ok) throw new Error('Local voice service unavailable');
+
+            const blob = await response.blob();
+            const objectUrl = URL.createObjectURL(blob);
+            const audio = new Audio(objectUrl);
+            this.voiceAudio = audio;
+            audio.volume = this.audioState?.volume ?? 0.8;
+            audio.onended = () => {
+                URL.revokeObjectURL(objectUrl);
+                if (this.voiceAudio === audio) this.voiceAudio = null;
                 this.hideAudioControlPanel();
-                this.speakTextBrowser(text);
-            } else {
-                // Voice was sent to PersonaPlex - hide after estimated time
-                // Rough estimate: 100ms per character
-                const estimatedDuration = Math.max(2000, text.length * 100);
-                setTimeout(() => this.hideAudioControlPanel(), estimatedDuration);
-            }
+            };
+            audio.onerror = () => {
+                URL.revokeObjectURL(objectUrl);
+                if (this.voiceAudio === audio) this.voiceAudio = null;
+                this.hideAudioControlPanel();
+                this.speakTextBrowser(spokenText);
+            };
+            await audio.play();
         } catch (error) {
             console.error('Failed to speak with Rogr:', error);
             this.hideAudioControlPanel();
-            this.showNotification('Rogr voice unavailable, using browser voice fallback.', 'warning');
             this.speakTextBrowser(text);
         }
     }
@@ -5282,6 +5329,11 @@ Then ask me: "What would you like to do with this email?"`,
     }
     
     stopSpeech() {
+        if (this.voiceAudio) {
+            this.voiceAudio.pause();
+            this.voiceAudio.currentTime = 0;
+            this.voiceAudio = null;
+        }
         if (this.speechSynthesis) {
             this.speechSynthesis.cancel();
         }
@@ -6217,41 +6269,88 @@ Then ask me: "What would you like to do with this email?"`,
         );
     }
     
-    startVoicePrompt() {
-        if (!this.voiceRecognition) {
-            alert('Voice recognition is not supported in your browser.');
+    async startVoicePrompt() {
+        if (this.voiceRecorder) {
+            this.stopLocalVoiceRecording();
             return;
         }
-        
-        const btn = document.getElementById('ai-voice-prompt');
-        if (btn) {
-            btn.textContent = '🎤 Listening...';
-            btn.classList.add('animate-pulse');
+
+        // Barge-in: beginning a prompt always stops the assistant immediately.
+        this.stopSpeech();
+        if (this.voiceAudio) {
+            this.voiceAudio.pause();
+            this.voiceAudio = null;
         }
-        
-        this.voiceRecognition.onresult = (event) => {
-            const transcript = event.results[0][0].transcript;
+
+        if (this.localVoiceAvailable && navigator.mediaDevices?.getUserMedia && window.MediaRecorder) {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+                });
+                const chunks = [];
+                const recorder = new MediaRecorder(stream);
+                this.voiceStream = stream;
+                this.voiceRecorder = recorder;
+                recorder.ondataavailable = event => {
+                    if (event.data.size) chunks.push(event.data);
+                };
+                recorder.onstop = async () => {
+                    this.voiceRecorder = null;
+                    this.voiceStream?.getTracks().forEach(track => track.stop());
+                    this.voiceStream = null;
+                    this.updateVoicePromptButton('⏳ Transcribing…');
+                    try {
+                        const audio = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' });
+                        const form = new FormData();
+                        form.append('audio', audio, 'prompt.webm');
+                        const response = await fetch('/api/voice/transcribe', { method: 'POST', body: form });
+                        const result = await response.json();
+                        if (!response.ok || !result.text) throw new Error(result.detail || 'No speech detected');
+                        const input = document.getElementById('ai-chat-input');
+                        if (input) input.value = result.text;
+                        await this.sendAIMessage();
+                    } catch (error) {
+                        console.error('Local transcription failed:', error);
+                        this.showNotification(error.message || 'Could not understand that recording.', 'warning');
+                    } finally {
+                        this.updateVoicePromptButton();
+                    }
+                };
+                recorder.start();
+                this.updateVoicePromptButton('⏹ Stop');
+                setTimeout(() => {
+                    if (this.voiceRecorder === recorder) this.stopLocalVoiceRecording();
+                }, 20000);
+                return;
+            } catch (error) {
+                console.warn('Local microphone capture unavailable:', error);
+            }
+        }
+
+        if (!this.voiceRecognition) {
+            const secureHint = window.isSecureContext ? '' : ' Open localhost:8008 to grant microphone access.';
+            alert(`Voice recognition is not available in this browser.${secureHint}`);
+            return;
+        }
+
+        this.updateVoicePromptButton('🎤 Listening…');
+        this.voiceRecognition.onresult = event => {
             const input = document.getElementById('ai-chat-input');
-            if (input) {
-                input.value = transcript;
-                this.sendAIMessage();
-            }
-            
-            if (btn) {
-                btn.textContent = '🎤 Voice Prompt';
-                btn.classList.remove('animate-pulse');
-            }
+            if (input) input.value = event.results[0][0].transcript;
+            this.updateVoicePromptButton();
+            this.sendAIMessage();
         };
-        
-        this.voiceRecognition.onerror = (event) => {
+        this.voiceRecognition.onerror = event => {
             console.error('Voice recognition error:', event.error);
-            if (btn) {
-                btn.textContent = '🎤 Voice Prompt';
-                btn.classList.remove('animate-pulse');
-            }
+            this.updateVoicePromptButton();
         };
-        
         this.voiceRecognition.start();
+    }
+
+    stopLocalVoiceRecording() {
+        if (this.voiceRecorder && this.voiceRecorder.state !== 'inactive') {
+            this.voiceRecorder.stop();
+        }
     }
     
     // VANITY ALERTS
@@ -10014,4 +10113,3 @@ if (typeof window.saveUserProfile !== 'function') {
         }
     };
 }
-

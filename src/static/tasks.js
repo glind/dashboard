@@ -22,7 +22,8 @@ async function initializeTaskManagement() {
     // Load tasks and suggested todos on startup
     await Promise.all([
         loadTasks(),
-        loadSuggestedTodos()
+        loadSuggestedTodos(),
+        loadScheduledTasks()
     ]);
     
     // Set up event listeners
@@ -32,6 +33,7 @@ async function initializeTaskManagement() {
     setInterval(() => {
         loadTasks();
         loadSuggestedTodos();
+        loadScheduledTasks();
     }, 30000);
 }
 
@@ -837,7 +839,9 @@ window.taskManagement = {
     updateTaskStatus,
     deleteTask,
     syncWithTickTick,
-    loadSuggestedTodos
+    loadSuggestedTodos,
+    loadScheduledTasks,
+    renderScheduledTasks
 };
 
 // Make edit functions globally available
@@ -846,6 +850,67 @@ window.cancelEditTaskContent = cancelEditTaskContent;
 window.saveTaskContent = saveTaskContent;
 window.approveSuggestedTodo = approveSuggestedTodo;
 window.rejectSuggestedTodo = rejectSuggestedTodo;
+
+async function loadScheduledTasks() {
+    const container = document.getElementById('scheduled-tasks-container');
+    if (!container) return;
+
+    try {
+        const response = await fetch('/api/tasks/scheduled');
+        const data = await response.json();
+        if (data.success !== false && Array.isArray(data.tasks)) {
+            renderScheduledTasks(data.tasks);
+        } else {
+            container.innerHTML = `<div class="text-gray-500 text-sm">${escapeHtml(data.error || 'Unable to load scheduled tasks.')}</div>`;
+        }
+    } catch (error) {
+        console.error('Error loading scheduled tasks:', error);
+        container.innerHTML = `<div class="text-gray-500 text-sm">Error loading scheduled tasks.</div>`;
+    }
+}
+
+function renderScheduledTasks(tasks) {
+    const container = document.getElementById('scheduled-tasks-container');
+    if (!container) return;
+
+    if (!Array.isArray(tasks) || tasks.length === 0) {
+        container.innerHTML = `<div class="text-gray-500 text-sm">No scheduled tasks registered yet.</div>`;
+        return;
+    }
+
+    const bySource = {};
+    for (const task of tasks) {
+        const key = task.source || 'unknown';
+        bySource[key] = bySource[key] || [];
+        bySource[key].push(task);
+    }
+
+    let html = '';
+
+    for (const [source, sourceTasks] of Object.entries(bySource)) {
+        html += `<div class="bg-gray-900/40 border border-gray-700 rounded-lg p-4 space-y-2">
+            <div class="text-sm font-semibold text-gray-300 mb-1">${escapeHtml(source)}</div>`;
+
+        for (const task of sourceTasks) {
+            const name = escapeHtml(task.name || task.title || task.id || 'Unnamed');
+            const schedule = escapeHtml(task.schedule || task.cron || '');
+            const enabled = task.enabled == null ? '' : (task.enabled ? '✅ enabled' : '⛔ disabled');
+            const lastStatus = task.last_status ? escapeHtml(String(task.last_status)) : '';
+            const nextRun = task.next_run_at ? escapeHtml(String(task.next_run_at)) : '';
+            const notes = task.notes ? escapeHtml(String(task.notes)) : '';
+            const details = [schedule, enabled, lastStatus ? `last: ${lastStatus}` : '', nextRun ? `next: ${nextRun}` : '', notes].filter(Boolean).join('<br>');
+
+            html += `<div class="text-sm text-gray-200">
+                <div class="font-medium">${name}</div>
+                ${details ? `<div class="text-gray-400 text-xs mt-1">${details}</div>` : ''}
+            </div>`;
+        }
+
+        html += `</div>`;
+    }
+
+    container.innerHTML = html;
+}
 
 // Auto-initialize if DOM is already loaded
 if (document.readyState === 'loading') {

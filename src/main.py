@@ -4,8 +4,9 @@ Simple Personal Dashboard with News Filtering
 Clean, minimal implementation focusing on core data sources
 """
 
-from fastapi import FastAPI, HTTPException, Request, Query
-from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse, JSONResponse
+from fastapi import FastAPI, HTTPException, Request, Query, UploadFile, File, Form
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 import uvicorn
 import json
@@ -30,6 +31,8 @@ import io
 import hashlib
 import zipfile
 from urllib.parse import quote
+import re
+import queue
 from typing import Dict, Any, Optional, List
 
 # Comics RSS catalog (kept near top so endpoints can reference)
@@ -338,6 +341,15 @@ except ImportError as e:
     print(f"Note: Could not import AI Assistant modules: {e}")
     AI_ASSISTANT_AVAILABLE = False
 
+try:
+    from services.personal_assistant_runtime import PersonalAssistantRuntime
+    personal_assistant = PersonalAssistantRuntime(lambda: get_ai_service(db, settings))
+    PERSONAL_ASSISTANT_AVAILABLE = True
+except Exception as e:
+    logger.warning(f"Personal assistant runtime unavailable: {e}")
+    personal_assistant = None
+    PERSONAL_ASSISTANT_AVAILABLE = False
+
 # Set up logging
 # ── Logging setup ──────────────────────────────────────────────────────────────
 import logging.handlers as _logging_handlers
@@ -360,6 +372,24 @@ logging.getLogger("uvicorn.access").setLevel(logging.WARNING)   # quiet access n
 # ────────────────────────────────────────────────────────────────────────────────
 
 app = FastAPI(title="Simple Personal Dashboard")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://dashboard.home",
+        "http://yavin.home",
+        "http://focus.home",
+        "http://launchpad.home",
+        "http://dashboard.localhost",
+        "http://yavin.localhost",
+        "http://focus.localhost",
+        "http://launchpad.localhost",
+        "http://127.0.0.1:8008",
+    ],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type"],
+)
 
 
 # Serve static files for PWA and frontend assets from both locations
@@ -808,6 +838,7 @@ participant_calendar_cache: Dict[str, Any] = {
     'cache_key': '',
     'events': []
 }
+notes_page_cache: Dict[str, Any] = {'timestamp': 0.0, 'response': None}
 self_identity_cache: Dict[str, Any] = {
     'timestamp': None,
     'emails': []
@@ -2696,7 +2727,7 @@ async def scan_notes():
         google_keep_labels = [l.strip() for l in google_keep_labels_str.split(',') if l.strip()] if google_keep_labels_str else None
         
         # Other settings
-        limit = int(os.getenv('NOTES_LIMIT', db.get_setting('notes_limit', notes_config.get('notes_limit', 10))))
+        limit = 50
         
         logger.info(f"Scanning notes - Obsidian: {obsidian_path}, GDrive: {gdrive_folder_id}, Apple Notes: {include_apple_notes}, Google Keep: {bool(google_keep_email)}")
         
@@ -2933,6 +2964,9 @@ async def sync_notes(request: Request):
 async def get_notes():
     """Get recent notes from Obsidian and Google Drive."""
     try:
+        cached_notes_response = notes_page_cache.get('response')
+        if cached_notes_response and time.monotonic() - float(notes_page_cache.get('timestamp') or 0) < 60:
+            return cached_notes_response
         from collectors.notes_collector import collect_all_notes
         from database import get_credentials, DatabaseManager
         import traceback
@@ -2966,10 +3000,22 @@ async def get_notes():
                 )
             ).lower() != 'false'
         )
-        apple_notes_timeout = int(os.getenv('APPLE_NOTES_TIMEOUT', db.get_setting('apple_notes_timeout', 10)))
+        apple_notes_timeout = min(3, int(os.getenv('APPLE_NOTES_TIMEOUT', db.get_setting('apple_notes_timeout', 10))))
 
         # Other settings
-        limit = int(os.getenv('NOTES_LIMIT', db.get_setting('notes_limit', notes_config.get('notes_limit', 10))))
+        # The Notes page is a review inbox: show the 50 newest created/edited
+        # notes from each configured provider.
+        limit = 50
+        google_keep_email = (
+            os.getenv('GOOGLE_KEEP_EMAIL') or db.get_setting('google_keep_email') or notes_config.get('google_keep_email')
+        )
+        google_keep_token = (
+            os.getenv('GOOGLE_KEEP_TOKEN') or db.get_setting('google_keep_token') or notes_config.get('google_keep_token')
+        )
+        google_keep_labels_raw = (
+            os.getenv('GOOGLE_KEEP_LABELS') or db.get_setting('google_keep_labels') or notes_config.get('google_keep_labels', '')
+        )
+        google_keep_labels = [value.strip() for value in str(google_keep_labels_raw).split(',') if value.strip()]
         auto_create = os.getenv('AUTO_CREATE_TASKS', str(db.get_setting('auto_create_tasks', notes_config.get('auto_create_tasks', True)))).lower() in ('true', '1', 'yes')
         
         logger.info(
@@ -2989,6 +3035,9 @@ async def get_notes():
                     obsidian_path=obsidian_path,
                     gdrive_folder_id=gdrive_folder_id,
                     include_apple_notes=include_apple_notes,
+                    google_keep_email=google_keep_email,
+                    google_keep_token=google_keep_token,
+                    google_keep_labels=google_keep_labels or None,
                     apple_notes_timeout=apple_notes_timeout,
                     limit=limit
                 ),
@@ -3083,14 +3132,19 @@ async def get_notes():
                     logger.error(f"Error creating suggested todo: {e}")
                     continue
         
-        return {
+        response_data = {
             "success": True,
             "notes": result['notes'],
             "obsidian_count": result['obsidian_count'],
             "gdrive_count": result['gdrive_count'],
+            "apple_notes_count": result.get('apple_notes_count', 0),
+            "google_keep_count": result.get('google_keep_count', 0),
             "total_todos_found": result['total_todos_found'],
             "suggestions_created": suggestions_created
         }
+        notes_page_cache['timestamp'] = time.monotonic()
+        notes_page_cache['response'] = response_data
+        return response_data
         
     except Exception as e:
         logger.error(f"Error collecting notes: {e}")
@@ -10154,6 +10208,147 @@ async def build_ai_context(user_message: str) -> str:
     except Exception as e:
         logger.error(f"Error building AI context: {e}")
         return f"Error accessing dashboard data: {e}"
+
+
+@app.get("/api/assistant/status")
+async def personal_assistant_status():
+    """Return shared assistant, memory, voice-client, and Hermes capacity status."""
+    if not PERSONAL_ASSISTANT_AVAILABLE:
+        return {"available": False, "error": "Personal assistant runtime is unavailable"}
+    memory = personal_assistant.read_memory()
+    return {
+        "available": True,
+        "memory": {
+            "short_term_chars": len(memory["short_term"]),
+            "long_term_chars": len(memory["long_term"]),
+        },
+        "hermes": personal_assistant.hermes_status(),
+        "voice": {
+            "browser_speech": True,
+            "personaplex_enabled": os.environ.get("PERSONAPLEX_ENABLED", "false").lower() == "true",
+        },
+    }
+
+
+VOICE_SERVICE_URL = os.environ.get("YAVIN_VOICE_URL", "http://alderaan.local:8766").rstrip("/")
+
+
+@app.get("/api/voice/status")
+async def local_voice_status():
+    """Report whether the private Alderraan speech service is ready."""
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            upstream = await client.get(f"{VOICE_SERVICE_URL}/health")
+            upstream.raise_for_status()
+            return {"available": True, **upstream.json()}
+    except Exception as exc:
+        return {"available": False, "status": "offline", "error": str(exc)}
+
+
+@app.post("/api/voice/transcribe")
+async def local_voice_transcribe(audio: UploadFile = File(...)):
+    """Keep remote speech infrastructure behind a same-origin upload API."""
+    payload = await audio.read()
+    if not payload or len(payload) > 20 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Audio must be between 1 byte and 20 MB")
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            upstream = await client.post(
+                f"{VOICE_SERVICE_URL}/transcribe",
+                files={"audio": (audio.filename or "recording.webm", payload, audio.content_type or "audio/webm")},
+            )
+        if upstream.status_code >= 400:
+            raise HTTPException(status_code=502, detail="Local transcription service rejected the recording")
+        return upstream.json()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.warning("Local transcription unavailable: %s", exc)
+        raise HTTPException(status_code=503, detail="Local transcription service is unavailable") from exc
+
+
+@app.post("/api/voice/synthesize")
+async def local_voice_synthesize(text: str = Form(...), speed: float = Form(1.0)):
+    """Return locally generated Kokoro speech audio from Alderraan."""
+    try:
+        async with httpx.AsyncClient(timeout=90.0) as client:
+            upstream = await client.post(
+                f"{VOICE_SERVICE_URL}/synthesize",
+                data={"text": text[:5000], "speed": max(0.7, min(1.3, speed))},
+            )
+        if upstream.status_code >= 400:
+            raise HTTPException(status_code=502, detail="Local speech service rejected the text")
+        return Response(
+            content=upstream.content,
+            media_type="audio/wav",
+            headers={"Cache-Control": "no-store", "X-Voice-Engine": "moonshine-kokoro"},
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.warning("Local speech synthesis unavailable: %s", exc)
+        raise HTTPException(status_code=503, detail="Local speech service is unavailable") from exc
+
+
+@app.post("/api/assistant/chat")
+async def personal_assistant_chat(request: Request):
+    """Context-aware assistant endpoint shared by all core-workspace apps."""
+    if not PERSONAL_ASSISTANT_AVAILABLE:
+        return {"success": False, "error": "Personal assistant runtime is unavailable"}
+    data = await request.json()
+    message = str(data.get("message") or "").strip()
+    if not message:
+        return {"success": False, "error": "Message is required"}
+    app_context = data.get("context") if isinstance(data.get("context"), dict) else {}
+    result = await personal_assistant.chat(message, app_context, data.get("conversation_id"))
+    if data.get("speak") and result.get("success") and result.get("response"):
+        result["spoken"] = personal_assistant.speak(str(result["response"]))
+    delegated_task = None
+    if data.get("delegate"):
+        try:
+            delegated_task = personal_assistant.enqueue_task(message, str(app_context.get("app") or "dashboard"))
+        except Exception as exc:
+            delegated_task = {"status": "not_queued", "error": str(exc)}
+    result["delegated_task"] = delegated_task
+    return result
+
+
+@app.post("/api/assistant/memory")
+async def personal_assistant_memory(request: Request):
+    """Explicitly save a stable fact or preference to Markdown memory."""
+    if not PERSONAL_ASSISTANT_AVAILABLE:
+        return {"success": False, "error": "Personal assistant runtime is unavailable"}
+    data = await request.json()
+    try:
+        return personal_assistant.remember(
+            str(data.get("content") or ""),
+            str(data.get("kind") or "long_term"),
+            str(data.get("source") or "dashboard"),
+        )
+    except ValueError as exc:
+        return {"success": False, "error": str(exc)}
+
+
+@app.get("/api/assistant/tasks")
+async def personal_assistant_tasks():
+    if not PERSONAL_ASSISTANT_AVAILABLE:
+        return {"tasks": []}
+    return {"tasks": personal_assistant.list_tasks()}
+
+
+@app.post("/api/assistant/tasks")
+async def personal_assistant_create_task(request: Request):
+    if not PERSONAL_ASSISTANT_AVAILABLE:
+        return {"success": False, "error": "Personal assistant runtime is unavailable"}
+    data = await request.json()
+    try:
+        task = personal_assistant.enqueue_task(
+            str(data.get("prompt") or ""),
+            str(data.get("app") or "dashboard"),
+        )
+        return {"success": True, "task": task}
+    except (ValueError, queue.Full) as exc:
+        return {"success": False, "error": str(exc)}
 
 
 @app.post("/api/ai/chat")

@@ -141,10 +141,17 @@ Keep answers concise (2-3 sentences). Be helpful and friendly."""
                     'messages': messages,
                     'stream': stream,
                     'think': self._think(),
+                    # Dashboard chat should answer promptly and concisely. A hard
+                    # generation ceiling prevents local models from spending a
+                    # minute producing an unnecessarily long dashboard brief.
+                    'options': {
+                        'temperature': 0.35,
+                        'num_predict': 320,
+                    },
                 }
                 chat_options = self._chat_options()
                 if chat_options:
-                    payload['options'] = chat_options
+                    payload['options'] = {**payload['options'], **chat_options}
                 
                 logger.debug(f"Ollama payload: model={self.model_name}, num_messages={len(messages)}")
                 

@@ -102,9 +102,18 @@ class ObsidianNotesCollector:
         with open(file_path, 'r', encoding='utf-8') as f:
             content = f.read()
         
-        # Extract title (first # heading or filename)
-        title_match = re.search(r'^#\s+(.+)$', content, re.MULTILINE)
-        title = title_match.group(1) if title_match else file_path.stem
+        # Prefer an explicit frontmatter title, then a meaningful heading. Imported
+        # notes often begin with generic sections such as "# Tags", which caused
+        # dozens of cards to appear to have the same (wrong) title.
+        frontmatter = re.match(r'^---\s*\n(.*?)\n---\s*\n', content, re.DOTALL)
+        frontmatter_title = None
+        if frontmatter:
+            match = re.search(r'^title:\s*["\']?(.+?)["\']?\s*$', frontmatter.group(1), re.MULTILINE | re.IGNORECASE)
+            frontmatter_title = match.group(1).strip() if match else None
+        generic_headings = {'tags', 'metadata', 'notes', 'links', 'properties', 'frontmatter'}
+        headings = [value.strip() for value in re.findall(r'^#\s+(.+)$', content, re.MULTILINE)]
+        meaningful_heading = next((value for value in headings if value.lower() not in generic_headings), None)
+        title = frontmatter_title or meaningful_heading or file_path.stem
         
         # Extract preview (first non-heading paragraph)
         lines = content.split('\n')
@@ -290,11 +299,12 @@ class GoogleDriveNotesCollector:
             notes = []
             for file in files:
                 try:
-                    # Get document content
-                    content = self._get_document_content(service, file['id'])
-                    
-                    # Extract TODOs from content
-                    todos = self._extract_todos_from_gdoc(content)
+                    # The Notes page is a review inbox. Fetching/exporting up to
+                    # 50 complete Docs serially made the initial list take tens
+                    # of seconds. Use Drive metadata here; content is available
+                    # when the user opens the source document.
+                    content = file.get('description') or ''
+                    todos = []
                     
                     # Clean up URL - remove usp parameter for better compatibility
                     url = file.get('webViewLink', '')
@@ -474,12 +484,9 @@ class AppleNotesCollector:
                         set output to output & "ID:" & noteId & return
                         set output to output & "CREATED:" & noteCreated & return
                         set output to output & "MODIFIED:" & noteModified & return
-                        -- Get body but limit to avoid slowdown
-                        set noteBody to ""
-                        try
-                            set noteBody to body of n
-                        end try
-                        set output to output & "BODY:" & return & noteBody & return
+                        -- Metadata-only review list: reading every HTML body is
+                        -- dramatically slower and can make the dashboard time out.
+                        set output to output & "BODY:" & return
                         set output to output & "|||NOTE_END|||" & return
                         set noteCount to noteCount + 1
                     on error
@@ -853,6 +860,9 @@ def collect_all_notes(obsidian_path: Optional[str] = None,
     Returns:
         Dictionary with notes from all sources
     """
+    # This function's contract is a per-provider review window, never an
+    # unbounded import. Keep the cap here so every caller gets the same behavior.
+    limit = max(1, min(int(limit or 50), 50))
     all_notes = []
     todos_to_create = []
     
@@ -984,11 +994,15 @@ def collect_all_notes(obsidian_path: Optional[str] = None,
                     'reauth_url': 'http://localhost:8008/auth/google'
                 }
     
-    # Sort all notes by modification time
-    all_notes.sort(key=lambda x: x.get('modified_at', ''), reverse=True)
+    # Sort the combined review feed by the newest creation or edit. Each source
+    # collector is already capped independently above.
+    all_notes.sort(
+        key=lambda x: max(str(x.get('modified_at') or ''), str(x.get('created_at') or '')),
+        reverse=True,
+    )
     
     result = {
-        'notes': all_notes[:limit * 3],  # Return more notes from combined sources
+        'notes': all_notes,
         'todos_to_create': todos_to_create,
         'obsidian_count': len([n for n in all_notes if n['source'] == 'obsidian']),
         'gdrive_count': len([n for n in all_notes if n['source'] == 'google_drive']),

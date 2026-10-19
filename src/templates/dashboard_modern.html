@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" class="h-full">
+<html lang="en" class="h-full" data-yavin-app="dashboard" data-yavin-background="false">
 <head>
     <!--DASH_THEME-->
     <script src="/static/theme/dash-theme.js?v=2"></script>
@@ -10,6 +10,8 @@
     <link rel="icon" href="/assets/images/icon-192.png" type="image/png">
     <link rel="manifest" href="/static/manifest.json">
     <meta name="theme-color" content="#2563eb">
+    <link rel="stylesheet" href="/static/yavin-theme.css?v=20260806-suite">
+    <script defer src="http://launchpad.localhost/static/yavin-theme.js?v=20260812-icons-v1"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         /* Custom scrollbar */
@@ -711,6 +713,12 @@
                     <span>Self-Diagnostics</span>
                 </a>
                 
+                <a href="#" onclick="showSection('ops'); return false;" 
+                   class="nav-link flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-gray-700 text-gray-300 hover:text-white">
+                    <span>⚙️</span>
+                    <span>Ops</span>
+                </a>
+                
                 <a href="#" onclick="showSection('liked'); return false;" 
                    class="nav-link flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-gray-700 text-gray-300 hover:text-white">
                     <span>❤️</span>
@@ -1209,6 +1217,20 @@
                         </div>
                     </div>
 
+                </div>
+            </section>
+            
+            <section id="section-ops" class="section-content hidden p-8">
+                <div class="max-w-7xl mx-auto">
+                    <h2 class="text-3xl font-bold mb-6">⚙️ Ops</h2>
+                    <p class="text-gray-400 mb-6">Scheduled jobs, automations, and platform operations.</p>
+                    <div class="bg-gray-800 p-6 rounded-xl border border-gray-700 mb-6">
+                        <h3 class="text-xl font-semibold mb-4">⏰ Scheduled Tasks</h3>
+                        <p class="text-gray-400 text-sm mb-3">Hermes, crontab, and local dashboard automations.</p>
+                        <div id="scheduled-tasks-container" class="space-y-3">
+                            <div class="text-gray-500 text-sm">Loading scheduled tasks...</div>
+                        </div>
+                    </div>
                 </div>
             </section>
             
@@ -1720,7 +1742,7 @@
                                         class="bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded-lg text-sm">
                                     🔊 Voice On
                                 </button>
-                                <button onclick="window.dataLoader && dataLoader.startVoicePrompt()" id="ai-voice-prompt"
+                                <button onclick="window.dataLoader && dataLoader.startVoicePrompt()" id="ai-settings-voice-prompt" data-voice-prompt
                                         class="bg-green-600 hover:bg-green-700 px-4 py-2 rounded-lg text-sm">
                                     🎤 Voice Prompt
                                 </button>
@@ -2318,6 +2340,12 @@
 
                         <div id="ai-chat-messages" class="space-y-4 mb-4 max-h-96 overflow-y-auto"></div>
                         <div class="flex gap-2">
+                            <button onclick="window.dataLoader && dataLoader.startVoicePrompt()"
+                                    id="ai-voice-prompt" data-voice-prompt
+                                    class="bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded-lg whitespace-nowrap"
+                                    title="Talk to your local assistant">
+                                🎙 Talk
+                            </button>
                             <input type="text" id="ai-chat-input" 
                                    placeholder="Ask me anything..."
                                    class="flex-1 bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 text-white"
@@ -2365,7 +2393,7 @@
     </script>
     
     <!-- Scripts -->
-    <script src="/static/dashboard.js?v=31"></script>
+    <script src="/static/dashboard.js?v=34"></script>
     <script>
         if (window.DashTheme) DashTheme.renderSettings(document.getElementById('dash-theme-settings'));
     </script>
@@ -3604,6 +3632,9 @@ Use simple ASCII characters only - no special quotes or unicode.`;
                     break;
                 case 'diagnostics':
                     if (dataLoader.loadDiagnostics) dataLoader.loadDiagnostics(true);
+                    break;
+                case 'ops':
+                    if (typeof loadScheduledTasks === 'function') loadScheduledTasks();
                     break;
                 case 'overview':
                     // Refresh overview sources in background when cached data exists.

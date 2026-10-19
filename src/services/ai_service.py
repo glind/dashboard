@@ -895,8 +895,8 @@ YOUR PERSONALITY:
             else:
                 context_parts.append("No active tasks")
             
-            # 4. Today's Calendar Events
-            context_parts.append(f"\n=== TODAY'S SCHEDULE ===")
+            # 4. Current and upcoming calendar events
+            context_parts.append(f"\n=== UPCOMING SCHEDULE ===")
             try:
                 cached_calendar = self._get_cached_background_data('calendar')
                 events = []
@@ -930,12 +930,40 @@ YOUR PERSONALITY:
                     except Exception as calendar_refresh_error:
                         logger.warning(f"Failed direct calendar fetch for AI context: {calendar_refresh_error}")
 
+                # Background data can outlive the event it describes. Never call
+                # an event upcoming unless its end (or start) is actually current.
+                now_local = datetime.now().astimezone()
+                def event_datetime(event, field):
+                    raw = event.get(field)
+                    if isinstance(raw, dict):
+                        raw = raw.get('dateTime') or raw.get('date')
+                    if not raw:
+                        return None
+                    try:
+                        parsed = datetime.fromisoformat(str(raw).replace('Z', '+00:00'))
+                        if parsed.tzinfo is None:
+                            parsed = parsed.replace(tzinfo=now_local.tzinfo)
+                        return parsed.astimezone(now_local.tzinfo)
+                    except (TypeError, ValueError):
+                        return None
+
+                current_events = []
+                for event in events:
+                    end_at = event_datetime(event, 'end') or event_datetime(event, 'end_time')
+                    start_at = event_datetime(event, 'start') or event_datetime(event, 'start_time')
+                    if (end_at and end_at >= now_local) or (not end_at and start_at and start_at >= now_local):
+                        current_events.append((start_at or end_at, event))
+                current_events.sort(key=lambda item: item[0] or now_local)
+                events = [event for _, event in current_events[:10]]
+
                 if events:
                     context_parts.append(f"You have {len(events)} upcoming events:")
                     for event in events[:10]:
                         time_str = event.get('time', 'All day')
                         title = event.get('title') or event.get('summary', 'Untitled')
-                        context_parts.append(f"  - {time_str}: {title}")
+                        start_at = event_datetime(event, 'start') or event_datetime(event, 'start_time')
+                        date_str = start_at.strftime('%a %b %d') if start_at else 'Date unavailable'
+                        context_parts.append(f"  - {date_str}, {time_str}: {title}")
                         if event.get('location'):
                             context_parts.append(f"    Location: {event['location']}")
                         if event.get('description'):
@@ -1031,10 +1059,12 @@ YOUR PERSONALITY:
                 obsidian_path = self.db.get_setting('obsidian_vault_path') or notes_config.get('obsidian_vault_path')
                 gdrive_folder_id = self.db.get_setting('google_drive_notes_folder_id') or notes_config.get('google_drive_folder_id')
                 
+                # Keep chat responsive: local note titles are sufficient context;
+                # remote providers are loaded by the Notes page, not per message.
                 result = collect_all_notes(
                     obsidian_path=obsidian_path,
-                    gdrive_folder_id=gdrive_folder_id,
-                    limit=10
+                    gdrive_folder_id=None,
+                    limit=5
                 )
                 
                 notes = result.get('notes', [])
@@ -1124,7 +1154,7 @@ YOUR PERSONALITY:
             '=== USER PROFILE ===': 6,
             '=== CURRENT CONTEXT ===': 4,
             '=== ACTIVE TASKS ===': 12,
-            "=== TODAY'S SCHEDULE ===": 10,
+            "=== UPCOMING SCHEDULE ===": 10,
             '=== RECENT EMAILS ===': 8,
             '=== GITHUB ACTIVITY ===': 6,
             '=== RECENT NEWS ===': 5,
@@ -1145,7 +1175,7 @@ YOUR PERSONALITY:
             '=== USER PROFILE ===',
             '=== CURRENT CONTEXT ===',
             '=== ACTIVE TASKS ===',
-            "=== TODAY'S SCHEDULE ===",
+            "=== UPCOMING SCHEDULE ===",
             '=== RECENT EMAILS ===',
             '=== GITHUB ACTIVITY ===',
             '=== RECENT NOTES & MEETINGS ===',
@@ -1358,7 +1388,7 @@ YOUR PERSONALITY:
                 if stripped == "=== ACTIVE TASKS ===":
                     current = 'tasks'
                     continue
-                if stripped == "=== TODAY'S SCHEDULE ===":
+                if stripped == "=== UPCOMING SCHEDULE ===":
                     current = 'calendar'
                     continue
                 if stripped == "=== RECENT EMAILS ===":

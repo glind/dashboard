@@ -13,24 +13,32 @@
  *   Server-forced: <html data-season="winter" data-season-lock>  (ignores user/query overrides).
  *
  * Window format (identical in seasons.json and python/buster_seasons.py):
- *   { "season": "winter", "variant": "newyear"?, "start": "MM-DD", "end": "MM-DD" }
+ *   { "season": "winter", "variant": "newyear"?, "start": "MM-DD", "end": "MM-DD" | "thanksgiving" }
  *   Inclusive on both ends. If end < start the window wraps over New Year. First match wins.
  */
 
 export const SEASONS = ["none", "halloween", "thanksgiving", "winter"];
 export const DEFAULT_WINDOWS = [
-  { season: "winter", variant: "newyear", start: "12-31", end: "01-01" },
-  { season: "halloween", start: "10-01", end: "11-01" },
-  { season: "thanksgiving", start: "11-02", end: "11-30" },
-  { season: "winter", start: "12-01", end: "01-06" },
+  { season: "winter", variant: "newyear", start: "12-27", end: "01-02" },
+  { season: "halloween", start: "10-15", end: "10-31" },
+  { season: "thanksgiving", start: "11-15", end: "thanksgiving" },
+  { season: "winter", start: "12-01", end: "12-26" },
 ];
 
 const STORE_KEY = "buster-ds:season";
 const root = document.documentElement;
 
-const md = (s) => {
+/** US Thanksgiving: the 4th Thursday of November in `year` (day of month). */
+export function thanksgivingDay(year) {
+  const firstDow = new Date(year, 10, 1).getDay(); // 0 = Sunday … 4 = Thursday
+  return 1 + ((4 - firstDow + 7) % 7) + 21;
+}
+
+// "MM-DD" (or the keyword "thanksgiving") → MMDD integer for `year`, e.g. 1031.
+const md = (s, year) => {
+  if (String(s).toLowerCase() === "thanksgiving") return 1100 + thanksgivingDay(year);
   const [m, d] = String(s).split("-").map(Number);
-  return m * 100 + d; // MMDD as an integer, e.g. 1031
+  return m * 100 + d;
 };
 
 /** Pure: which window (if any) contains `date`? Returns { season, variant } ("none" if no match). */
@@ -38,7 +46,7 @@ export function resolveSeason(date = new Date(), windows = DEFAULT_WINDOWS) {
   const d = date instanceof Date ? date : new Date(date);
   const today = (d.getMonth() + 1) * 100 + d.getDate();
   for (const w of windows || []) {
-    const a = md(w.start), b = md(w.end);
+    const a = md(w.start, d.getFullYear()), b = md(w.end, d.getFullYear());
     const hit = a <= b ? today >= a && today <= b : today >= a || today <= b; // wrap over New Year
     if (hit && SEASONS.includes(w.season)) return { season: w.season, variant: w.variant || "" };
   }

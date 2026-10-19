@@ -13,7 +13,7 @@ it for both UIs (family and modern):
       seasons:
         enabled: true          # false = no automatic holidays (manual picks still work)
         windows:               # same format as buster-design seasons.json
-          - {season: halloween, start: "10-01", end: "11-01"}
+          - {season: halloween, start: "10-15", end: "10-31"}
 
   Without that block the vendored ``src/static/ds/seasons.json`` defaults are used.
 * Precedence (highest first): ``?season=`` query, the per-user choice saved in the

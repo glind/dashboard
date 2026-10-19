@@ -78,22 +78,21 @@ def test_default_calendar_matches_design_system_seasons_json():
 
 
 @pytest.mark.parametrize("md,expected", [
-    ("09-30", ("none", "")),
-    ("10-01", ("halloween", "")),
+    ("10-14", ("none", "")),
+    ("10-15", ("halloween", "")),
     ("10-31", ("halloween", "")),
-    ("11-01", ("halloween", "")),
-    ("11-02", ("thanksgiving", "")),
-    ("11-30", ("thanksgiving", "")),
+    ("11-01", ("none", "")),
+    ("11-15", ("thanksgiving", "")),
     ("12-01", ("winter", "")),
     ("12-25", ("winter", "")),
+    ("12-26", ("winter", "")),
+    ("12-27", ("winter", "newyear")),
     ("12-31", ("winter", "newyear")),
-    ("01-01", ("winter", "newyear")),
-    ("01-02", ("winter", "")),
-    ("01-06", ("winter", "")),
-    ("01-07", ("none", "")),
+    ("01-02", ("winter", "newyear")),
+    ("01-03", ("none", "")),
     ("07-04", ("none", "")),
 ])
-def test_season_windows(md, expected):
+def test_season_windows(md, expected):  # the shared calendar (matches the stream pages)
     for year in (2026, 2027, 2028):
         day = dt.date.fromisoformat(f"{year}-{md}")
         r = theme.resolve(today=day, windows=theme.default_windows())
@@ -199,3 +198,11 @@ def test_theme_api_saves_season_choice(client):
     assert 'data-season="thanksgiving"' in client.get("/?ui=family").text
     assert 'data-season="winter"' in client.get("/?ui=family&season=winter").text  # ?season= still wins
     client.post("/api/theme", json={"season": "auto"})
+
+
+@pytest.mark.parametrize("year,day", [(2026, 26), (2027, 25), (2028, 23)])
+def test_thanksgiving_window_ends_on_thanksgiving_day(year, day):
+    windows = theme.default_windows()
+    on = theme.resolve(today=dt.date(year, 11, day), windows=windows)
+    after = theme.resolve(today=dt.date(year, 11, day) + dt.timedelta(days=1), windows=windows)
+    assert on["season"] == "thanksgiving" and after["season"] == "none"

@@ -6,7 +6,7 @@
 import { Motion } from "./motion.js";
 import { icon, icons } from "./icons.js";
 import "./background.js";
-import { STATES, ACCENTS } from "./companion.js";
+import { STATES, VIEWS, ACCENTS } from "./companion.js";
 import "./waveform.js";
 import "./network-universe.js";
 import { smoothPath } from "./area-chart.js";
@@ -36,7 +36,7 @@ function apply(evt = {}) {
   if (evt.season) BusterSeasons.set(evt.season);
 }
 
-const BusterDS = { Motion, icon, icons, toast, setMode, getMode, openPanel, closePanel, togglePanel, companion, apply, STATES, ACCENTS, smoothPath, seasons: BusterSeasons, seasonFor, resolveSeason, version: "0.1.0" };
+const BusterDS = { Motion, icon, icons, toast, setMode, getMode, openPanel, closePanel, togglePanel, companion, apply, STATES, VIEWS, ACCENTS, smoothPath, seasons: BusterSeasons, seasonFor, resolveSeason, version: "0.1.0" };
 window.BusterDS = BusterDS;
 
 // HTMX integration: a response header `HX-Trigger: {"buster": {"state": "success", "say": "Done!"}}`

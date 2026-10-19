@@ -102,6 +102,12 @@ def _slim_email(m: dict) -> dict:
         "risk": m.get("risk_level") or "",
         "snippet": (m.get("snippet") or "")[:200],
         "url": m.get("gmail_url") or "",
+        # Gmail labels (no content) let the Assistant tell people from bulk mail
+        # and spot threads you've already answered.
+        "labels": [lbl for lbl in labels if isinstance(lbl, str)
+                   and (lbl.startswith("CATEGORY_") or lbl in ("IMPORTANT", "SENT", "UNREAD"))],
+        "action": m.get("recommended_action") or "",
+        "task": bool(m.get("should_create_task")),
     }
 
 

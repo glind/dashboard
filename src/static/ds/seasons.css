@@ -1,0 +1,114 @@
+/*!
+ * Buster Design System — seasons.css
+ * Seasonal token overrides layered on top of companion / operations modes.
+ * "Same base, holiday version": only brand gradients, accent tints, nebula and planet change;
+ * status colours (ok/info/warn/error) stay semantic and untouched.
+ *   <html data-season="none|halloween|thanksgiving|winter" data-season-variant="newyear">
+ */
+
+/* ---------------- Halloween: orange / purple / lime ---------------- */
+[data-season="halloween"] {
+  --planet-opacity: 0.72;
+  --season-a: #f97316; --season-b: #a855f7; --season-c: #a3e635;
+  --c-cyan-soft: #fdba74;
+  --gradient-headline: linear-gradient(92deg, #fb923c 0%, #f97316 30%, #c084fc 62%, #a3e635 100%);
+  --gradient-brand: linear-gradient(135deg, #f97316 0%, #c2410c 40%, #9333ea 100%);
+  --gradient-nav-active: linear-gradient(90deg, #ea580c 0%, #b4359e 55%, #7e22ce 100%);
+  --gradient-send: linear-gradient(135deg, #fb923c 0%, #c026d3 60%, #7e22ce 100%);
+  --gradient-border: linear-gradient(140deg, rgba(249, 115, 22, 0.7) 0%, rgba(249, 115, 22, 0.22) 24%, rgba(168, 85, 247, 0.16) 52%, rgba(168, 85, 247, 0.3) 76%, rgba(163, 230, 53, 0.5) 100%);
+  --gradient-border-strong: linear-gradient(140deg, #f97316, #a855f7 60%, #a3e635);
+  --gradient-orb: radial-gradient(circle at 35% 30%, #fff7ed 0%, #fdba74 14%, #f97316 36%, #7e22ce 72%, #2e1065 100%);
+  --glow-nav: 0 8px 26px -6px rgba(234, 88, 12, 0.6), 0 0 18px -4px rgba(147, 51, 234, 0.55);
+  --glow-send: 0 8px 26px -4px rgba(234, 88, 12, 0.6), 0 0 20px -2px rgba(168, 85, 247, 0.5);
+}
+/* ---------------- Thanksgiving: amber / rust / gold ---------------- */
+[data-season="thanksgiving"] {
+  --planet-opacity: 0.6;
+  --season-a: #f59e0b; --season-b: #c2410c; --season-c: #facc15;
+  --c-cyan-soft: #fcd34d;
+  --gradient-headline: linear-gradient(92deg, #fde68a 0%, #fbbf24 30%, #f97316 65%, #dc2626 100%);
+  --gradient-brand: linear-gradient(135deg, #f59e0b 0%, #ea580c 50%, #9a3412 100%);
+  --gradient-nav-active: linear-gradient(90deg, #d97706 0%, #c2410c 60%, #9a3412 100%);
+  --gradient-send: linear-gradient(135deg, #facc15 0%, #f97316 50%, #b91c1c 100%);
+  --gradient-border: linear-gradient(140deg, rgba(251, 191, 36, 0.65) 0%, rgba(245, 158, 11, 0.22) 24%, rgba(194, 65, 12, 0.16) 52%, rgba(194, 65, 12, 0.3) 76%, rgba(250, 204, 21, 0.5) 100%);
+  --gradient-border-strong: linear-gradient(140deg, #fbbf24, #ea580c 60%, #facc15);
+  --gradient-orb: radial-gradient(circle at 35% 30%, #fffbeb 0%, #fde68a 14%, #f59e0b 38%, #9a3412 74%, #431407 100%);
+  --glow-nav: 0 8px 26px -6px rgba(217, 119, 6, 0.6), 0 0 18px -4px rgba(194, 65, 12, 0.5);
+  --glow-send: 0 8px 26px -4px rgba(234, 88, 12, 0.6), 0 0 20px -2px rgba(250, 204, 21, 0.45);
+}
+/* ---------------- Winter (Christmas / New Year): icy blue / white / red-green ---------------- */
+[data-season="winter"] {
+  --planet-opacity: 0.8;
+  --season-a: #7dd3fc; --season-b: #ef4444; --season-c: #22c55e;
+  --c-cyan-soft: #bae6fd;
+  --gradient-headline: linear-gradient(92deg, #ffffff 0%, #e0f2fe 25%, #7dd3fc 60%, #a5b4fc 100%);
+  --gradient-brand: linear-gradient(135deg, #7dd3fc 0%, #3b82f6 55%, #6366f1 100%);
+  --gradient-nav-active: linear-gradient(90deg, #0ea5e9 0%, #3b82f6 55%, #6366f1 100%);
+  --gradient-send: linear-gradient(135deg, #e0f2fe 0%, #38bdf8 40%, #4f46e5 100%);
+  --gradient-border: linear-gradient(140deg, rgba(224, 242, 254, 0.75) 0%, rgba(125, 211, 252, 0.25) 24%, rgba(99, 102, 241, 0.14) 52%, rgba(125, 211, 252, 0.28) 76%, rgba(255, 255, 255, 0.5) 100%);
+  --gradient-border-strong: linear-gradient(140deg, #ffffff, #7dd3fc 50%, #818cf8);
+  --gradient-orb: radial-gradient(circle at 35% 30%, #ffffff 0%, #e0f2fe 18%, #7dd3fc 40%, #3b82f6 72%, #1e1b4b 100%);
+}
+[data-season="winter"][data-season-variant="newyear"] {
+  --gradient-headline: linear-gradient(92deg, #fde68a 0%, #fbbf24 25%, #f0abfc 60%, #a5f3fc 100%);
+  --gradient-border-strong: linear-gradient(140deg, #fbbf24, #e879f9 50%, #67e8f9);
+}
+
+/* Operations mode keeps only a tint: borders stay calm. */
+[data-mode="operations"][data-season]:not([data-season="none"]) {
+  --planet-opacity: 0.2;
+  --gradient-border: linear-gradient(140deg, color-mix(in srgb, var(--season-a, #7896ff) 38%, transparent), rgba(148, 163, 255, 0.14));
+}
+
+/* ---------------- Backdrop: nebula & planet variants ---------------- */
+[data-season="halloween"] buster-space::before {
+  background:
+    radial-gradient(38% 30% at 22% 26%, rgba(126, 34, 206, 0.32), transparent 70%),
+    radial-gradient(30% 26% at 58% 8%, rgba(234, 88, 12, 0.16), transparent 70%),
+    radial-gradient(34% 28% at 46% 62%, rgba(147, 51, 234, 0.16), transparent 72%),
+    radial-gradient(40% 34% at 92% 30%, rgba(234, 88, 12, 0.2), transparent 70%),
+    radial-gradient(30% 30% at 8% 88%, rgba(132, 204, 22, 0.1), transparent 70%),
+    radial-gradient(36% 30% at 70% 96%, rgba(126, 34, 206, 0.2), transparent 70%);
+}
+/* carved-pumpkin-orange moon */
+[data-season="halloween"] buster-space::after {
+  background:
+    radial-gradient(circle at 30% 70%, transparent 55%, rgba(253, 186, 116, 0.28) 64%, transparent 71%),
+    repeating-linear-gradient(90deg, rgba(124, 45, 18, 0) 0 7%, rgba(124, 45, 18, 0.28) 8.5%, rgba(124, 45, 18, 0) 10%),
+    radial-gradient(circle at 26% 74%, #fdba74 0%, #f97316 26%, #c2410c 50%, #431407 76%);
+  box-shadow: -18px 26px 90px -6px rgba(249, 115, 22, 0.45), 0 0 160px 20px rgba(234, 88, 12, 0.25), inset 40px -40px 90px -30px rgba(254, 215, 170, 0.45), inset -60px 60px 120px rgba(20, 6, 2, 0.85);
+}
+[data-season="thanksgiving"] buster-space::before {
+  background:
+    radial-gradient(38% 30% at 22% 26%, rgba(194, 65, 12, 0.24), transparent 70%),
+    radial-gradient(30% 26% at 58% 8%, rgba(217, 119, 6, 0.16), transparent 70%),
+    radial-gradient(34% 28% at 46% 62%, rgba(124, 45, 18, 0.2), transparent 72%),
+    radial-gradient(40% 34% at 92% 30%, rgba(180, 83, 9, 0.22), transparent 70%),
+    radial-gradient(36% 30% at 70% 96%, rgba(146, 64, 14, 0.2), transparent 70%);
+}
+/* harvest moon */
+[data-season="thanksgiving"] buster-space::after {
+  background:
+    radial-gradient(circle at 30% 70%, transparent 55%, rgba(253, 230, 138, 0.25) 64%, transparent 71%),
+    radial-gradient(circle at 26% 74%, #fde68a 0%, #f59e0b 28%, #b45309 54%, #451a03 78%);
+  box-shadow: -18px 26px 90px -6px rgba(245, 158, 11, 0.4), 0 0 160px 20px rgba(217, 119, 6, 0.2), inset 40px -40px 90px -30px rgba(254, 243, 199, 0.4), inset -60px 60px 120px rgba(20, 8, 2, 0.85);
+}
+[data-season="winter"] buster-space::before {
+  background:
+    radial-gradient(38% 30% at 22% 26%, rgba(56, 189, 248, 0.2), transparent 70%),
+    radial-gradient(30% 26% at 58% 8%, rgba(186, 230, 253, 0.12), transparent 70%),
+    radial-gradient(34% 28% at 46% 62%, rgba(99, 102, 241, 0.16), transparent 72%),
+    radial-gradient(40% 34% at 92% 30%, rgba(125, 211, 252, 0.2), transparent 70%),
+    radial-gradient(36% 30% at 70% 96%, rgba(79, 70, 229, 0.18), transparent 70%);
+}
+/* icy planet */
+[data-season="winter"] buster-space::after {
+  background:
+    radial-gradient(circle at 30% 70%, transparent 55%, rgba(224, 242, 254, 0.35) 64%, transparent 71%),
+    radial-gradient(circle at 26% 74%, #e0f2fe 0%, #7dd3fc 22%, #2563eb 50%, #0b1a4a 78%);
+  box-shadow: -18px 26px 90px -6px rgba(125, 211, 252, 0.45), 0 0 160px 20px rgba(56, 189, 248, 0.2), inset 40px -40px 90px -30px rgba(255, 255, 255, 0.45), inset -60px 60px 120px rgba(2, 6, 23, 0.85);
+}
+
+/* Seasonal particle canvas (created lazily by seasons-fx.js inside <buster-space>) */
+buster-space > canvas.bds-season-fx { opacity: 1; }
+[data-mode="operations"] buster-space > canvas.bds-season-fx { display: none; }

@@ -1,0 +1,32 @@
+{
+  "signature_phrases": [
+    "Hey! I'm here.",
+    "Buster, at your service!"
+  ],
+  "greetings": [
+    "Hey! I'm Buster. What are we doing today?",
+    "Systems are cozy and the coffee is (probably) warm.",
+    "Welcome back, space cadet!",
+    "All stars accounted for. How can I help?",
+    "Ready for launch whenever you are."
+  ],
+  "acknowledgments": [
+    "On it!",
+    "Got it.",
+    "Consider it done.",
+    "Copy that, captain."
+  ],
+  "random_quotes": [
+    "We are all made of star stuff. Some of us also run on snacks.",
+    "Small steps still count as steps. Ask any astronaut.",
+    "The universe is big, but your to-do list doesn't have to be.",
+    "Every comet started as a snowball with ambition.",
+    "Look up once in a while. The view is free.",
+    "Gravity is just the universe giving you a hug.",
+    "Even the Moon takes a whole month to get its act together."
+  ],
+  "errors": [
+    "Hmm, that one drifted out of orbit. Let's try again.",
+    "Houston, we have a small problem."
+  ]
+}

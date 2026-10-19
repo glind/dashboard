@@ -22,6 +22,11 @@ _LOCAL_SKINS_PATH = Path(__file__).parent.parent.parent / "data" / "skins"
 # Use Docker path if it exists (running in container), otherwise use local
 SKINS_DIR = _DOCKER_SKINS_PATH if _DOCKER_SKINS_PATH.exists() else _LOCAL_SKINS_PATH
 
+# Built-in skins ship with the code (src/config/skins/<name>/skin.yaml), so they are
+# available on every install without copying anything into the personal data/skins
+# folder. A skin of the same name in SKINS_DIR overrides the built-in one.
+BUILTIN_SKINS_DIR = Path(__file__).parent / "skins"
+
 
 class Skin:
     """Represents a loaded skin configuration."""
@@ -40,6 +45,9 @@ class Skin:
         self.navigation = config.get("navigation", [])
         self.features = config.get("features", {})
         self.ai_personality = config.get("ai_personality", {})
+        # Optional design-system theme block (e.g. the built-in "cosmic" skin).
+        self.theme = config.get("theme", {}) or {}
+        self.builtin = False
     
     @property
     def display_name(self) -> str:
@@ -121,15 +129,19 @@ class Skin:
             "navigation": self.navigation,
             "features": self.features,
             "quotes": self.quotes,
-            "ai_personality": self.ai_personality
+            "ai_personality": self.ai_personality,
+            "identity": self.identity,
+            "theme": self.theme,
+            "builtin": self.builtin,
         }
 
 
 class SkinLoader:
     """Loads and manages dashboard skins."""
     
-    def __init__(self, skins_dir: Optional[Path] = None):
+    def __init__(self, skins_dir: Optional[Path] = None, builtin_dir: Optional[Path] = None):
         self.skins_dir = skins_dir or SKINS_DIR
+        self.builtin_dir = builtin_dir if builtin_dir is not None else BUILTIN_SKINS_DIR
         self._skins_cache: Dict[str, Skin] = {}
         self._active_skin_name: str = DEFAULT_SKIN
         self._active_skin: Optional[Skin] = None
@@ -139,21 +151,42 @@ class SkinLoader:
         
         logger.info(f"SkinLoader initialized with skins directory: {self.skins_dir}")
     
+    def _skin_dirs(self) -> List[Path]:
+        """Skin search path: personal/shared skins first, then built-in skins."""
+        dirs = [self.skins_dir]
+        if self.builtin_dir and self.builtin_dir != self.skins_dir:
+            dirs.append(self.builtin_dir)
+        return dirs
+
+    def _find_skin_dir(self, skin_name: str) -> Optional[Path]:
+        if not skin_name or "/" in skin_name or "\\" in skin_name or skin_name.startswith("."):
+            return None
+        for base in self._skin_dirs():
+            candidate = base / skin_name
+            if (candidate / "skin.yaml").exists():
+                return candidate
+        return None
+
     def list_available_skins(self) -> List[Dict[str, Any]]:
-        """List all available skins with basic info including voice."""
+        """List all available skins (personal + built-in) with basic info including voice."""
         skins = []
-        
+        seen = set()
+
         if not self.skins_dir.exists():
             logger.warning(f"Skins directory does not exist: {self.skins_dir}")
-            return skins
-        
-        for skin_dir in self.skins_dir.iterdir():
-            if skin_dir.is_dir():
+
+        for base in self._skin_dirs():
+            if not base or not base.exists():
+                continue
+            builtin = base == self.builtin_dir
+            for skin_dir in sorted(base.iterdir()):
+                if not skin_dir.is_dir() or skin_dir.name in seen:
+                    continue
                 skin_yaml = skin_dir / "skin.yaml"
                 if skin_yaml.exists():
                     try:
                         with open(skin_yaml, 'r') as f:
-                            config = yaml.safe_load(f)
+                            config = yaml.safe_load(f) or {}
                         identity = config.get("identity", {})
                         voice = config.get("voice", {})
                         skins.append({
@@ -161,8 +194,10 @@ class SkinLoader:
                             "display_name": identity.get("display_name", skin_dir.name.title()),
                             "tagline": identity.get("tagline", ""),
                             "avatar": identity.get("avatar", ""),
-                            "voice": voice
+                            "voice": voice,
+                            "builtin": builtin,
                         })
+                        seen.add(skin_dir.name)
                     except Exception as e:
                         logger.error(f"Error reading skin {skin_dir.name}: {e}")
         
@@ -175,10 +210,10 @@ class SkinLoader:
             logger.debug(f"Returning cached skin: {skin_name}")
             return self._skins_cache[skin_name]
         
-        skin_dir = self.skins_dir / skin_name
+        skin_dir = self._find_skin_dir(skin_name)
         
-        if not skin_dir.exists():
-            logger.error(f"Skin directory not found: {skin_dir}")
+        if skin_dir is None:
+            logger.error(f"Skin not found: {skin_name} (searched {', '.join(str(d) for d in self._skin_dirs())})")
             return None
         
         skin_yaml = skin_dir / "skin.yaml"
@@ -199,7 +234,8 @@ class SkinLoader:
                 with open(quotes_json, 'r') as f:
                     quotes = json.load(f)
             
-            skin = Skin(skin_name, config, quotes)
+            skin = Skin(skin_name, config or {}, quotes)
+            skin.builtin = skin_dir.parent == self.builtin_dir
             self._skins_cache[skin_name] = skin
             
             logger.info(f"Loaded skin: {skin_name} ({skin.display_name})")

@@ -1,0 +1,261 @@
+/*!
+ * Dashboard theme layer: Cosmic (Buster design system) for the family + modern UIs,
+ * and the seasonal tint/garland for classic skins.
+ * Requires ds/tokens.css, ds/background.css, ds/components.css, ds/seasons.css (loaded first).
+ *   <html data-ui="family|modern" data-theme="cosmic|classic" data-season="…" data-mode="companion|operations">
+ */
+
+/* =====================================================================
+   COSMIC: shared (both UIs)
+   ===================================================================== */
+html[data-theme="cosmic"] {
+  /* skin variables before /api/skins/switch answers (no flash of the Roger palette) */
+  --skin-primary: var(--c-violet); --skin-primary-light: var(--c-violet-soft); --skin-primary-dark: var(--c-indigo);
+  --skin-secondary: var(--c-blue); --skin-secondary-light: var(--c-blue-soft); --skin-accent: var(--c-cyan-soft);
+  --skin-bg-primary: var(--surface-inset); --skin-bg-secondary: var(--surface-glass-strong); --skin-bg-tertiary: var(--surface-raised);
+  --skin-text-primary: var(--text-primary); --skin-text-secondary: var(--text-secondary); --skin-text-muted: var(--text-muted);
+  --skin-border-primary: var(--border-default); --skin-border-accent: var(--c-violet);
+  --dash-glass-bg: rgba(9, 13, 38, 0.55);
+  background: var(--c-bg-0);
+}
+html[data-theme="cosmic"] body {
+  background: transparent !important;
+  color: var(--text-primary) !important;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+html[data-theme="cosmic"] ::selection { background: rgba(139, 92, 246, 0.45); color: #fff; }
+html[data-theme="cosmic"] ::-webkit-scrollbar { width: 8px; height: 8px; }
+html[data-theme="cosmic"] ::-webkit-scrollbar-track { background: transparent; }
+html[data-theme="cosmic"] ::-webkit-scrollbar-thumb { background: rgba(148, 163, 255, 0.22); border-radius: 8px; }
+html[data-theme="cosmic"] #app-bg,
+html[data-theme="cosmic"] .dash-classic-only { display: none !important; }
+
+/* glass panels: sidebar + sticky header */
+html[data-theme="cosmic"] aside {
+  background: var(--dash-glass-bg) !important;
+  -webkit-backdrop-filter: blur(var(--blur-md)) saturate(var(--glass-saturate));
+  backdrop-filter: blur(var(--blur-md)) saturate(var(--glass-saturate));
+  border-color: var(--border-subtle) !important;
+}
+html[data-theme="cosmic"] main > .sticky {
+  background: rgba(7, 11, 30, 0.5) !important;
+  -webkit-backdrop-filter: blur(var(--blur-md)) saturate(var(--glass-saturate));
+  backdrop-filter: blur(var(--blur-md)) saturate(var(--glass-saturate));
+  border-color: var(--border-subtle) !important;
+}
+html[data-theme="cosmic"] main { position: relative; }
+
+/* typography */
+html[data-theme="cosmic"] h1, html[data-theme="cosmic"] h2, html[data-theme="cosmic"] h3, html[data-theme="cosmic"] h4 {
+  font-family: var(--font-display);
+  letter-spacing: var(--tracking-tight, -0.01em);
+}
+html[data-theme="cosmic"] main section > h2,
+html[data-theme="cosmic"] main section > div > h2,
+html[data-theme="cosmic"] main section > div > div > h2 {
+  background: var(--gradient-headline); -webkit-background-clip: text; background-clip: text; color: transparent !important;
+  width: fit-content;
+}
+
+/* glass cards: every tailwind gray card surface */
+html[data-theme="cosmic"] .widget-container,
+html[data-theme="cosmic"] main .bg-gray-800 {
+  position: relative;
+  isolation: isolate;
+  background: var(--surface-glass) !important;
+  -webkit-backdrop-filter: blur(var(--blur-md)) saturate(var(--glass-saturate));
+  backdrop-filter: blur(var(--blur-md)) saturate(var(--glass-saturate));
+  border-color: var(--border-subtle) !important;
+  border-radius: var(--radius-card) !important;
+  box-shadow: var(--shadow-card), var(--glow-card);
+}
+/* luminous 1px gradient border (same technique as .bds-card) */
+html[data-theme="cosmic"] .widget-container,
+html[data-theme="cosmic"] main .bg-gray-800.p-6,
+html[data-theme="cosmic"] main .bg-gray-800.rounded-xl { border: 0 !important; }
+html[data-theme="cosmic"] .widget-container::before,
+html[data-theme="cosmic"] main .bg-gray-800.p-6::before,
+html[data-theme="cosmic"] main .bg-gray-800.rounded-xl::before {
+  content: ""; position: absolute; inset: 0; z-index: -1; border-radius: inherit; padding: 1px;
+  background: var(--gradient-border);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+  pointer-events: none;
+}
+html[data-theme="cosmic"] main .bg-gray-900,
+html[data-theme="cosmic"] main .bg-gray-700:not(.nav-link) {
+  background: var(--surface-inset) !important;
+  border-color: var(--border-subtle) !important;
+}
+html[data-theme="cosmic"] main .bg-gray-900 { border-radius: var(--radius-md); }
+html[data-theme="cosmic"] .border-gray-700, html[data-theme="cosmic"] .border-gray-600 { border-color: var(--border-subtle) !important; }
+/* modals over the backdrop: stronger glass */
+html[data-theme="cosmic"] .fixed .bg-gray-800,
+html[data-theme="cosmic"] .fixed .bg-gray-900 {
+  background: var(--surface-glass-strong) !important;
+  -webkit-backdrop-filter: blur(var(--blur-lg)); backdrop-filter: blur(var(--blur-lg));
+  border-color: var(--border-default) !important;
+}
+
+/* widget headings: white title, coloured emoji/icon stays */
+html[data-theme="cosmic"] .widget-container h3 {
+  color: var(--text-primary) !important;
+  font-size: var(--fs-lg) !important;
+  font-weight: var(--fw-semibold, 600) !important;
+}
+
+/* inputs + selects */
+html[data-theme="cosmic"] main input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+html[data-theme="cosmic"] aside select, html[data-theme="cosmic"] main select, html[data-theme="cosmic"] main textarea {
+  background-color: var(--surface-inset) !important;
+  border: 1px solid var(--border-default) !important;
+  border-radius: var(--radius-sm) !important;
+  color: var(--text-primary) !important;
+}
+html[data-theme="cosmic"] main input:focus, html[data-theme="cosmic"] main select:focus, html[data-theme="cosmic"] main textarea:focus,
+html[data-theme="cosmic"] aside select:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--c-cyan) 65%, transparent) !important;
+  box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.18) !important;
+}
+html[data-theme="cosmic"] option { background: #10163a; color: var(--text-primary); }
+html[data-theme="cosmic"] input::placeholder, html[data-theme="cosmic"] textarea::placeholder { color: var(--text-muted) !important; }
+
+/* buttons: primary = brand gradient, the rest = raised glass */
+html[data-theme="cosmic"] button[style*="var(--skin-primary)"],
+html[data-theme="cosmic"] main button.bg-blue-600, html[data-theme="cosmic"] main button.bg-purple-600,
+html[data-theme="cosmic"] aside button.bg-purple-600, html[data-theme="cosmic"] aside button.bg-blue-600 {
+  background: var(--gradient-brand) !important;
+  color: #fff !important;
+  border: 0 !important;
+  border-radius: var(--radius-sm) !important;
+  box-shadow: var(--glow-send), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+html[data-theme="cosmic"] button[style*="var(--skin-primary-dark)"],
+html[data-theme="cosmic"] button[style*="var(--skin-secondary)"],
+html[data-theme="cosmic"] button[style*="var(--skin-bg-tertiary)"],
+html[data-theme="cosmic"] button[style*="var(--skin-bg-primary)"],
+html[data-theme="cosmic"] main button.bg-gray-700, html[data-theme="cosmic"] main button.bg-gray-600,
+html[data-theme="cosmic"] aside button.bg-gray-700 {
+  background: var(--surface-raised) !important;
+  color: var(--text-primary) !important;
+  border: 1px solid var(--border-default) !important;
+  border-radius: var(--radius-sm) !important;
+}
+html[data-theme="cosmic"] button[style*="var(--skin-"]:hover,
+html[data-theme="cosmic"] main button.bg-gray-700:hover { filter: brightness(1.12); }
+
+/* =====================================================================
+   COSMIC: hero, brand, companion placement
+   ===================================================================== */
+html[data-theme="cosmic"] .dash-hero { margin: -8px 0 16px; min-height: 0; grid-template-columns: minmax(0, 1fr) minmax(0, 360px); }
+html[data-theme="cosmic"] .dash-hero .bds-hero__text { padding-left: 4px; }
+html[data-theme="cosmic"] .dash-hero .bds-hero__stage { min-height: 200px; }
+html[data-theme="cosmic"] .dash-hero .bds-hero__stage buster-companion { --bc-size: 168px; --bubble-left: 74%; --bubble-max: 210px; margin-left: 12px; }
+html[data-theme="cosmic"] .dash-hero .bds-hero__sub { font-size: var(--fs-lg); }
+html[data-theme="cosmic"] .dash-hero .bds-hero__sub > span { color: var(--text-secondary); }
+html[data-theme="cosmic"] .dash-hero .bds-chip i { font-style: normal; }
+html[data-theme="cosmic"][data-mode="operations"] .dash-hero .bds-hero__title { font-size: clamp(30px, 3vw, 42px); }
+html[data-theme="cosmic"][data-mode="operations"] .dash-hero .bds-hero__stage buster-companion { --bc-size: 112px; }
+html[data-theme="cosmic"][data-mode="operations"] .dash-hero .bds-hero__stage { min-height: 120px; }
+@media (max-width: 900px) {
+  html[data-theme="cosmic"] .dash-hero { grid-template-columns: 1fr; }
+  html[data-theme="cosmic"] .dash-hero .bds-hero__stage { min-height: 150px; place-items: center; }
+}
+html[data-theme="cosmic"] .dash-replaced-title { display: none !important; }
+/* modern UI: the photo banner + full-page photo give way to the cosmic backdrop */
+html[data-theme="cosmic"][data-ui="modern"] #overview-header-image { display: none !important; }
+html[data-theme="cosmic"][data-ui="modern"] .section-content { background-image: none !important; }
+
+/* family sidebar: companion brand replaces the avatar GIF */
+html[data-theme="cosmic"][data-ui="family"] #assistant-avatar,
+html[data-theme="cosmic"][data-ui="family"] #assistant-avatar + div,
+html[data-theme="cosmic"][data-ui="family"] #assistant-name { display: none !important; }
+html[data-theme="cosmic"][data-ui="family"] .group:has(> #assistant-avatar) { display: none !important; }
+html[data-theme="cosmic"] .dash-brand { display: flex; align-items: center; gap: 10px; padding: 0; }
+html[data-theme="cosmic"] .dash-brand buster-companion { --bc-size: 64px; flex: none; }
+html[data-theme="cosmic"] .dash-brand b { display: block; font-size: var(--fs-lg); color: var(--text-primary); }
+html[data-theme="cosmic"] .dash-brand small { display: block; font-size: var(--fs-xs); color: var(--text-muted); line-height: 1.3; }
+
+/* sidebar nav (both UIs) in the DS nav style */
+html[data-theme="cosmic"] .nav-link {
+  border-radius: var(--radius-md) !important;
+  color: var(--text-secondary) !important;
+  background: transparent !important;
+  transition: background var(--dur-fast), color var(--dur-fast);
+}
+html[data-theme="cosmic"] .nav-link:hover { background: var(--surface-hover) !important; color: var(--text-primary) !important; }
+html[data-theme="cosmic"] .nav-link.bg-gray-700,
+html[data-theme="cosmic"] .nav-link.active,
+html[data-theme="cosmic"] .nav-link[aria-current="page"] {
+  background: var(--gradient-nav-active) !important;
+  color: #fff !important;
+  box-shadow: var(--glow-nav);
+}
+
+/* modern UI: brand + chat companions */
+html[data-theme="cosmic"] .dash-logo-companion { display: inline-flex; width: 40px; height: 40px; align-items: center; justify-content: center; }
+html[data-theme="cosmic"] .dash-logo-companion buster-companion { --bc-size: 40px; }
+html[data-theme="cosmic"] img[data-dash-swapped] { display: none; }
+html[data-theme="cosmic"] .dash-chat-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+html[data-theme="cosmic"] .dash-chat-head h3 { margin: 0 !important; }
+html[data-theme="cosmic"] .dash-chat-head buster-companion { --bc-size: 40px; }
+html[data-theme="cosmic"][data-ui="modern"] aside h1 {
+  background: var(--gradient-headline); -webkit-background-clip: text; background-clip: text; color: transparent !important;
+}
+html[data-theme="cosmic"][data-ui="modern"] main .text-blue-400 { color: var(--c-cyan-soft) !important; }
+html[data-theme="cosmic"][data-ui="modern"] main .text-green-400 { color: var(--c-green) !important; }
+html[data-theme="cosmic"][data-ui="modern"] main .text-purple-400 { color: var(--c-violet-soft) !important; }
+
+/* the theme picker (settings) */
+.dash-theme-settings .dash-seg { display: inline-flex; gap: 4px; padding: 3px; border-radius: 12px; background: rgba(0, 0, 0, 0.25); border: 1px solid rgba(148, 163, 255, 0.18); flex-wrap: wrap; }
+.dash-theme-settings .dash-seg button { padding: 6px 12px; border-radius: 9px; font-size: 13px; color: inherit; background: transparent; border: 0; cursor: pointer; }
+.dash-theme-settings .dash-seg button[aria-pressed="true"] { background: var(--gradient-nav-active, #6d4aff); color: #fff; }
+.dash-theme-settings .dash-help { font-size: 12px; opacity: 0.7; margin-top: 6px; }
+
+/* =====================================================================
+   SEASONS for classic skins: accent tint + garland + badge
+   (Cosmic gets the design system's full seasonal backdrop + companion accessories.)
+   --season-a/b/c come from ds/seasons.css.
+   ===================================================================== */
+html[data-theme="classic"][data-season="halloween"],
+html[data-theme="classic"][data-season="thanksgiving"],
+html[data-theme="classic"][data-season="winter"] {
+  --dash-season-ring: color-mix(in srgb, var(--season-a) 45%, transparent);
+}
+html[data-theme="classic"][data-season]:not([data-season="none"]) .widget-container,
+html[data-theme="classic"][data-season]:not([data-season="none"]) main .bg-gray-800.rounded-xl {
+  box-shadow: 0 0 0 1px var(--dash-season-ring, transparent), 0 14px 34px -22px var(--season-a, transparent);
+}
+html[data-theme="classic"][data-season]:not([data-season="none"]) main > .sticky,
+html[data-theme="classic"][data-season]:not([data-season="none"]) aside > div:first-child {
+  border-image: linear-gradient(90deg, var(--season-a), var(--season-b), var(--season-c)) 1;
+}
+html[data-theme="classic"][data-season]:not([data-season="none"]) main > .sticky { border-bottom-width: 2px; }
+.dash-season-garland {
+  position: fixed; top: 0; left: 0; right: 0; height: 26px; z-index: 60; pointer-events: none;
+}
+.dash-season-garland__strip { position: absolute; inset: 0; background-repeat: repeat-x; background-size: 120px 26px; }
+html[data-season="winter"]:not([data-season-variant]) .dash-season-garland__strip { filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.35)); }
+@media (prefers-reduced-motion: no-preference) {
+  html[data-season="winter"]:not([data-season-variant]) .dash-season-garland__strip--0 { animation: dash-twinkle 2.6s ease-in-out infinite; }
+  html[data-season="winter"]:not([data-season-variant]) .dash-season-garland__strip--1 { animation: dash-twinkle 2.6s ease-in-out -1.3s infinite; }
+  .dash-season-badge__emoji { animation: dash-bob 3.2s ease-in-out infinite; display: inline-block; }
+}
+@keyframes dash-twinkle { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+@keyframes dash-bob { 0%, 100% { transform: translateY(0) rotate(-4deg); } 50% { transform: translateY(-3px) rotate(4deg); } }
+.dash-season-badge {
+  position: fixed; right: 16px; bottom: 16px; z-index: 60;
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 7px 14px 7px 10px; border-radius: 999px;
+  font: 600 13px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  color: #fff;
+  background: color-mix(in srgb, var(--season-a, #8b5cf6) 22%, rgba(10, 12, 30, 0.82));
+  border: 1px solid color-mix(in srgb, var(--season-a, #8b5cf6) 55%, transparent);
+  box-shadow: 0 8px 24px -10px var(--season-a, #000);
+  pointer-events: none;
+}
+.dash-season-badge__emoji { font-size: 18px; }
+html[data-season-variant="newyear"] .dash-season-badge { --season-a: #fbbf24; }

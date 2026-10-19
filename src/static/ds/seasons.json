@@ -1,0 +1,10 @@
+{
+  "$comment": "Default Buster seasonal calendar. Window: {season, variant?, start: 'MM-DD', end: 'MM-DD'}; inclusive; end < start wraps over New Year; first match wins. Same format for seasons.js (BusterSeasons.configure) and python/buster_seasons.py.",
+  "seasons": ["none", "halloween", "thanksgiving", "winter"],
+  "windows": [
+    { "season": "winter", "variant": "newyear", "start": "12-31", "end": "01-01" },
+    { "season": "halloween", "start": "10-01", "end": "11-01" },
+    { "season": "thanksgiving", "start": "11-02", "end": "11-30" },
+    { "season": "winter", "start": "12-01", "end": "01-06" }
+  ]
+}

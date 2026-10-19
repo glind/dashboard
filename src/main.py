@@ -5,7 +5,7 @@ Clean, minimal implementation focusing on core data sources
 """
 
 from fastapi import FastAPI, HTTPException, Request, Query
-from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 import uvicorn
 import json
@@ -325,6 +325,8 @@ except ImportError as e:
 
 # Dashboard profile (family vs laptop/modern) - see src/config/profile.py
 from config.profile import get_dashboard_profile, is_family_profile
+# Theme + seasonal (holiday) layer shared by both UIs - see src/config/theme.py
+from config import theme as dashboard_theme
 
 # Try to import AI Assistant modules
 try:
@@ -2240,8 +2242,33 @@ assets_dir = project_root / "assets"
 if assets_dir.exists():
     app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
 
+def _theme_context(ui_profile: str, season: str = None, skin: str = None,
+                   theme: str = None, density: str = None) -> dict:
+    """Season + theme context rendered into the dashboard page (see config/theme.py)."""
+    cal = dashboard_theme.season_config(config)
+    try:
+        saved_choice = db.get_setting(dashboard_theme.SEASON_SETTING_KEY, "auto")
+    except Exception:
+        saved_choice = "auto"
+    resolved = dashboard_theme.resolve(
+        choice=saved_choice, query=season, windows=cal["windows"], enabled=cal["enabled"]
+    )
+    theme_name = dashboard_theme.safe_name(theme)
+    density_name = dashboard_theme.safe_name(density)
+    return {
+        "ui": ui_profile,
+        "season": resolved,
+        "windows": cal["windows"],
+        "enabled": cal["enabled"],
+        "skin": dashboard_theme.safe_name(skin),
+        "theme": theme_name if theme_name in dashboard_theme.UI_THEMES else None,
+        "density": density_name if density_name in dashboard_theme.DENSITIES else None,
+    }
+
+
 @app.get("/", response_class=HTMLResponse)
-async def dashboard(code: str = None, state: str = None, error: str = None, ui: str = None):
+async def dashboard(code: str = None, state: str = None, error: str = None, ui: str = None,
+                    season: str = None, skin: str = None, theme: str = None, density: str = None):
     """Serve the main dashboard page or handle OAuth callbacks"""
     
     # Check if this is a TickTick OAuth callback
@@ -2273,6 +2300,13 @@ async def dashboard(code: str = None, state: str = None, error: str = None, ui: 
     try:
         with open(template_path, 'r') as f:
             content = f.read()
+        # Seasons + theme (Cosmic) context: data-season on <html>, calendar for ds/seasons.js
+        try:
+            content = dashboard_theme.inject_theme(
+                content, _theme_context(profile, season=season, skin=skin, theme=theme, density=density)
+            )
+        except Exception as e:
+            logger.warning(f"Theme injection skipped: {e}")
         # Return with no-cache headers to prevent stale content
         return HTMLResponse(
             content=content,
@@ -4494,6 +4528,47 @@ async def get_skin_quote(category: str = "random_quotes"):
     except Exception as e:
         logger.error(f"Error getting skin quote: {e}")
         return {"success": False, "quote": "Error loading quote."}
+
+
+@app.get("/api/theme")
+async def get_theme_settings():
+    """Season calendar, the saved per-user season choice and what is in effect today."""
+    cal = dashboard_theme.season_config(config)
+    try:
+        choice = dashboard_theme.normalize_choice(db.get_setting(dashboard_theme.SEASON_SETTING_KEY, "auto")) or "auto"
+    except Exception:
+        choice = "auto"
+    return {
+        "success": True,
+        "season_choice": choice,
+        "season": dashboard_theme.resolve(choice=choice, windows=cal["windows"], enabled=cal["enabled"]),
+        "calendar": dashboard_theme.resolve(windows=cal["windows"], enabled=cal["enabled"]),
+        "choices": list(dashboard_theme.SEASON_CHOICES),
+        "windows": cal["windows"],
+        "enabled": cal["enabled"],
+    }
+
+
+@app.post("/api/theme")
+async def save_theme_settings(request: Request):
+    """Save the per-user season choice: auto | none | halloween | thanksgiving | winter | newyear."""
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+    choice = dashboard_theme.normalize_choice((data or {}).get("season"))
+    if not choice:
+        return JSONResponse(
+            status_code=400,
+            content={"success": False, "error": f"season must be one of {', '.join(dashboard_theme.SEASON_CHOICES)}"},
+        )
+    db.save_setting(dashboard_theme.SEASON_SETTING_KEY, choice)
+    cal = dashboard_theme.season_config(config)
+    return {
+        "success": True,
+        "season_choice": choice,
+        "season": dashboard_theme.resolve(choice=choice, windows=cal["windows"], enabled=cal["enabled"]),
+    }
 
 
 @app.get("/api/skins/active/css")

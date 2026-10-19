@@ -1,0 +1,117 @@
+/*!
+ * Buster Design System — icons.js
+ * Original simple line icons (24×24, stroke = currentColor, 1.75 width, round caps).
+ *
+ *   import { icon, icons } from "./icons.js";
+ *   el.innerHTML = icon("chat", { size: 18 });
+ *   <buster-icon name="chat" size="18"></buster-icon>      (light DOM, inherits color)
+ *   <svg class="bds-icon"><use href="/static/ds/icons.svg#chat"/></svg>  (no-JS sprite)
+ */
+
+export const icons = {
+  overview: '<rect x="3.5" y="3.5" width="7" height="7" rx="2"/><rect x="13.5" y="3.5" width="7" height="7" rx="2"/><rect x="3.5" y="13.5" width="7" height="7" rx="2"/><rect x="13.5" y="13.5" width="7" height="7" rx="2"/>',
+  chat: '<path d="M20 11.5c0 4.1-3.6 7.5-8 7.5-1.2 0-2.3-.2-3.3-.6L4 20l1.3-3.9C4.5 14.8 4 13.2 4 11.5 4 7.4 7.6 4 12 4s8 3.4 8 7.5Z"/><path d="M8.5 11.5h.01M12 11.5h.01M15.5 11.5h.01" stroke-width="2.4"/>',
+  systems: '<rect x="3" y="4" width="18" height="12" rx="2.5"/><path d="M8 20h8M12 16v4"/><path d="M7 12l2.5-3 2 2 3-4L17 10"/>',
+  network: '<circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.4 2.3 3.6 5.1 3.6 8.5s-1.2 6.2-3.6 8.5c-2.4-2.3-3.6-5.1-3.6-8.5S9.6 5.8 12 3.5Z"/>',
+  agents: '<rect x="4.5" y="7.5" width="15" height="11" rx="4.5"/><path d="M12 7.5V4.5M10.5 4h3"/><path d="M9 12.5v1M15 12.5v1" stroke-width="2.2"/><path d="M2.5 12v3M21.5 12v3"/>',
+  workflows: '<rect x="3" y="4" width="6" height="5" rx="1.6"/><rect x="15" y="4" width="6" height="5" rx="1.6"/><rect x="9" y="15" width="6" height="5" rx="1.6"/><path d="M6 9v2.5a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V9M12 13.5V15"/>',
+  connections: '<path d="M9.5 14.5l5-5"/><path d="M11 6.5l1.6-1.6a4 4 0 0 1 5.6 5.6L16.6 12M13 17.5l-1.6 1.6a4 4 0 0 1-5.6-5.6L7.4 12"/>',
+  knowledge: '<path d="M4 5.5A1.5 1.5 0 0 1 5.5 4H11v16H5.5A1.5 1.5 0 0 1 4 18.5Z"/><path d="M20 5.5A1.5 1.5 0 0 0 18.5 4H13v16h5.5a1.5 1.5 0 0 0 1.5-1.5Z"/><path d="M7 8h1.5M7 11h1.5M15.5 8H17M15.5 11H17"/>',
+  projects: '<path d="M3.5 7.5A2 2 0 0 1 5.5 5.5h4l2 2.5h7a2 2 0 0 1 2 2v7.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2Z"/>',
+  search: '<circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/>',
+  bell: '<path d="M6 16.5V11a6 6 0 0 1 12 0v5.5l1.5 2h-15Z"/><path d="M10 20.5a2.2 2.2 0 0 0 4 0"/>',
+  settings: '<circle cx="12" cy="12" r="3"/><path d="M12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4M5.5 5.5l1.7 1.7M16.8 16.8l1.7 1.7M5.5 18.5l1.7-1.7M16.8 7.2l1.7-1.7"/>',
+  sidebar: '<rect x="3.5" y="4.5" width="17" height="15" rx="3"/><path d="M9.5 4.5v15"/>',
+  menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  send: '<path d="M12 19V5M6 11l6-6 6 6"/>',
+  file: '<path d="M14 3.5H7.5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V8Z"/><path d="M14 3.5V8h4.5M9 13h6M9 16.5h4"/>',
+  web: '<circle cx="12" cy="12" r="8.5"/><path d="M3.8 9h16.4M3.8 15h16.4M12 3.5c-2 2.5-3 5.3-3 8.5s1 6 3 8.5M12 3.5c2 2.5 3 5.3 3 8.5s-1 6-3 8.5"/>',
+  apps: '<circle cx="7" cy="7" r="2.5"/><circle cx="17" cy="7" r="2.5"/><circle cx="7" cy="17" r="2.5"/><circle cx="17" cy="17" r="2.5"/>',
+  mic: '<rect x="9" y="3.5" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v2.5"/>',
+  focus: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4.2"/><circle cx="12" cy="12" r="0.6" stroke-width="2.4"/>',
+  build: '<path d="M14.5 4.5l5 5-2.4 2.4-5-5Z"/><path d="M13.3 8.7L4.5 17.5l2 2 8.8-8.8"/><path d="M12 6l1.5-1.5"/>',
+  fix: '<path d="M14.7 6.3a4 4 0 0 0-5.3 5.3L4 17l3 3 5.4-5.4a4 4 0 0 0 5.3-5.3l-2.4 2.4-2.6-.6-.6-2.6Z"/>',
+  research: '<path d="M9.5 3.5h5M10.5 3.5v5.2L5.4 17.6A2 2 0 0 0 7.1 20.5h9.8a2 2 0 0 0 1.7-2.9l-5.1-8.9V3.5"/><path d="M7.5 14h9"/>',
+  automate: '<path d="M13 3L5 13.5h6L10 21l8-10.5h-6Z"/>',
+  sparkle: '<path d="M12 3.5l1.7 5.1a2 2 0 0 0 1.2 1.2l5.1 1.7-5.1 1.7a2 2 0 0 0-1.2 1.2L12 19.5l-1.7-5.1a2 2 0 0 0-1.2-1.2L4 11.5l5.1-1.7a2 2 0 0 0 1.2-1.2Z"/><path d="M19 3v3M17.5 4.5h3"/>',
+  check: '<path d="M5 12.5l4.2 4.2L19 7"/>',
+  close: '<path d="M6 6l12 12M18 6L6 18"/>',
+  alert: '<path d="M10.3 4.6L3 17.5A2 2 0 0 0 4.7 20.5h14.6a2 2 0 0 0 1.7-3L13.7 4.6a2 2 0 0 0-3.4 0Z"/><path d="M12 9.5v4M12 17h.01"/>',
+  info: '<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5M12 7.8h.01"/>',
+  clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
+  activity: '<path d="M3 12h4l2.5-6 5 12 2.5-6H21"/>',
+  shield: '<path d="M12 3.5l7 2.8v5.4c0 4.3-3 7.6-7 8.8-4-1.2-7-4.5-7-8.8V6.3Z"/><path d="M9 12l2.2 2.2L15.5 10"/>',
+  cpu: '<rect x="6" y="6" width="12" height="12" rx="2.5"/><rect x="9.5" y="9.5" width="5" height="5" rx="1"/><path d="M9.5 3v3M14.5 3v3M9.5 18v3M14.5 18v3M3 9.5h3M3 14.5h3M18 9.5h3M18 14.5h3"/>',
+  memory: '<rect x="3" y="7" width="18" height="9" rx="2"/><path d="M7 16v3M11 16v3M15 16v3M7 10.5v2M11 10.5v2M15 10.5v2"/>',
+  disk: '<ellipse cx="12" cy="6.5" rx="7.5" ry="3"/><path d="M4.5 6.5v11c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3v-11M4.5 12c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3"/>',
+  thermometer: '<path d="M14 14.8V5a2 2 0 0 0-4 0v9.8a4 4 0 1 0 4 0Z"/><path d="M12 9v7"/>',
+  wifi: '<path d="M2.5 9a14 14 0 0 1 19 0M5.5 12.5a9.5 9.5 0 0 1 13 0M8.5 16a5 5 0 0 1 7 0"/><path d="M12 19.5h.01" stroke-width="2.6"/>',
+  arrowRight: '<path d="M5 12h14M13 6l6 6-6 6"/>',
+  chevronDown: '<path d="M6 9l6 6 6-6"/>',
+  chevronRight: '<path d="M9 6l6 6-6 6"/>',
+  more: '<path d="M6 12h.01M12 12h.01M18 12h.01" stroke-width="2.8"/>',
+  mac: '<rect x="3" y="4" width="18" height="12.5" rx="2"/><path d="M9 20.5h6M12 16.5v4"/>',
+  laptop: '<rect x="5" y="5" width="14" height="10" rx="1.6"/><path d="M2.5 18.5h19"/>',
+  phone: '<rect x="7" y="3" width="10" height="18" rx="2.5"/><path d="M11 18h2"/>',
+  server: '<rect x="4" y="4" width="16" height="7" rx="2"/><rect x="4" y="13" width="16" height="7" rx="2"/><path d="M8 7.5h.01M8 16.5h.01" stroke-width="2.4"/>',
+  router: '<rect x="3" y="13" width="18" height="6" rx="2"/><path d="M7 16h.01M10 16h.01" stroke-width="2.4"/><path d="M15 13l2.5-6M8.5 7.5a5 5 0 0 1 7 0"/>',
+  database: '<ellipse cx="12" cy="6" rx="7" ry="2.8"/><path d="M5 6v6c0 1.5 3.1 2.8 7 2.8s7-1.3 7-2.8V6M5 12v6c0 1.5 3.1 2.8 7 2.8s7-1.3 7-2.8v-6"/>',
+  cloud: '<path d="M7 18.5a4.5 4.5 0 0 1-.6-9 6 6 0 0 1 11.4 1.6A3.8 3.8 0 0 1 17.2 18.5Z"/>',
+  terminal: '<rect x="3" y="4.5" width="18" height="15" rx="2.5"/><path d="M7 9.5l3 2.5-3 2.5M12.5 15H17"/>',
+  code: '<path d="M8.5 7L3.5 12l5 5M15.5 7l5 5-5 5M13.5 4.5l-3 15"/>',
+  calendar: '<rect x="3.5" y="5" width="17" height="15" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/>',
+  mail: '<rect x="3" y="5.5" width="18" height="13" rx="2.5"/><path d="M3.5 7l8.5 6 8.5-6"/>',
+  github: '<path d="M9 19c-4 1.3-4-2-5.6-2.5M14.6 21v-3.2c0-1 .1-1.4-.5-2 2.8-.3 5.4-1.3 5.4-6A4.7 4.7 0 0 0 18.2 6.5 4.3 4.3 0 0 0 18.1 3.3s-1-.3-3.4 1.3a11.6 11.6 0 0 0-6 0C6.3 3 5.3 3.3 5.3 3.3a4.3 4.3 0 0 0-.1 3.2 4.7 4.7 0 0 0-1.3 3.3c0 4.6 2.6 5.6 5.4 6-.6.6-.6 1.2-.5 2V21"/>',
+  slack: '<rect x="10" y="3" width="4" height="8" rx="2"/><rect x="10" y="13" width="4" height="8" rx="2"/><rect x="3" y="10" width="8" height="4" rx="2"/><rect x="13" y="10" width="8" height="4" rx="2"/>',
+  docker: '<path d="M3 12.5h16.5c.7 0 1.4-.6 1.5-1.3 0 4.3-3.6 7.8-9 7.8-4.6 0-7.6-2.5-9-6.5Z"/><path d="M6 12.5v-3h3v3M9 9.5v-3h3v6M12 9.5h3v3"/>',
+  refresh: '<path d="M19.5 12a7.5 7.5 0 0 1-13.1 5M4.5 12a7.5 7.5 0 0 1 13.1-5"/><path d="M17.8 3.5v3.7h-3.7M6.2 20.5v-3.7h3.7"/>',
+  play: '<path d="M8 5.5v13l10-6.5Z"/>',
+  pause: '<path d="M8.5 5.5v13M15.5 5.5v13"/>',
+  moon: '<path d="M19.5 14.5A8 8 0 0 1 9.5 4.5a8 8 0 1 0 10 10Z"/>',
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/>',
+  gauge: '<path d="M4.5 17.5a8.5 8.5 0 1 1 15 0"/><path d="M12 13.5l4-4"/><circle cx="12" cy="13.5" r="1.2"/>',
+  user: '<circle cx="12" cy="8.5" r="3.8"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/>',
+  lock: '<rect x="5" y="10.5" width="14" height="10" rx="2.5"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/>',
+  home: '<path d="M4 10.5L12 4l8 6.5V19a1.5 1.5 0 0 1-1.5 1.5h-4v-6h-5v6h-4A1.5 1.5 0 0 1 4 19Z"/>',
+  list: '<path d="M9 7h11M9 12h11M9 17h11M4.5 7h.01M4.5 12h.01M4.5 17h.01" />',
+  target: '<circle cx="12" cy="12" r="8.5"/><path d="M12 3.5v4M12 16.5v4M3.5 12h4M16.5 12h4"/>',
+  layers: '<path d="M12 4l8.5 4.5L12 13 3.5 8.5Z"/><path d="M3.5 12.5L12 17l8.5-4.5M3.5 16.5L12 21l8.5-4.5"/>',
+  eye: '<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="3"/>',
+  power: '<path d="M12 3.5v8M7 6.5a7.5 7.5 0 1 0 10 0"/>',
+  download: '<path d="M12 4v11M7 10.5l5 5 5-5M5 20h14"/>',
+  external: '<path d="M14 4.5h5.5V10M19.5 4.5L11 13M17 14v4.5a1.5 1.5 0 0 1-1.5 1.5h-10A1.5 1.5 0 0 1 4 18.5v-10A1.5 1.5 0 0 1 5.5 7H10"/>',
+  filter: '<path d="M4 5.5h16l-6.2 7.3v5.4l-3.6 1.8v-7.2Z"/>',
+  dot: '<circle cx="12" cy="12" r="4" fill="currentColor" stroke="none"/>',
+};
+
+/** Return an SVG string for an icon name. */
+export function icon(name, { size = 18, stroke = 1.75, label = "", cls = "bds-icon" } = {}) {
+  const body = icons[name] || icons.dot;
+  const a11y = label ? `role="img" aria-label="${label.replace(/"/g, "&quot;")}"` : 'aria-hidden="true" focusable="false"';
+  return `<svg class="${cls}" ${a11y} width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${stroke}" stroke-linecap="round" stroke-linejoin="round">${body}</svg>`;
+}
+
+/** Build an SVG sprite string (<symbol id="name">) — used by scripts/build.mjs to emit icons.svg. */
+export function sprite() {
+  const syms = Object.entries(icons)
+    .map(([n, b]) => `<symbol id="${n}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">${b}</symbol>`)
+    .join("\n");
+  return `<svg xmlns="http://www.w3.org/2000/svg">\n${syms}\n</svg>\n`;
+}
+
+if (typeof customElements !== "undefined" && !customElements.get("buster-icon")) {
+  customElements.define("buster-icon", class extends HTMLElement {
+    static get observedAttributes() { return ["name", "size", "label"]; }
+    connectedCallback() { this.render(); }
+    attributeChangedCallback() { if (this.isConnected) this.render(); }
+    render() {
+      this.innerHTML = icon(this.getAttribute("name"), {
+        size: Number(this.getAttribute("size")) || 18,
+        label: this.getAttribute("label") || "",
+      });
+    }
+  });
+}
+
+export default icons;

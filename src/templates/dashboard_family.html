@@ -1,6 +1,8 @@
 <!DOCTYPE html>
 <html lang="en" class="h-full">
 <head>
+    <!--DASH_THEME-->
+    <script src="/static/theme/dash-theme.js?v=1"></script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title id="page-title">Personal Assistant</title>
@@ -37,6 +39,13 @@
         .skin-border { border-color: var(--skin-border-primary); }
         .skin-border-accent { border-color: var(--skin-border-accent); }
     </style>
+    <!-- Buster design system (vendored by buster-design/sync.sh) + dashboard theme layer.
+         Tokens are inert unless used; the Cosmic skin and the seasonal tint build on them. -->
+    <link rel="stylesheet" href="/static/ds/tokens.css">
+    <link rel="stylesheet" href="/static/ds/background.css">
+    <link rel="stylesheet" href="/static/ds/components.css">
+    <link rel="stylesheet" href="/static/ds/seasons.css">
+    <link rel="stylesheet" href="/static/theme/dash-theme.css?v=1">
     <script>
         // ========================================
         // MODULE REGISTRY SYSTEM
@@ -300,6 +309,12 @@
             }
         };
         
+        // The built-in Cosmic skin shows the family's everyday modules.
+        ['weather', 'jokes', 'quote', 'comics', 'history_fact', 'tasks', 'calendar', 'news',
+         'calm_tips', 'ambient_weather', 'homeassistant'].forEach(id => {
+            if (MODULE_REGISTRY[id] && !MODULE_REGISTRY[id].themes.includes('cosmic')) MODULE_REGISTRY[id].themes.push('cosmic');
+        });
+
         // Module categories for organization
         const MODULE_CATEGORIES = {
             environment: { name: 'Environment', icon: '🌍' },
@@ -369,6 +384,8 @@
                 
                 elements.forEach(el => {
                     if (isEnabled && isForTheme) {
+                        // Full-page sections (Tasks, Calendar, News) stay under showSection()'s control
+                        if (el.classList.contains('section-content')) { el.style.display = ''; return; }
                         el.classList.remove('hidden');
                         el.style.display = '';
                     } else {
@@ -553,17 +570,17 @@
                                 <option value="dracula">😈 Demon</option>
                             </select>
                         </div>
-                        <span style="color: var(--skin-text-muted);">|</span>
-                        <span style="color: var(--skin-text-secondary);">Background:</span>
-                        <select id="bg-select" class="px-2 py-1 rounded text-sm" style="background-color: var(--skin-bg-primary); border: 1px solid var(--skin-border-primary); color: var(--skin-text-secondary);">
+                        <span class="dash-classic-only" style="color: var(--skin-text-muted);">|</span>
+                        <span class="dash-classic-only" style="color: var(--skin-text-secondary);">Background:</span>
+                        <select id="bg-select" class="dash-classic-only px-2 py-1 rounded text-sm" style="background-color: var(--skin-bg-primary); border: 1px solid var(--skin-border-primary); color: var(--skin-text-secondary);">
                             <option value="bg1">Background 1</option>
                             <option value="bg2">Background 2</option>
                             <option value="bg3">Background 3</option>
                         </select>
-                        <button id="bg-prev" class="px-2 py-1 rounded" style="background-color: var(--skin-bg-tertiary);" title="Previous">⟨</button>
-                        <button id="bg-next" class="px-2 py-1 rounded" style="background-color: var(--skin-bg-tertiary);" title="Next">⟩</button>
-                        <input id="bg-url" type="url" placeholder="Paste image URL" class="hidden md:block w-48 px-2 py-1 rounded text-sm" style="background-color: var(--skin-bg-primary); border: 1px solid var(--skin-border-primary); color: var(--skin-text-secondary);"/>
-                        <button id="bg-url-set" class="hidden md:block px-2 py-1 rounded" style="background-color: var(--skin-secondary);">Set</button>
+                        <button id="bg-prev" class="dash-classic-only px-2 py-1 rounded" style="background-color: var(--skin-bg-tertiary);" title="Previous">⟨</button>
+                        <button id="bg-next" class="dash-classic-only px-2 py-1 rounded" style="background-color: var(--skin-bg-tertiary);" title="Next">⟩</button>
+                        <input id="bg-url" type="url" placeholder="Paste image URL" class="dash-classic-only hidden md:block w-48 px-2 py-1 rounded text-sm" style="background-color: var(--skin-bg-primary); border: 1px solid var(--skin-border-primary); color: var(--skin-text-secondary);"/>
+                        <button id="bg-url-set" class="dash-classic-only hidden md:block px-2 py-1 rounded" style="background-color: var(--skin-secondary);">Set</button>
                     </div>
                 </div>
             </div>
@@ -1283,7 +1300,8 @@
                 'roger': '🤖',
                 'dracula': '😈',
                 'alice': '🐰',
-                'jedi': '⚔️'
+                'jedi': '⚔️',
+                'cosmic': '🪐'
             };
             
             skinSelectors.forEach(id => {
@@ -1338,6 +1356,13 @@
                 console.log('📦 Skin data received:', JSON.stringify(currentSkin.dashboard?.widgets || {}, null, 2));
                 localStorage.setItem('dashboard_skin', skinName);
                 
+                // Cosmic loads the design system (backdrop, glass, companion): switching
+                // to or from it re-renders the page once.
+                if (window.DashTheme && DashTheme.needsReloadFor(skinName)) {
+                    location.reload();
+                    return;
+                }
+                
                 // Apply the skin (colors, avatar, widgets visibility)
                 applySkin(currentSkin, animate);
                 
@@ -1360,6 +1385,9 @@
             for (const [key, value] of Object.entries(cssVars)) {
                 root.style.setProperty(key, value);
             }
+            
+            // Design-system theme hooks (companion accent/name for Cosmic)
+            if (window.DashTheme) DashTheme.onSkin(skin);
             
             // Update page title
             document.getElementById('page-title').textContent = `${skin.display_name} - Personal Assistant`;
@@ -3082,6 +3110,12 @@
                         </div>
                     </div>
                     
+                    <!-- Theme & Holidays (skin, season, Cosmic density) - rendered by theme/dash-theme.js -->
+                    <div class="mb-8">
+                        <h3 class="text-lg font-semibold text-purple-300 mb-4"><i class="fas fa-star mr-2"></i>Theme &amp; Holidays</h3>
+                        <div id="dash-theme-settings" class="dash-theme-settings bg-gray-900 rounded-lg border border-gray-700 p-4"></div>
+                    </div>
+                    
                     <!-- Appearance -->
                     <div class="mb-8">
                         <h3 class="text-lg font-semibold text-purple-300 mb-4"><i class="fas fa-palette mr-2"></i>Appearance</h3>
@@ -3381,6 +3415,9 @@
                         </div>
                     </div>
                 `;
+                
+                // Theme & Holidays card
+                if (window.DashTheme) DashTheme.renderSettings(document.getElementById('dash-theme-settings'), { onSkin: (name) => switchSkin(name) });
                 
                 // Load API keys section
                 loadApiKeysSection();

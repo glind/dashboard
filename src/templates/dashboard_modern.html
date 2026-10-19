@@ -1,6 +1,8 @@
 <!DOCTYPE html>
 <html lang="en" class="h-full">
 <head>
+    <!--DASH_THEME-->
+    <script src="/static/theme/dash-theme.js?v=1"></script>
         <script src="/static/provider_manager.js?v=1"></script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -555,6 +557,13 @@
         };
     })();
     </script>
+    <!-- Buster design system (vendored by buster-design/sync.sh) + dashboard theme layer:
+         opt-in Cosmic theme (Settings > Theme) and holiday seasons. -->
+    <link rel="stylesheet" href="/static/ds/tokens.css">
+    <link rel="stylesheet" href="/static/ds/background.css">
+    <link rel="stylesheet" href="/static/ds/components.css">
+    <link rel="stylesheet" href="/static/ds/seasons.css">
+    <link rel="stylesheet" href="/static/theme/dash-theme.css?v=1">
 </head>
 <body class="h-full bg-gray-900 text-gray-100 overflow-hidden">
     
@@ -1388,6 +1397,12 @@
             <section id="section-settings" class="section-content hidden p-8">
                 <div class="max-w-4xl mx-auto">
                     <h2 class="text-3xl font-bold mb-6">⚙️ Settings</h2>
+                    
+                    <!-- Theme & Holidays - rendered by /static/theme/dash-theme.js -->
+                    <div class="bg-gray-800 rounded-xl border border-gray-700 p-6 mb-6">
+                        <h3 class="text-xl font-semibold mb-4">🪐 Theme &amp; Holidays</h3>
+                        <div id="dash-theme-settings" class="dash-theme-settings"></div>
+                    </div>
                     
                     <!-- AI Settings -->
                     <div class="bg-gray-800 rounded-xl border border-gray-700 p-6 mb-6">
@@ -2351,6 +2366,9 @@
     
     <!-- Scripts -->
     <script src="/static/dashboard.js?v=31"></script>
+    <script>
+        if (window.DashTheme) DashTheme.renderSettings(document.getElementById('dash-theme-settings'));
+    </script>
     <script src="/static/leads_modern.js?v=6"></script>
     <script src="/static/trust_layer_ui.js?v=1"></script>
     

@@ -112,3 +112,16 @@ voice:
   # Signature phrase added to announcements
   signature_phrase: "roger, roger"
 
+
+# Holiday themes (Buster design system seasons) for every skin / both UIs.
+# Defaults come from src/static/ds/seasons.json; uncomment to change the calendar.
+# Window format: {season: halloween|thanksgiving|winter, variant: newyear (optional),
+# start: "MM-DD", end: "MM-DD"}; inclusive; end < start wraps over New Year; first match wins.
+# Each person can still pick auto/none/a season in Settings > Theme & Holidays, and ?season= previews.
+# seasons:
+#   enabled: true
+#   windows:
+#     - {season: winter, variant: newyear, start: "12-31", end: "01-01"}
+#     - {season: halloween, start: "10-01", end: "11-01"}
+#     - {season: thanksgiving, start: "11-02", end: "11-30"}
+#     - {season: winter, start: "12-01", end: "01-06"}

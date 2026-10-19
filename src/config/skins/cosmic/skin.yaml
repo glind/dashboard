@@ -1,0 +1,144 @@
+# Cosmic skin (built-in) - the Buster design system as a dashboard theme.
+#
+# Ships with the code (src/config/skins/cosmic), so every install has it without
+# copying anything into the personal data/skins folder. A data/skins/cosmic/ folder,
+# if someone creates one, overrides this file.
+#
+# Colours point at the design-system tokens (src/static/ds/tokens.css) with hex
+# fallbacks, so the seasonal token overrides (seasons.css) flow into the skin too.
+
+identity:
+  name: "cosmic"
+  display_name: "Cosmic"
+  tagline: "Your friendly space companion"
+  description: "Buster, a playful little space companion, on a dark cosmic glass dashboard"
+  avatar: "/assets/images/forge-logo.png"   # unused: the Cosmic skin renders <buster-companion>
+  wake_words: ["buster", "hey buster"]
+  signature_phrase: "Hey! I'm here."
+
+# Design-system theme block (read by src/static/theme/dash-theme.js)
+theme:
+  design_system: "buster"
+  companion:
+    name: "Buster"
+    accent: "violet"        # cyan | blue | violet | green | amber | magenta | pink | coral
+    hero_size: "md"
+    sidebar_size: "sm"
+  default_density: "companion"   # companion | operations
+
+colors:
+  primary: "var(--c-violet, #8b5cf6)"
+  primary_light: "var(--c-violet-soft, #a78bfa)"
+  primary_dark: "var(--c-indigo, #6366f1)"
+
+  secondary: "var(--c-blue, #3b82f6)"
+  secondary_light: "var(--c-blue-soft, #60a5fa)"
+  secondary_dark: "#2563eb"
+
+  accent: "var(--c-cyan-soft, #67e8f9)"
+  accent_light: "var(--c-cyan-soft, #67e8f9)"
+  accent_dark: "var(--c-cyan, #22d3ee)"
+
+  bg_primary: "var(--surface-inset, rgba(6, 9, 28, 0.55))"
+  bg_secondary: "var(--surface-glass-strong, rgba(17, 23, 56, 0.78))"
+  bg_tertiary: "var(--surface-raised, rgba(32, 40, 92, 0.55))"
+
+  text_primary: "var(--text-primary, #f1f4ff)"
+  text_secondary: "var(--text-secondary, #bcc5ea)"
+  text_muted: "var(--text-muted, #919cc8)"
+
+  border_primary: "var(--border-default, rgba(148, 163, 255, 0.2))"
+  border_accent: "var(--c-violet, #8b5cf6)"
+
+  weather_border: "var(--c-cyan, #22d3ee)"
+  comics_border: "var(--c-orange, #fb923c)"
+  jokes_border: "var(--c-magenta, #e879f9)"
+  quote_border: "var(--c-violet, #8b5cf6)"
+  tasks_border: "var(--c-green, #34d399)"
+  calendar_border: "var(--c-blue-soft, #60a5fa)"
+  news_border: "var(--c-pink, #f472b6)"
+  ebay_border: "var(--c-amber, #fbbf24)"
+  communities_border: "var(--c-violet-soft, #a78bfa)"
+
+voice:
+  model: "en_US-lessac-medium"
+  style: "clean"
+  speed: 0.95
+  pitch: 1.0
+  use_authentic_samples: false
+
+dashboard:
+  default_section: "overview"
+  widgets:
+    weather:
+      enabled: true
+      title: "Weather"
+      icon: "fa-cloud-sun"
+    comics:
+      enabled: true
+      title: "Comics"
+      icon: "fa-book"
+      default: "garfield"
+    jokes:
+      enabled: true
+      title: "Jokes"
+      icon: "fa-laugh"
+    quote:
+      enabled: true
+      title: "Quote"
+      icon: "fa-quote-right"
+    calm_tips:
+      enabled: true
+      title: "Calm Tips"
+      icon: "fa-heart"
+  news:
+    categories:
+      - technology
+      - science
+      - space
+    default_category: "technology"
+
+# The cosmic backdrop (<buster-space>) replaces the photo backgrounds.
+backgrounds: []
+
+navigation:
+  - id: "overview"
+    label: "Overview"
+    icon: "fa-home"
+  - id: "weather"
+    label: "Weather"
+    icon: "fa-cloud-sun"
+  - id: "news"
+    label: "News"
+    icon: "fa-newspaper"
+  - id: "tasks"
+    label: "Tasks"
+    icon: "fa-tasks"
+  - id: "calendar"
+    label: "Calendar"
+    icon: "fa-calendar"
+  - id: "settings"
+    label: "Settings"
+    icon: "fa-cog"
+
+features: {}
+
+ai_personality:
+  system_prompt: |
+    You are Buster, a small, friendly space companion who lives on this family dashboard.
+
+    PERSONALITY:
+    - Warm, upbeat and curious; a little playful, never sarcastic
+    - Keep answers to 2-3 short sentences
+    - Explain things simply, like a helpful older sibling
+    - Light space puns are welcome, but never at the cost of a clear answer
+
+    STYLE:
+    - Casual, kind language with contractions
+    - No formal letters, no long lists unless asked
+  response_style: "concise"
+  max_tokens: 150
+  temperature: 0.7
+  stop_sequences:
+    - "\n\n\n"
+    - "---"

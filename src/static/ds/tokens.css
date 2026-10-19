@@ -1,0 +1,266 @@
+/*!
+ * Buster Design System — tokens.css
+ * Design tokens as CSS custom properties.
+ *
+ * Two intensities of the same system:
+ *   [data-mode="companion"]  (default) expressive: glows, nebula, big hero, playful motion
+ *   [data-mode="operations"] calm & readable: low glow/blur, denser, higher contrast, no decorative motion
+ *
+ * Motion level is set by motion.js on <html data-motion="full|low|off">.
+ */
+
+:root,
+[data-mode="companion"] {
+  color-scheme: dark;
+
+  /* ---------- Palette: backgrounds ---------- */
+  --c-bg-0: #050816;          /* deepest space */
+  --c-bg-1: #070b1e;          /* app background top */
+  --c-bg-2: #0b1030;          /* app background bottom */
+  --c-bg-3: #111842;          /* raised solid */
+  --bg-app: linear-gradient(180deg, var(--c-bg-1) 0%, var(--c-bg-2) 100%);
+
+  /* ---------- Palette: accents ---------- */
+  --c-cyan: #22d3ee;
+  --c-cyan-soft: #67e8f9;
+  --c-sky: #38bdf8;
+  --c-blue: #3b82f6;
+  --c-blue-soft: #60a5fa;
+  --c-indigo: #6366f1;
+  --c-violet: #8b5cf6;
+  --c-violet-soft: #a78bfa;
+  --c-magenta: #e879f9;
+  --c-pink: #f472b6;
+  --c-green: #34d399;
+  --c-amber: #fbbf24;
+  --c-orange: #fb923c;
+  --c-coral: #ff7f6e;
+  --c-red: #f87171;
+  --c-slate: #8b93b8;
+
+  /* ---------- Status ---------- */
+  --status-ok: var(--c-green);
+  --status-info: var(--c-blue-soft);
+  --status-warn: var(--c-amber);
+  --status-error: var(--c-red);
+  --status-idle: #6b7499;
+
+  /* ---------- Surfaces (glass) ---------- */
+  --surface-glass: rgba(18, 24, 58, 0.55);
+  --surface-glass-strong: rgba(17, 23, 56, 0.78);
+  --surface-raised: rgba(32, 40, 92, 0.55);
+  --surface-inset: rgba(6, 9, 28, 0.55);
+  --surface-hover: rgba(148, 163, 255, 0.07);
+  --surface-active: rgba(148, 163, 255, 0.12);
+  --surface-solid: #10163a;   /* fallback when backdrop-filter is unavailable */
+
+  /* ---------- Borders ---------- */
+  --border-subtle: rgba(148, 163, 255, 0.12);
+  --border-default: rgba(148, 163, 255, 0.2);
+  --border-strong: rgba(148, 163, 255, 0.32);
+  --border-glow-opacity: 1;
+
+  /* ---------- Text (AA checked by scripts/contrast.py) ---------- */
+  --text-primary: #f1f4ff;
+  --text-secondary: #bcc5ea;
+  --text-muted: #919cc8;
+  --text-faint: #6f79a6;      /* decorative only (≥3:1, not for body text) */
+  --text-on-accent: #ffffff;
+  --text-link: var(--c-cyan-soft);
+
+  /* ---------- Gradients ---------- */
+  --gradient-brand: linear-gradient(135deg, #38bdf8 0%, #6366f1 52%, #a855f7 100%);
+  --gradient-headline: linear-gradient(92deg, #f472b6 0%, #c084fc 38%, #a78bfa 55%, #67e8f9 100%);
+  --gradient-border: linear-gradient(140deg, rgba(56, 189, 248, 0.7) 0%, rgba(34, 211, 238, 0.28) 22%, rgba(139, 92, 246, 0.16) 50%, rgba(139, 92, 246, 0.28) 74%, rgba(232, 121, 249, 0.62) 100%);
+  --gradient-border-strong: linear-gradient(140deg, #38bdf8 0%, #22d3ee 20%, #8b5cf6 55%, #e879f9 100%);
+  --gradient-send: linear-gradient(135deg, #22d3ee 0%, #6366f1 52%, #d946ef 100%);
+  --gradient-nav-active: linear-gradient(90deg, #2563eb 0%, #6d4aff 60%, #8b5cf6 100%);
+  --gradient-orb: radial-gradient(circle at 35% 30%, #ffffff 0%, #a5f3fc 12%, #38bdf8 32%, #7c3aed 68%, #3b0764 100%);
+  --gradient-chart: linear-gradient(90deg, #22d3ee, #8b5cf6, #e879f9);
+
+  /* ---------- Radii ---------- */
+  --radius-xs: 6px;
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 18px;
+  --radius-xl: 22px;
+  --radius-2xl: 28px;
+  --radius-pill: 999px;
+  --radius-card: var(--radius-lg);
+
+  /* ---------- Spacing scale (4px base) ---------- */
+  --space-0: 0;
+  --space-half: 2px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 32px;
+  --space-8: 40px;
+  --space-9: 48px;
+  --space-10: 64px;
+
+  /* Semantic density (mode-dependent) */
+  --gap-layout: 16px;
+  --gap-card: 14px;
+  --card-pad: 18px;
+  --row-pad-y: 9px;
+  --control-h: 38px;
+  --control-h-sm: 30px;
+  --sidebar-w: 236px;
+  --rail-w: 328px;
+  --topbar-h: 64px;
+
+  /* ---------- Shadows & glows ---------- */
+  --glow-strength: 1;
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.45);
+  --shadow-2: 0 8px 24px -8px rgba(0, 0, 0, 0.6);
+  --shadow-card: 0 24px 48px -24px rgba(0, 0, 0, 0.75), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  --shadow-pop: 0 30px 80px -20px rgba(0, 0, 0, 0.8);
+  --glow-card: 0 0 36px -14px rgba(99, 102, 241, 0.55);
+  --glow-cyan: 0 0 22px rgba(34, 211, 238, 0.45);
+  --glow-violet: 0 0 26px rgba(139, 92, 246, 0.5);
+  --glow-magenta: 0 0 26px rgba(232, 121, 249, 0.45);
+  --glow-nav: 0 8px 26px -6px rgba(99, 92, 246, 0.75), 0 0 18px -4px rgba(56, 120, 248, 0.6);
+  --glow-send: 0 8px 26px -4px rgba(168, 85, 247, 0.7), 0 0 20px -2px rgba(34, 211, 238, 0.45);
+
+  /* ---------- Blur ---------- */
+  --blur-sm: 8px;
+  --blur-md: 18px;
+  --blur-lg: 30px;
+  --glass-saturate: 150%;
+
+  /* ---------- Typography (system stack; SF Pro on macOS) ---------- */
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Segoe UI Variable", "Segoe UI", system-ui, Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI Variable Display", "Segoe UI", system-ui, Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  --fs-2xs: 10.5px;
+  --fs-xs: 11.5px;
+  --fs-sm: 12.5px;
+  --fs-base: 14px;
+  --fs-md: 15px;
+  --fs-lg: 17px;
+  --fs-xl: 20px;
+  --fs-2xl: 24px;
+  --fs-3xl: 32px;
+  --fs-hero: clamp(40px, 4.6vw, 68px);
+  --fs-hero-sub: 17px;
+  --lh-tight: 1.15;
+  --lh-snug: 1.3;
+  --lh-base: 1.5;
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+  --fw-bold: 700;
+  --tracking-tight: -0.02em;
+  --tracking-hero: -0.035em;
+  --tracking-caps: 0.08em;
+
+  /* ---------- Z layers ---------- */
+  --z-backdrop: -1;
+  --z-base: 0;
+  --z-raised: 10;
+  --z-sticky: 100;
+  --z-sidebar: 200;
+  --z-overlay: 900;
+  --z-panel: 950;
+  --z-modal: 1000;
+  --z-toast: 1100;
+  --z-tooltip: 1200;
+
+  /* ---------- Motion ---------- */
+  --dur-instant: 80ms;
+  --dur-fast: 140ms;
+  --dur-base: 200ms;
+  --dur-panel: 260ms;          /* panel opening: 220–280ms spring */
+  --dur-success: 350ms;        /* task completed pulse */
+  --dur-slow: 480ms;
+  --cycle-float: 4.2s;         /* idle float: 3–5s */
+  --cycle-think: 2.2s;         /* thinking orbit: 1.5–3s */
+  --cycle-pulse: 2.6s;         /* soft status pulse */
+  --cycle-network: 2.8s;       /* network line pulse */
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --ease-spring: cubic-bezier(0.34, 1.45, 0.64, 1);
+  --ease-float: cubic-bezier(0.45, 0, 0.55, 1);
+
+  /* ---------- Mode intensity knobs ---------- */
+  --nebula-opacity: 1;
+  --planet-opacity: 0.9;
+  --stars-opacity: 1;
+  --chart-glow: 1;
+  --hero-stage-h: 330px;
+  --focus-ring: 0 0 0 2px var(--c-bg-1), 0 0 0 4px var(--c-cyan-soft);
+}
+
+/* ===================================================================
+   Operations mode: same components, calmer intensity.
+   =================================================================== */
+[data-mode="operations"] {
+  --surface-glass: rgba(14, 19, 46, 0.86);
+  --surface-glass-strong: rgba(13, 18, 44, 0.94);
+  --surface-raised: rgba(28, 35, 78, 0.7);
+  --surface-inset: rgba(6, 9, 26, 0.7);
+  --border-subtle: rgba(148, 163, 255, 0.1);
+  --border-default: rgba(148, 163, 255, 0.17);
+  --border-strong: rgba(148, 163, 255, 0.28);
+  --border-glow-opacity: 0.32;
+  --gradient-border: linear-gradient(140deg, rgba(120, 160, 255, 0.34), rgba(148, 163, 255, 0.16));
+
+  --text-primary: #f6f8ff;
+  --text-secondary: #ccd3f1;
+  --text-muted: #a3acd3;
+
+  --glow-strength: 0.25;
+  --glow-card: 0 0 0 transparent;
+  --glow-cyan: 0 0 0 transparent;
+  --glow-violet: 0 0 0 transparent;
+  --glow-magenta: 0 0 0 transparent;
+  --glow-nav: 0 2px 8px -2px rgba(80, 90, 246, 0.5);
+  --glow-send: 0 2px 10px -2px rgba(120, 90, 246, 0.5);
+  --shadow-card: 0 10px 24px -16px rgba(0, 0, 0, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.03);
+
+  --blur-sm: 4px;
+  --blur-md: 8px;
+  --blur-lg: 12px;
+  --glass-saturate: 110%;
+
+  --gap-layout: 12px;
+  --gap-card: 10px;
+  --card-pad: 14px;
+  --row-pad-y: 6px;
+  --control-h: 34px;
+  --control-h-sm: 28px;
+  --sidebar-w: 220px;
+  --rail-w: 300px;
+  --topbar-h: 54px;
+
+  --fs-hero: clamp(28px, 2.4vw, 36px);
+  --fs-hero-sub: 14px;
+  --hero-stage-h: 150px;
+
+  --nebula-opacity: 0.32;
+  --planet-opacity: 0.22;
+  --stars-opacity: 0.45;
+  --chart-glow: 0;
+}
+
+/* Motion off: transitions become (near) instant. */
+:root[data-motion="off"] {
+  --dur-fast: 1ms;
+  --dur-base: 1ms;
+  --dur-panel: 1ms;
+  --dur-success: 1ms;
+  --dur-slow: 1ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-panel: 1ms;
+    --dur-success: 1ms;
+    --dur-slow: 1ms;
+  }
+}
